@@ -1,73 +1,78 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     User, Building2, Mail, Phone, Shield, Bell, Key, LogOut,
     CheckCircle, Clock, Edit3, Camera, ChevronRight, Zap,
     BarChart3, FileText, Globe, Lock, Briefcase, Award, Star
 } from 'lucide-react';
-
-/* ─── Mock Data ─────────────────────────────────────────── */
-const user = {
-    name: 'WT Kishore',
-    role: 'Finance Manager',
-    email: 'kishore@wheelsontech.com',
-    phone: '+91 98450 12345',
-    department: 'Accounts & Finance',
-    location: 'Bengaluru, Karnataka',
-    joined: 'March 2022',
-    lastLogin: 'Today, 04:32 PM',
-    avatar: 'WK',
-    status: 'Active',
-};
-
-const company = {
-    name: 'Wheelson Technologies',
-    gstin: '29AABCS1234A1Z9',
-    pan: 'AABCS1234A',
-    industry: 'Technology Services',
-    employees: '850+',
-    tallyVersion: 'agent_w Prime 4.1',
-    fiscalYear: 'April 2024 – March 2025',
-    website: 'www.wheelsontech.com',
-    cin: 'U74900KA2015PTC082941',
-};
-
-const stats = [
-    { label: 'Invoices Approved', value: '1,248', icon: CheckCircle, color: '#22C55E', bg: '#D1FAE5' },
-    { label: 'Batches Processed', value: '312', icon: Zap, color: '#1E6FD9', bg: '#DBEAFE' },
-    { label: 'Avg. Response Time', value: '3.2h', icon: Clock, color: '#F59E0B', bg: '#FEF3C7' },
-    { label: 'Trust Score', value: '97%', icon: Star, color: '#7C3AED', bg: '#EDE9FE' },
-];
-
-const permissions = [
-    { label: 'Invoice Approval', granted: true },
-    { label: 'Batch Upload', granted: true },
-    { label: 'Vendor Management', granted: true },
-    { label: 'agent_w Tally Posting', granted: true },
-    { label: 'Report Export', granted: true },
-    { label: 'User Management', granted: false },
-    { label: 'System Configuration', granted: false },
-    { label: 'Audit Log Access', granted: true },
-];
-
-const activity = [
-    { action: 'Approved invoice', target: 'AWS-2024-98421', time: '2 hours ago', type: 'approve' },
-    { action: 'Rejected invoice', target: 'DHL-2024-339921', time: '5 hours ago', type: 'reject' },
-    { action: 'Batch uploaded', target: 'BATCH-20241225-MR1 (3 docs)', time: 'Yesterday', type: 'upload' },
-    { action: 'Edited invoice amount', target: 'WIP-2024-55012', time: '2 days ago', type: 'edit' },
-    { action: 'System config updated', target: 'Posting Mode → Manual', time: '3 days ago', type: 'config' },
-    { action: 'Approved invoice', target: 'ORC-Q4-2024-1102', time: '4 days ago', type: 'approve' },
-];
-
-const activityColor: Record<string, string> = {
-    approve: '#22C55E', reject: '#EF4444', upload: '#1E6FD9', edit: '#F59E0B', config: '#7C3AED',
-};
-
-const tabs = ['Profile', 'Company', 'Permissions', 'Activity'];
+import { getCompanies } from '../lib/api';
+import { useCompany } from '../context/CompanyContext';
+import type { Company } from '../lib/types';
+import { SectionHeader } from '../components/at/SectionHeader';
 
 export default function UserProfile() {
+    const { selectedCompany } = useCompany();
+    const [companies, setCompanies] = useState<Company[]>([]);
+    const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('Profile');
     const [editMode, setEditMode] = useState(false);
+
+    useEffect(() => {
+        getCompanies().then(data => {
+            setCompanies(data || []);
+            setLoading(false);
+        });
+    }, []);
+
+    const activeCompany = companies.find(c => c.id === selectedCompany) || companies[0];
+
+    // Placeholder until we have user management
+    const user = {
+        name: 'Finance Admin',
+        role: 'Administrator',
+        email: 'admin@system.com',
+        phone: '+91 00000 00000',
+        department: 'Finance',
+        location: activeCompany?.state || 'Bengaluru',
+        joined: 'Jan 2024',
+        lastLogin: 'Today',
+        avatar: 'AD',
+        status: 'Active',
+    };
+
+
+    const stats = [
+        { label: 'Invoices Approved', value: '1,248', icon: CheckCircle, color: '#22C55E', bg: '#D1FAE5' },
+        { label: 'Batches Processed', value: '312', icon: Zap, color: '#1E6FD9', bg: '#DBEAFE' },
+        { label: 'Avg. Response Time', value: '3.2h', icon: Clock, color: '#F59E0B', bg: '#FEF3C7' },
+        { label: 'Trust Score', value: '97%', icon: Star, color: '#7C3AED', bg: '#EDE9FE' },
+    ];
+
+    const permissions = [
+        { label: 'Invoice Approval', granted: true },
+        { label: 'Batch Upload', granted: true },
+        { label: 'Vendor Management', granted: true },
+        { label: 'agent_w Tally Posting', granted: true },
+        { label: 'Report Export', granted: true },
+        { label: 'User Management', granted: false },
+        { label: 'System Configuration', granted: false },
+        { label: 'Audit Log Access', granted: true },
+    ];
+
+    const activity = [
+        { action: 'Approved invoice', target: 'AWS-2024-98421', time: '2 hours ago', type: 'approve' },
+        { action: 'Rejected invoice', target: 'DHL-2024-339921', time: '5 hours ago', type: 'reject' },
+        { action: 'Batch uploaded', target: 'BATCH-20241225-MR1 (3 docs)', time: 'Yesterday', type: 'upload' },
+        { action: 'Edited invoice amount', target: 'WIP-2024-55012', time: '2 days ago', type: 'edit' },
+        { action: 'System config updated', target: 'Posting Mode → Manual', time: '3 days ago', type: 'config' },
+        { action: 'Approved invoice', target: 'ORC-Q4-2024-1102', time: '4 days ago', type: 'approve' },
+    ];
+
+    const activityColor: Record<string, string> = {
+        approve: '#22C55E', reject: '#EF4444', upload: '#1E6FD9', edit: '#F59E0B', config: '#7C3AED',
+    };
+
+    const tabs = ['Profile', 'Company', 'Permissions', 'Activity'];
 
     return (
         <div className="font-sans min-h-screen pb-[40px]">
@@ -305,13 +310,11 @@ export default function UserProfile() {
                                     </div>
                                 </div>
                                 {[
-                                    { label: 'Company Name', value: company.name },
-                                    { label: 'GSTIN', value: company.gstin },
-                                    { label: 'PAN', value: company.pan },
-                                    { label: 'CIN', value: company.cin },
-                                    { label: 'Industry', value: company.industry },
-                                    { label: 'Team Size', value: company.employees },
-                                    { label: 'Website', value: company.website },
+                                    { label: 'Company Name', value: activeCompany?.name || 'Loading...' },
+                                    { label: 'GSTIN', value: activeCompany?.gstin || 'N/A' },
+                                    { label: 'Trade Name', value: activeCompany?.trade_name || 'N/A' },
+                                    { label: 'State', value: activeCompany?.state || 'N/A' },
+                                    { label: 'Status', value: activeCompany?.is_active ? 'Active' : 'Inactive' },
                                 ].map(({ label, value }) => (
                                     <div key={label} className="flex justify-between items-center py-[10px] border-b border-[#F0F4FA] last:border-0">
                                         <span className="text-[12px] font-semibold text-[#8899AA] uppercase tracking-wide">{label}</span>
@@ -333,10 +336,10 @@ export default function UserProfile() {
                                         </div>
                                     </div>
                                     {[
-                                        { label: 'agent_w Version', value: company.tallyVersion },
-                                        { label: 'Fiscal Year', value: company.fiscalYear },
+                                        { label: 'agent_w Version', value: 'Prime 4.1' },
+                                        { label: 'Fiscal Year', value: '2024–25' },
                                         { label: 'GST Mode', value: 'Auto-Compute' },
-                                        { label: 'Ledger Sync', value: 'Enabled — Real-time' },
+                                        { label: 'Sync Status', value: activeCompany?.is_active ? 'Enabled — Real-time' : 'Disabled' },
                                         { label: 'Voucher Type', value: 'Purchase' },
                                     ].map(({ label, value }) => (
                                         <div key={label} className="flex justify-between items-center py-[10px] border-b border-[#F0F4FA] last:border-0">

@@ -84,8 +84,8 @@ export function registerIpcHandlers() {
      * Get all invoices for the Doc Hub.
      * Output: Array of invoice rows
      */
-    ipcMain.handle('invoices:get-all', async () => {
-        return await queries.getAllInvoices();
+    ipcMain.handle('invoices:get-all', async (_event, { companyId } = {}) => {
+        return await queries.getAllInvoices(companyId);
     });
 
     /**
@@ -120,7 +120,7 @@ export function registerIpcHandlers() {
         // Log audit event
         await queries.createAuditLog({
             invoice_id: invoiceId,
-            invoice_no: updated.invoice_no,
+            invoice_no: updated.invoice_number,
             vendor_name: updated.vendor_name,
             event_type: 'Edited',
             description: `Invoice mapped to vendor ID: ${vendorId}`,
@@ -178,7 +178,7 @@ export function registerIpcHandlers() {
         // Step 4: Log audit event
         await queries.createAuditLog({
             invoice_id: invoice.id,
-            invoice_no: invoice.invoice_no,
+            invoice_no: invoice.invoice_number,
             event_type: 'Created',
             description: `Invoice "${fileName}" uploaded to batch "${currentBatch}"`,
         });
@@ -215,12 +215,12 @@ export function registerIpcHandlers() {
         // Log audit event
         await queries.createAuditLog({
             invoice_id: id,
-            invoice_no: before?.invoice_no,
+            invoice_no: before?.invoice_number,
             vendor_name: before?.vendor_name,
             event_type: status === 'Auto-Posted' ? 'Approved' : status === 'Failed' ? 'Rejected' : 'Edited',
             user_name: userName || 'System',
-            description: `Status changed from "${before?.status}" to "${status}"`,
-            before_data: { status: before?.status },
+            description: `Status changed from "${before?.processing_status}" to "${status}"`,
+            before_data: { status: before?.processing_status },
             after_data: { status },
         });
 
@@ -228,13 +228,13 @@ export function registerIpcHandlers() {
         if (status === 'Auto-Posted' || status === 'Approved') {
             try {
                 const n8nResult = await n8n.sendToTallyPrime({
-                    invoice_no: updated.invoice_no,
+                    invoice_no: updated.invoice_number,
                     vendor_name: updated.vendor_name,
-                    amount: updated.amount,
-                    gst: updated.gst,
-                    total: updated.total,
+                    amount: updated.sub_total,
+                    gst: updated.tax_total,
+                    total: updated.grand_total,
                     gl_account: updated.gl_account,
-                    date: updated.date,
+                    date: updated.invoice_date,
                     due_date: updated.due_date,
                 });
 
@@ -255,8 +255,8 @@ export function registerIpcHandlers() {
      * Get all vendors with dynamically calculated totals.
      * Output: Array of vendor rows with total_due and invoice_count
      */
-    ipcMain.handle('vendors:get-all', async () => {
-        return await queries.getAllVendors();
+    ipcMain.handle('vendors:get-all', async (_event, { companyId } = {}) => {
+        return await queries.getAllVendors(companyId);
     });
 
     /**
@@ -392,8 +392,8 @@ export function registerIpcHandlers() {
      * Used by Dashboard KPI chips.
      * Output: Array of { status, count }
      */
-    ipcMain.handle('invoices:status-counts', async () => {
-        return await queries.getInvoiceStatusCounts();
+    ipcMain.handle('invoices:status-counts', async (_event, { companyId } = {}) => {
+        return await queries.getInvoiceStatusCounts(companyId);
     });
 
     /**
@@ -407,5 +407,29 @@ export function registerIpcHandlers() {
         return await ocr.testOCR();
     });
 
-    console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing');
+    // ─── PURCHASE ORDERS ────────────────────────────────────────
+    ipcMain.handle('po:get-all', async (_event, { companyId } = {}) => {
+        return await queries.getAllPurchaseOrders(companyId);
+    });
+
+    ipcMain.handle('po:get-by-id', async (_event, { id }) => {
+        return await queries.getPurchaseOrderById(id);
+    });
+
+    // ─── GOODS RECEIPTS ──────────────────────────────────────────
+    ipcMain.handle('grn:get-all', async (_event, { companyId } = {}) => {
+        return await queries.getAllGoodsReceipts(companyId);
+    });
+
+    // ─── SERVICE ENTRY SHEETS ───────────────────────────────────
+    ipcMain.handle('ses:get-all', async (_event, { companyId } = {}) => {
+        return await queries.getAllServiceEntrySheets(companyId);
+    });
+
+    // ─── DASHBOARD ──────────────────────────────────────────────
+    ipcMain.handle('dashboard:get-metrics', async (_event, { companyId } = {}) => {
+        return await queries.getDashboardMetrics(companyId);
+    });
+
+    console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp');
 }

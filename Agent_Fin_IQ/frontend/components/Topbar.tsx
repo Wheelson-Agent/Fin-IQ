@@ -24,9 +24,10 @@ interface TopbarProps {
     theme: Theme;
     onToggleTheme: (t: Theme) => void;
     onRefresh?: () => void;
-    selectedCompany?: string;
-    onCompanyChange?: (company: string) => void;
-    companies?: string[];
+    selectedCompany?: string; // Display Name
+    selectedCompanyId?: string; // ID or 'ALL'
+    onCompanyChange?: (id: string) => void;
+    companies?: any[];
 }
 
 /**
@@ -151,7 +152,7 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
     );
 }
 
-export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme, onRefresh, selectedCompany, onCompanyChange, companies = [] }: TopbarProps) {
+export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme, onRefresh, selectedCompany, selectedCompanyId, onCompanyChange, companies = [] }: TopbarProps) {
     const isMono = theme === 'mono';
     const [themeOpen, setThemeOpen] = useState(false);
     const [companyOpen, setCompanyOpen] = useState(false);
@@ -160,7 +161,6 @@ export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme
     const companyDropRef = useRef<HTMLDivElement>(null);
     const active = themes.find(t => t.id === theme)!;
 
-    const allCompanies = ['All Companies', ...companies];
     const currentCompany = selectedCompany || 'All Companies';
 
     const handleRefresh = async () => {
@@ -228,19 +228,32 @@ export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme
                                 <div className={`px-[10px] pt-[8px] pb-[4px] text-[9px] font-black uppercase tracking-[1.2px] ${isMono ? 'text-[#a1a1aa]' : 'text-[#8899AA]'}`}>
                                     Company
                                 </div>
-                                {allCompanies.map(c => {
-                                    const isActive = c === currentCompany;
+                                <button
+                                    onClick={() => { if (onCompanyChange) onCompanyChange('ALL'); setCompanyOpen(false); }}
+                                    className={`w-full flex items-center gap-[8px] px-[10px] py-[8px] transition-colors text-left text-[12px] font-medium ${selectedCompanyId === 'ALL'
+                                        ? (isMono ? 'bg-[#f4f4f5] text-[#09090b] font-bold' : 'bg-[#EBF3FF] text-[#1E6FD9] font-bold')
+                                        : (isMono ? 'text-[#3f3f46] hover:bg-[#f4f4f5]' : 'text-[#334155] hover:bg-[#F8FAFC]')
+                                        }`}
+                                >
+                                    <Building2 size={13} className={selectedCompanyId === 'ALL' ? (isMono ? 'text-[#09090b]' : 'text-[#1E6FD9]') : 'text-[#94A3B8]'} />
+                                    <span className="flex-1 truncate">All Companies</span>
+                                    {selectedCompanyId === 'ALL' && (
+                                        <div className={`w-[5px] h-[5px] rounded-full shrink-0 ${isMono ? 'bg-[#09090b]' : 'bg-[#1E6FD9]'}`} />
+                                    )}
+                                </button>
+                                {companies.map(c => {
+                                    const isActive = c.id === selectedCompanyId;
                                     return (
                                         <button
-                                            key={c}
-                                            onClick={() => { if (onCompanyChange) onCompanyChange(c); setCompanyOpen(false); }}
+                                            key={c.id}
+                                            onClick={() => { if (onCompanyChange) onCompanyChange(c.id); setCompanyOpen(false); }}
                                             className={`w-full flex items-center gap-[8px] px-[10px] py-[8px] transition-colors text-left text-[12px] font-medium ${isActive
                                                 ? (isMono ? 'bg-[#f4f4f5] text-[#09090b] font-bold' : 'bg-[#EBF3FF] text-[#1E6FD9] font-bold')
                                                 : (isMono ? 'text-[#3f3f46] hover:bg-[#f4f4f5]' : 'text-[#334155] hover:bg-[#F8FAFC]')
                                                 }`}
                                         >
                                             <Building2 size={13} className={isActive ? (isMono ? 'text-[#09090b]' : 'text-[#1E6FD9]') : 'text-[#94A3B8]'} />
-                                            <span className="flex-1 truncate">{c}</span>
+                                            <span className="flex-1 truncate">{c.name}</span>
                                             {isActive && (
                                                 <div className={`w-[5px] h-[5px] rounded-full shrink-0 ${isMono ? 'bg-[#09090b]' : 'bg-[#1E6FD9]'}`} />
                                             )}

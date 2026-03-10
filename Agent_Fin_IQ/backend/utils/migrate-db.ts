@@ -64,7 +64,7 @@ async function migrate() {
         console.log('[MIGRATE] ✅ Successfully updated schema with Doc Hub Detail View fields.');
 
     } catch (err) {
-        console.error('[MIGRATE] ❌ Migration failed:', err.message);
+        console.error('[MIGRATE] ❌ Migration failed:', (err as Error).message);
     } finally {
         await pool.end();
         process.exit(0);

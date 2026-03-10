@@ -6,17 +6,15 @@ import { CommandPalette } from '../components/CommandPalette';
 import { NotificationPanel } from '../components/NotificationPanel';
 import { FloatingAgent } from '../components/FloatingAgent';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
+import { CompanyProvider, useCompany } from '../context/CompanyContext';
 
 function AppShell() {
   const location = useLocation();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState('All Companies');
   const { theme, toggleTheme } = useTheme();
-
-  // Sample company list — replace with DB data when ready
-  const companies = ['Wheels Tech', 'Wheelson Logistics', 'Wheelson Foods'];
+  const { selectedCompany, setSelectedCompany, selectedCompanyName, companies } = useCompany();
 
   const handleRefresh = () => {
     window.dispatchEvent(new CustomEvent('app:refresh'));
@@ -48,7 +46,8 @@ function AppShell() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onRefresh={handleRefresh}
-          selectedCompany={selectedCompany}
+          selectedCompany={selectedCompanyName}
+          selectedCompanyId={selectedCompany}
           onCompanyChange={setSelectedCompany}
           companies={companies}
         />
@@ -74,7 +73,9 @@ function AppShell() {
 export default function Root() {
   return (
     <ThemeProvider>
-      <AppShell />
+      <CompanyProvider>
+        <AppShell />
+      </CompanyProvider>
     </ThemeProvider>
   );
 }

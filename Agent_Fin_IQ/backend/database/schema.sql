@@ -1,324 +1,396 @@
 -- ============================================================
 -- agent_ai_tally — PostgreSQL Database Schema
 -- ============================================================
--- This file creates all 11 tables required by the application.
--- Run this once on your PostgreSQL instance to initialize.
---
--- Tables:
---   1. invoices         — Core document tracking (AP)
---   2. vendors          — Vendor / supplier master
---   3. audit_logs       — Every action logged
---   4. processing_jobs  — Pipeline stage tracking
---   5. users            — Role-based authentication
---   6. invoice_items    — Line items per invoice
---   7. companies        — Buyer organization(s)
---   8. app_config       — Key-value settings per company
---   9. ledger_masters   — GL accounts (expense + tax)
---  10. tds_sections     — TDS rates and sections
---  11. batches          — Upload batch tracking
+-- This file creates all tables required by the application in the correct dependency order.
 -- ============================================================
 
 -- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================
--- TABLE 1: invoices
--- Powers: Doc Hub, Detail View, Dashboard
--- Line items stored inside ocr_raw_data (JSONB), not separate table.
--- ============================================================
-CREATE TABLE IF NOT EXISTS invoices (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_name             TEXT NOT NULL,                      -- Original uploaded file name
-    file_path             TEXT,                               -- Path to stored file on disk
-    file_location         TEXT,                               -- Logical/Current physical location descriptive path
-    batch_id              TEXT,                               -- Batch group identifier
-    invoice_no            TEXT,                               -- Extracted invoice number
-    vendor_name           TEXT,                               -- Extracted vendor name
-    vendor_id             UUID,                               -- FK to vendors table (nullable until mapped)
-    date                  DATE,                               -- Invoice date
-    due_date              DATE,                               -- Payment due date
-    amount                DECIMAL(15,2) DEFAULT 0,            -- Sub-total amount
-    gst                   DECIMAL(15,2) DEFAULT 0,            -- GST amount
-    total                 DECIMAL(15,2) DEFAULT 0,            -- Grand total (amount + gst)
-    po_number             TEXT,                               -- Purchase order reference
-    gl_account            TEXT,                               -- General ledger account
-    status                TEXT DEFAULT 'Processing',          -- Processing | Pending Approval | Auto-Posted | Failed | Manual Review
-    processing_time       TEXT,                               -- Time taken to process
-    validation_time       TEXT,                               -- Time spent in validation
-    approval_delay_time  TEXT,                               -- Time spent waiting for approval
-    failure_reason        TEXT,                               -- Why it failed
-    failure_category      TEXT,                               -- Data Validation | Vendor Mismatch | etc.
-    retry_count           INT DEFAULT 0,                      -- Number of retry attempts
-    is_mapped             BOOLEAN DEFAULT false,              -- Vendor mapped in Tally?
-    is_high_amount        BOOLEAN DEFAULT false,              -- Flagged for manual review?
-    pre_ocr_status        TEXT,                               -- OCR_READY | ENHANCE_REQUIRED | FAILED
-    pre_ocr_score         INT,                                -- Pre-OCR quality score
-    ocr_raw_data          JSONB,                              -- Full JSON from Document AI
-    n8n_validation_status TEXT DEFAULT 'pending',             -- pending | validated | rejected
-    is_posted_to_tally    BOOLEAN DEFAULT false,              -- Successfully posted to Tally Prime?
-    doc_type              TEXT,                               -- Document Type
-    posted_to_tally_json  JSONB,                              -- Detailed Tally response
-    all_data_invoice      JSONB,                              -- Original full invoice data
-    uploader_name        TEXT DEFAULT 'System',              -- Who uploaded the file
-    n8n_val_json_data    VARCHAR,                            -- Specialized validation data
-    tally_id             TEXT,                               -- Tally master ID
-    vendor_gst           VARCHAR,                            -- GSTIN captured on invoice
-    created_at            TIMESTAMPTZ DEFAULT NOW(),
-    updated_at            TIMESTAMPTZ DEFAULT NOW()
-);
-
-
--- ============================================================
--- TABLE 2: vendors
--- Powers: AP Monitor, Vendor management page
--- NOTE: total_due and invoice_count are NOT stored here.
---        They are calculated dynamically via SQL JOINs:
---        SELECT v.*, COUNT(i.id), SUM(i.total)
---        FROM vendors v LEFT JOIN invoices i ON i.vendor_id = v.id
---        GROUP BY v.id
--- ============================================================
-CREATE TABLE IF NOT EXISTS vendors (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name                  TEXT NOT NULL,                      -- Vendor display name
-    gstin                 TEXT,                               -- GST Identification Number
-    under_group           TEXT DEFAULT 'Sundry Creditors',    -- Tally ledger group
-    state                 TEXT,                               -- State for GST
-    address               TEXT,                               -- Full billing address
-    tds_nature            TEXT DEFAULT 'Any',                 -- TDS Nature of Payment
-    total_due             DECIMAL(15,2) DEFAULT 0,            -- Cumulative due amount
-    invoice_count         INT DEFAULT 0,                      -- Total bills from this vendor
-    oldest_due            DATE,                               -- Oldest unpaid invoice date
-    aging                 TEXT DEFAULT '0-30',                -- 0-30 | 31-60 | 61-90 | 90+
-    status                TEXT DEFAULT 'Current',             -- Current | At Risk | Overdue
-    created_at            TIMESTAMPTZ DEFAULT NOW()
-);
-
-
--- ============================================================
--- TABLE 6: invoice_items
--- Powers: Line items table in Detail View
--- ============================================================
-CREATE TABLE IF NOT EXISTS invoice_items (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoice_id            UUID REFERENCES invoices(id) ON DELETE CASCADE,
-    description           TEXT NOT NULL,
-    ledger                TEXT,                               -- Tally expense ledger
-    tax                   TEXT,                               -- Tax rate (e.g. 18%)
-    quantity              DECIMAL(15,3) DEFAULT 1,
-    rate                  DECIMAL(15,2) DEFAULT 0,
-    discount              DECIMAL(5,2) DEFAULT 0,
-    amount                DECIMAL(15,2) DEFAULT 0,            -- Calculated (qty * rate)
-    created_at            TIMESTAMPTZ DEFAULT NOW()
-);
-
-
--- ============================================================
--- TABLE 3: audit_logs
--- Powers: Audit Trail page
--- Every action in the system is logged here.
--- ============================================================
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id                    SERIAL PRIMARY KEY,
-    invoice_id            UUID REFERENCES invoices(id) ON DELETE SET NULL,
-    invoice_no            TEXT,                               -- Invoice number (for display)
-    vendor_name           TEXT,                               -- Vendor name (for display)
-    event_type            TEXT NOT NULL,                      -- Created | Validated | Auto-Posted | Edited | Rejected | Approved
-    user_name             TEXT DEFAULT 'System',              -- Who performed the action
-    description           TEXT,                               -- Human-readable event description
-    before_data           JSONB,                              -- State before change
-    after_data            JSONB,                              -- State after change
-    timestamp             TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================================
--- TABLE 4: processing_jobs
--- Powers: Pipeline status tracking in the UI
--- Each row = one stage of one invoice's processing journey.
--- ============================================================
-CREATE TABLE IF NOT EXISTS processing_jobs (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoice_id            UUID REFERENCES invoices(id) ON DELETE CASCADE,
-    stage                 TEXT NOT NULL,                      -- Upload | File Validation | Image Extraction | etc.
-    status                TEXT DEFAULT 'NOT_STARTED',         -- NOT_STARTED | RUNNING | PASSED | FAILED | SKIPPED
-    metrics               JSONB,                              -- Stage-specific metrics (DPI, blur score, etc.)
-    error_message         TEXT,                               -- Error details if failed
-    started_at            TIMESTAMPTZ,
-    completed_at          TIMESTAMPTZ
-);
-
--- ============================================================
--- TABLE 5: users
--- Powers: Login page, Role-Based Access Control
--- Roles: admin, approver, operator, viewer
--- ============================================================
-CREATE TABLE IF NOT EXISTS users (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email                 TEXT UNIQUE NOT NULL,               -- Login email
-    password_hash         TEXT NOT NULL,                      -- bcrypt hashed password
-    display_name          TEXT NOT NULL,                      -- Full name
-    role                  TEXT DEFAULT 'viewer',              -- admin | approver | operator | viewer
-    is_active             BOOLEAN DEFAULT true,               -- Account enabled?
-    last_login            TIMESTAMPTZ,                        -- Last login timestamp
-    created_at            TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================================
--- Default admin user (password: admin123 — change immediately)
--- Hash generated with bcrypt, 10 rounds
--- ============================================================
-INSERT INTO users (email, password_hash, display_name, role)
-VALUES ('admin@agent-tally.local', '$2b$10$placeholder_hash_change_me', 'System Admin', 'admin')
-ON CONFLICT (email) DO NOTHING;
-
--- ============================================================
--- TABLE 7: companies
--- Powers: Config page, Topbar company filter, Tally connection
--- The buyer organization(s) using this system.
+-- TABLE: companies (Base Entity)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS companies (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name                  TEXT NOT NULL,                      -- Registered company name
-    trade_name            TEXT,                               -- Display / brand name
-    type                  TEXT DEFAULT 'pvt_ltd',             -- pvt_ltd | ltd | llp | partnership | proprietorship | opc | trust
-    gstin                 TEXT,                               -- Company GSTIN (destination of supply)
-    pan                   TEXT,                               -- PAN for TDS
-    cin                   TEXT,                               -- Corporate Identity Number
-    tan                   TEXT,                               -- Tax Deduction Account Number
-    address               TEXT,                               -- Registered address
+    name                  TEXT NOT NULL,
+    trade_name            TEXT,
+    type                  TEXT DEFAULT 'pvt_ltd',
+    gstin                 TEXT,
+    tax_id                TEXT,
+    pan                   TEXT,
+    cin                   TEXT,
+    tan                   TEXT,
+    address               TEXT,
     city                  TEXT,
-    state                 TEXT,                               -- State = Destination of Supply
+    state                 TEXT,
     pincode               TEXT,
     phone                 TEXT,
     email                 TEXT,
     website               TEXT,
-    fy_start              TEXT DEFAULT 'april',               -- Financial year start month
+    fy_start              TEXT DEFAULT 'april',
     currency              TEXT DEFAULT 'INR',
-    books_from            DATE,                               -- Books beginning date
+    base_currency_id      UUID,
+    books_from            DATE,
+    erp_sync_id           TEXT,
+    integration_params    JSONB,
     tally_server_url      TEXT DEFAULT 'http://localhost:9000',
-    tally_company_name    TEXT,                               -- Must match Tally exactly
+    tally_company_name    TEXT,
     tally_license_serial  TEXT,
     tally_auto_sync       BOOLEAN DEFAULT true,
-    is_active             BOOLEAN DEFAULT false,              -- Currently selected company
+    is_active             BOOLEAN DEFAULT false,
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
-
 -- ============================================================
--- TABLE 8: app_config
--- Powers: Config page settings persistence
--- Key-value settings per company (posting mode, approval criteria, etc.)
+-- TABLE: app_config
 -- ============================================================
 CREATE TABLE IF NOT EXISTS app_config (
     id                    SERIAL PRIMARY KEY,
     company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
-    config_key            TEXT NOT NULL,                      -- e.g. 'posting_mode', 'approval_criteria'
-    config_value          JSONB NOT NULL,                     -- Flexible JSON value
+    config_key            TEXT NOT NULL,
+    config_value          JSONB NOT NULL,
     updated_at            TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(company_id, config_key)
 );
 
+-- ============================================================
+-- TABLE: batches
+-- ============================================================
+CREATE TABLE IF NOT EXISTS batches (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID REFERENCES companies(id) ON DELETE SET NULL,
+    label                 TEXT NOT NULL,
+    uploaded_by           TEXT DEFAULT 'System',
+    file_count            INT DEFAULT 0,
+    status                TEXT DEFAULT 'Processing',
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ============================================================
--- TABLE 9: ledger_masters
--- Powers: DetailView line item Ledger dropdown
--- Expense accounts and tax ledgers (pre-seeded, optionally synced from Tally)
+-- TABLE: vendors
 -- ============================================================
-CREATE TABLE IF NOT EXISTS ledger_masters (
+CREATE TABLE IF NOT EXISTS vendors (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID REFERENCES companies(id) ON DELETE SET NULL,
+    vendor_code           TEXT,
+    name                  TEXT NOT NULL,
+    gstin                 TEXT,
+    tax_id                TEXT,
+    under_group           TEXT DEFAULT 'Sundry Creditors',
+    state                 TEXT,
+    address               TEXT,
+    pan                   TEXT,
+    city                  TEXT,
+    pincode               TEXT,
+    phone                 TEXT,
+    email                 TEXT,
+    tds_nature            TEXT DEFAULT 'Any',
+    payment_term_id       UUID,
+    payment_terms         TEXT,
+    bank_name             TEXT,
+    bank_account_no       TEXT,
+    bank_ifsc             TEXT,
+    erp_sync_id           TEXT,
+    status                TEXT DEFAULT 'Active',
+    tally_ledger_name     TEXT,
+    is_synced_from_tally  BOOLEAN DEFAULT false,
+    alias                 TEXT,
+    oldest_due            DATE,
+    aging                 TEXT DEFAULT '0-30',
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: gl_accounts (Replaces ledger_masters)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS gl_accounts (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
-    name                  TEXT NOT NULL,                      -- Ledger name (e.g. "IT Expenses")
-    parent_group          TEXT NOT NULL,                      -- Tally group (e.g. "Indirect Expenses")
-    ledger_type           TEXT DEFAULT 'expense',             -- expense | tax_gst | tax_tds | party
-    tax_rate              DECIMAL(5,2),                       -- For tax ledgers: percentage (e.g. 9.00)
-    tally_guid            TEXT,                               -- Tally's unique ID for sync
+    account_code          TEXT,
+    account_name          TEXT NOT NULL,
+    account_type          TEXT DEFAULT 'expense',
+    erp_sync_id           TEXT,
+    parent_group          TEXT,
     is_active             BOOLEAN DEFAULT true,
     synced_at             TIMESTAMPTZ,
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
-
 -- ============================================================
--- TABLE 10: tds_sections
--- Powers: DetailView TDS dropdown
--- Standard TDS sections and rates
+-- TABLE: tax_codes (Replaces tds_sections)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS tds_sections (
-    id                    SERIAL PRIMARY KEY,
-    section               TEXT NOT NULL,                      -- e.g. "194C"
-    description           TEXT NOT NULL,                      -- "Payment to Contractors"
-    rate_individual       DECIMAL(5,2),                       -- Rate for individuals (%)
-    rate_company          DECIMAL(5,2),                       -- Rate for companies (%)
-    threshold             DECIMAL(15,2),                      -- Annual threshold limit
-    is_active             BOOLEAN DEFAULT true
-);
-
-
--- ============================================================
--- TABLE 11: batches
--- Powers: InvoiceHub batch filter & batch modal
--- Tracks each group of files uploaded together
--- ============================================================
-CREATE TABLE IF NOT EXISTS batches (
+CREATE TABLE IF NOT EXISTS tax_codes (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id            UUID REFERENCES companies(id) ON DELETE SET NULL,
-    label                 TEXT NOT NULL,                      -- User-given batch name
-    uploaded_by           TEXT DEFAULT 'System',              -- Uploader name
-    file_count            INT DEFAULT 0,
-    status                TEXT DEFAULT 'Processing',          -- Processing | Completed | Partial
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    tax_code              TEXT NOT NULL,
+    description           TEXT NOT NULL,
+    rate_percentage       DECIMAL(5,2),
+    tax_authority         TEXT,
+    erp_sync_id           TEXT,
+    is_active             BOOLEAN DEFAULT true,
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ============================================================
+-- TABLE: purchase_orders
+-- ============================================================
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    po_number             TEXT UNIQUE NOT NULL,
+    vendor_id             UUID REFERENCES vendors(id) ON DELETE RESTRICT,
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    po_date               DATE NOT NULL,
+    total_amount          DECIMAL(15,2) DEFAULT 0,
+    status                TEXT DEFAULT 'Open',
+    erp_sync_id           TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ============================================================
--- ALTER existing tables: add company_id FK
+-- TABLE: purchase_order_lines
 -- ============================================================
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
-ALTER TABLE vendors  ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
-
--- Add missing columns to vendors
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pan TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS city TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS pincode TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS phone TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS email TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payment_terms TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS tally_ledger_name TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS is_synced_from_tally BOOLEAN DEFAULT false;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS alias TEXT;
-
--- Vendor bank details (for payment processing)
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS bank_name TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS bank_account_no TEXT;
-ALTER TABLE vendors ADD COLUMN IF NOT EXISTS bank_ifsc TEXT;
-
--- E-invoicing columns on invoices
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS irn TEXT;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS ack_no TEXT;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS ack_date DATE;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS eway_bill_no TEXT;
-
--- GST split columns on invoices
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cgst DECIMAL(15,2) DEFAULT 0;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sgst DECIMAL(15,2) DEFAULT 0;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS round_off DECIMAL(15,2) DEFAULT 0;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total_in_words TEXT;
-
--- Add missing columns to invoice_items
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS hsn_sac TEXT;
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS tds_section TEXT;
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS tds_amount DECIMAL(15,2) DEFAULT 0;
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS order_no TEXT;
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS unit TEXT;
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS part_no TEXT;
-ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS possible_gl_names TEXT;
-
+CREATE TABLE IF NOT EXISTS purchase_order_lines (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    po_id                 UUID REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    line_number           INT NOT NULL,
+    item_description      TEXT NOT NULL,
+    quantity              DECIMAL(15,3) DEFAULT 1,
+    unit_price            DECIMAL(15,2) DEFAULT 0,
+    total_amount          DECIMAL(15,2) DEFAULT 0,
+    gl_account_id         UUID REFERENCES gl_accounts(id) ON DELETE SET NULL
+);
 
 -- ============================================================
--- SEED: Ledger Masters (Expense Accounts)
--- These are standard Indian GL accounts for AP
--- company_id is NULL = global defaults for all companies
+-- TABLE: goods_receipts
 -- ============================================================
-INSERT INTO ledger_masters (name, parent_group, ledger_type) VALUES
+CREATE TABLE IF NOT EXISTS goods_receipts (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    grn_number            TEXT UNIQUE NOT NULL,
+    po_id                 UUID REFERENCES purchase_orders(id) ON DELETE RESTRICT,
+    vendor_id             UUID REFERENCES vendors(id) ON DELETE RESTRICT,
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    receipt_date          DATE NOT NULL,
+    status                TEXT DEFAULT 'Received',
+    erp_sync_id           TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: goods_receipt_lines
+-- ============================================================
+CREATE TABLE IF NOT EXISTS goods_receipt_lines (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    grn_id                UUID REFERENCES goods_receipts(id) ON DELETE CASCADE,
+    po_line_id            UUID REFERENCES purchase_order_lines(id) ON DELETE RESTRICT,
+    item_description      TEXT NOT NULL,
+    received_quantity     DECIMAL(15,3) DEFAULT 0,
+    accepted_quantity     DECIMAL(15,3) DEFAULT 0,
+    rejected_quantity     DECIMAL(15,3) DEFAULT 0
+);
+
+-- ============================================================
+-- TABLE: service_entry_sheets
+-- ============================================================
+CREATE TABLE IF NOT EXISTS service_entry_sheets (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ses_number            TEXT UNIQUE NOT NULL,
+    po_id                 UUID REFERENCES purchase_orders(id) ON DELETE RESTRICT,
+    vendor_id             UUID REFERENCES vendors(id) ON DELETE RESTRICT,
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    service_date          DATE NOT NULL,
+    total_amount          DECIMAL(15,2) DEFAULT 0,
+    status                TEXT DEFAULT 'Entered',
+    erp_sync_id           TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: service_entry_sheet_lines
+-- ============================================================
+CREATE TABLE IF NOT EXISTS service_entry_sheet_lines (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ses_id                UUID REFERENCES service_entry_sheets(id) ON DELETE CASCADE,
+    po_line_id            UUID REFERENCES purchase_order_lines(id) ON DELETE RESTRICT,
+    service_description   TEXT NOT NULL,
+    completed_quantity    DECIMAL(15,3) DEFAULT 0,
+    unit_price            DECIMAL(15,2) DEFAULT 0,
+    line_amount           DECIMAL(15,2) DEFAULT 0
+);
+
+-- ============================================================
+-- TABLE: ap_invoices (Replaces invoices)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_invoices (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID REFERENCES companies(id) ON DELETE SET NULL,
+    vendor_id             UUID REFERENCES vendors(id) ON DELETE SET NULL,
+    purchase_order_id     UUID,
+    
+    invoice_number        TEXT,
+    invoice_date          DATE,
+    due_date              DATE,
+    sub_total             DECIMAL(15,2) DEFAULT 0,
+    tax_total             DECIMAL(15,2) DEFAULT 0,
+    grand_total           DECIMAL(15,2) DEFAULT 0,
+    currency_id           UUID,
+    
+    processing_status     TEXT DEFAULT 'Draft',
+    ocr_raw_payload       JSONB,
+    
+    erp_sync_id           TEXT,
+    erp_sync_status       TEXT DEFAULT 'Pending',
+    erp_sync_logs         JSONB,
+    
+    file_name             TEXT NOT NULL,
+    file_path             TEXT,
+    file_location         TEXT,
+    batch_id              TEXT,
+    vendor_name           TEXT,
+    
+    po_number             TEXT,
+    gl_account            TEXT,
+    processing_time       TEXT,
+    validation_time       TEXT,
+    approval_delay_time   TEXT,
+    failure_reason        TEXT,
+    failure_category      TEXT,
+    retry_count           INT DEFAULT 0,
+    is_mapped             BOOLEAN DEFAULT false,
+    is_high_amount        BOOLEAN DEFAULT false,
+    pre_ocr_status        TEXT,
+    pre_ocr_score         INT,
+    n8n_validation_status TEXT DEFAULT 'pending',
+    is_posted_to_tally    BOOLEAN DEFAULT false,
+    doc_type              TEXT,
+    posted_to_tally_json  JSONB,
+    all_data_invoice      JSONB,
+    uploader_name         TEXT DEFAULT 'System',
+    n8n_val_json_data     VARCHAR,
+    tally_id              TEXT,
+    vendor_gst            VARCHAR,
+    irn                   TEXT,
+    ack_no                TEXT,
+    ack_date              DATE,
+    eway_bill_no          TEXT,
+    
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: ap_invoice_lines (Replaces invoice_items)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_invoice_lines (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ap_invoice_id         UUID REFERENCES ap_invoices(id) ON DELETE CASCADE,
+    line_number           INT,
+    description           TEXT NOT NULL,
+    quantity              DECIMAL(15,3) DEFAULT 1,
+    unit_price            DECIMAL(15,2) DEFAULT 0,
+    line_amount           DECIMAL(15,2) DEFAULT 0,
+    gl_account_id         UUID REFERENCES gl_accounts(id) ON DELETE SET NULL,
+    cost_center_id        UUID,
+    tax                   TEXT,
+    discount              DECIMAL(5,2) DEFAULT 0,
+    hsn_sac               TEXT,
+    tds_section           TEXT,
+    tds_amount            DECIMAL(15,2) DEFAULT 0,
+    order_no              TEXT,
+    unit                  TEXT,
+    part_no               TEXT,
+    possible_gl_names     TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: ap_invoice_taxes
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ap_invoice_taxes (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ap_invoice_id         UUID REFERENCES ap_invoices(id) ON DELETE CASCADE,
+    tax_code_id           UUID REFERENCES tax_codes(id) ON DELETE CASCADE,
+    tax_amount            DECIMAL(15,2),
+    base_amount           DECIMAL(15,2)
+);
+
+-- ============================================================
+-- TABLE: audit_logs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id                    SERIAL PRIMARY KEY,
+    entity_name           TEXT,
+    entity_id             UUID,
+    invoice_id            UUID,
+    invoice_no            TEXT,
+    vendor_name           TEXT,
+    event_type            TEXT NOT NULL,
+    action                TEXT,
+    changed_by_user_id    UUID,
+    user_name             TEXT DEFAULT 'System',
+    description           TEXT,
+    before_data           JSONB,
+    after_data            JSONB,
+    old_values            JSONB,
+    new_values            JSONB,
+    timestamp             TIMESTAMPTZ DEFAULT NOW(),
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: processing_jobs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS processing_jobs (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_id            UUID REFERENCES ap_invoices(id) ON DELETE CASCADE,
+    stage                 TEXT NOT NULL,
+    status                TEXT DEFAULT 'NOT_STARTED',
+    metrics               JSONB,
+    error_message         TEXT,
+    started_at            TIMESTAMPTZ,
+    completed_at          TIMESTAMPTZ
+);
+
+-- ============================================================
+-- TABLE: integration_queues
+-- ============================================================
+CREATE TABLE IF NOT EXISTS integration_queues (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type           TEXT NOT NULL,
+    entity_id             UUID NOT NULL,
+    target_erp            TEXT NOT NULL,
+    payload               JSONB,
+    status                TEXT DEFAULT 'Queued',
+    retry_count           INT DEFAULT 0,
+    error_message         TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: users
+-- ============================================================
+CREATE TABLE IF NOT EXISTS users (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email                 TEXT UNIQUE NOT NULL,
+    password_hash         TEXT NOT NULL,
+    display_name          TEXT NOT NULL,
+    role                  TEXT DEFAULT 'viewer',
+    is_active             BOOLEAN DEFAULT true,
+    last_login            TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO users (email, password_hash, display_name, role)
+VALUES ('admin@agent-tally.local', '$2b$10$placeholder_hash_change_me', 'System Admin', 'admin')
+ON CONFLICT (email) DO NOTHING;
+
+-- ============================================================
+-- SEED DATA
+-- ============================================================
+INSERT INTO gl_accounts (account_name, parent_group, account_type) VALUES
     ('IT Expenses',                'Indirect Expenses', 'expense'),
     ('Professional Fees',          'Indirect Expenses', 'expense'),
     ('Cloud Services',             'Indirect Expenses', 'expense'),
@@ -336,46 +408,29 @@ INSERT INTO ledger_masters (name, parent_group, ledger_type) VALUES
     ('Subscription & Memberships', 'Indirect Expenses', 'expense')
 ON CONFLICT DO NOTHING;
 
--- SEED: Tax Ledgers (GST Input Credit)
-INSERT INTO ledger_masters (name, parent_group, ledger_type, tax_rate) VALUES
-    ('CGST Input @9%',   'Duties & Taxes', 'tax_gst', 9.00),
-    ('SGST Input @9%',   'Duties & Taxes', 'tax_gst', 9.00),
-    ('IGST Input @18%',  'Duties & Taxes', 'tax_gst', 18.00),
-    ('CGST Input @2.5%', 'Duties & Taxes', 'tax_gst', 2.50),
-    ('SGST Input @2.5%', 'Duties & Taxes', 'tax_gst', 2.50),
-    ('IGST Input @5%',   'Duties & Taxes', 'tax_gst', 5.00),
-    ('CGST Input @6%',   'Duties & Taxes', 'tax_gst', 6.00),
-    ('SGST Input @6%',   'Duties & Taxes', 'tax_gst', 6.00),
-    ('IGST Input @12%',  'Duties & Taxes', 'tax_gst', 12.00),
-    ('CGST Input @14%',  'Duties & Taxes', 'tax_gst', 14.00),
-    ('SGST Input @14%',  'Duties & Taxes', 'tax_gst', 14.00),
-    ('IGST Input @28%',  'Duties & Taxes', 'tax_gst', 28.00)
+INSERT INTO tax_codes (tax_code, description, rate_percentage, tax_authority) VALUES
+    ('CGST9',   'CGST Input @9%',   9.00, 'GST'),
+    ('SGST9',   'SGST Input @9%',   9.00, 'GST'),
+    ('IGST18',  'IGST Input @18%', 18.00, 'GST'),
+    ('194C-Ind', '194C Payment to Contractors (Individual)', 1.00, 'TDS'),
+    ('194C-Co',  '194C Payment to Contractors (Company)',    2.00, 'TDS'),
+    ('194J',     '194J Professional / Technical Fees',       10.00, 'TDS'),
+    ('194I',     '194I Rent',                                10.00, 'TDS')
 ON CONFLICT DO NOTHING;
 
--- SEED: TDS Sections
-INSERT INTO tds_sections (section, description, rate_individual, rate_company, threshold) VALUES
-    ('194C', 'Payment to Contractors',    1.00, 2.00,  30000),
-    ('194J', 'Professional / Technical Fees', 10.00, 10.00, 30000),
-    ('194I', 'Rent',                      10.00, 10.00, 240000),
-    ('194H', 'Commission / Brokerage',     5.00,  5.00,  15000),
-    ('194A', 'Interest (other than securities)', 10.00, 10.00, 40000),
-    ('194D', 'Insurance Commission',       5.00,  5.00,  15000),
-    ('194Q', 'Purchase of Goods',          0.10,  0.10, 5000000)
-ON CONFLICT DO NOTHING;
-
-
 -- ============================================================
--- Indexes for performance
+-- INDEXES
 -- ============================================================
-CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
-CREATE INDEX IF NOT EXISTS idx_invoices_vendor ON invoices(vendor_name);
-CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(date);
-CREATE INDEX IF NOT EXISTS idx_invoices_batch ON invoices(batch_id);
-CREATE INDEX IF NOT EXISTS idx_invoices_company ON invoices(company_id);
+CREATE INDEX IF NOT EXISTS idx_ap_invoices_status ON ap_invoices(processing_status);
+CREATE INDEX IF NOT EXISTS idx_ap_invoices_vendor ON ap_invoices(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_ap_invoices_date ON ap_invoices(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_ap_invoices_company ON ap_invoices(company_id);
 CREATE INDEX IF NOT EXISTS idx_vendors_company ON vendors(company_id);
-CREATE INDEX IF NOT EXISTS idx_ledger_masters_company ON ledger_masters(company_id);
-CREATE INDEX IF NOT EXISTS idx_ledger_masters_type ON ledger_masters(ledger_type);
+CREATE INDEX IF NOT EXISTS idx_gl_accounts_company ON gl_accounts(company_id);
+CREATE INDEX IF NOT EXISTS idx_gl_accounts_type ON gl_accounts(account_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_invoice ON audit_logs(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_invoice ON processing_jobs(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_integration_queues_entity ON integration_queues(entity_id);
 CREATE INDEX IF NOT EXISTS idx_batches_company ON batches(company_id);
