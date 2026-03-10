@@ -255,3 +255,46 @@ export interface Company {
     state: string | null;
     is_active: boolean;
 }
+
+// ─── ERP MODULES ──────────────────────────────────────────
+
+export interface PurchaseOrder {
+    id: string;
+    po_number: string;
+    po_date: string;
+    vendor_id: string;
+    company_id: string;
+    grand_total: number;
+    currency: string;
+    status: string;
+    created_at: string;
+}
+
+export interface GoodsReceipt {
+    id: string;
+    grn_number: string;
+    receipt_date: string;
+    po_id: string | null;
+    company_id: string;
+    status: string;
+    created_at: string;
+}
+
+export interface ServiceEntrySheet {
+    id: string;
+    ses_number: string;
+    service_date: string;
+    po_id: string | null;
+    company_id: string;
+    status: string;
+    created_at: string;
+}
+
+// ─── DASHBOARD ──────────────────────────────────────────────
+
+export interface DashboardMetrics {
+    totalInvoices: number;
+    totalAmount: number;
+    pendingApproval: number;
+    statusCounts: StatusCount[];
+}

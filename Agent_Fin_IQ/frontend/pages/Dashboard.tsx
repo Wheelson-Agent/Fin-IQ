@@ -14,15 +14,16 @@ import { SectionHeader } from '../components/at/SectionHeader';
 import {
   cashFlowData, sparklineData, userProductivity
 } from '../lib/mockData';
-import { getInvoices } from '../lib/api';
-import type { Invoice } from '../lib/types';
+import { getInvoices, getDashboardMetrics } from '../lib/api';
+import { useCompany } from '../context/CompanyContext';
+import type { Invoice, DashboardMetrics } from '../lib/types';
 
 const formatCurrency = (v: number) =>
   v >= 1000000
     ? `₹${(v / 1000000).toFixed(1)}M`
     : v >= 1000
-      ? `₹${(v / 1000).toFixed(0)}K`
-      : `₹${v}`;
+      ? `₹${(v / 1000).toFixed(0).toLocaleString()}K`
+      : `₹${v.toLocaleString()}`;
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -40,25 +41,46 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const AgingTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="bg-white border border-[#D0D9E8]/50 rounded-[8px] p-[12px_16px] shadow-[0_4px_16px_rgba(13,27,42,0.1)] font-sans">
-        <p className="text-[12px] font-semibold text-[#1A2640] mb-[4px]">{label}</p>
-        <p className="text-[12px] text-[#1A2640]">Amount: {formatCurrency(payload[0].value)}</p>
-      </div>
-    );
-  }
-  return null;
-};
-
 export default function Dashboard() {
+  const { selectedCompany } = useCompany();
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'payables' | 'ai_insights'>('payables');
 
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [m, inv] = await Promise.all([
+        getDashboardMetrics(selectedCompany),
+        getInvoices(selectedCompany)
+      ]);
+      setMetrics(m);
+      setInvoices(inv || []);
+    } catch (err) {
+      console.error('[Dashboard] Failed to load data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    getInvoices().then(data => setInvoices(data || [])).catch(err => console.error('[Dashboard] Failed to load invoices:', err));
-  }, []);
+    fetchData();
+    const handleRefresh = () => fetchData();
+    window.addEventListener('app:refresh', handleRefresh);
+    return () => window.removeEventListener('app:refresh', handleRefresh);
+  }, [selectedCompany]);
+
+  // Derived values from live metrics
+  const totalPayables = metrics?.totalAmount || 0;
+  const totalCount = metrics?.totalInvoices || 0;
+  const pendingCount = metrics?.pendingApproval || 0;
+
+  const statusCounts = metrics?.statusCounts || [];
+  const autoPostedCount = statusCounts.find(s => s.status === 'Auto-Posted')?.count || 0;
+  const approvedCount = statusCounts.find(s => s.status === 'Approved')?.count || 0;
+
+  const automationRate = totalCount > 0 ? ((autoPostedCount / totalCount) * 100).toFixed(1) : '0';
 
   // Staggered animation variants
   const container = {
@@ -73,15 +95,10 @@ export default function Dashboard() {
     show: { opacity: 1, y: 0, transition: { ease: 'easeOut' as any, duration: 0.4 } }
   };
 
-  const totalPayables = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
-  const autoPostedCount = invoices.filter(inv => inv.status === 'Auto-Posted').length;
-  const pendingCount = invoices.filter(inv => inv.status === 'Pending Approval' || inv.status === 'Manual Review').length;
-  const automationRate = invoices.length > 0 ? ((autoPostedCount / invoices.length) * 100).toFixed(1) : '0';
-
   // Dynamic Funnel Data
-  const uploadedCount = invoices.length;
-  const extractedCount = invoices.filter(inv => inv.status !== 'Failed' && inv.status !== 'Processing').length;
-  const validatedCount = invoices.filter(inv => inv.status === 'Approved' || inv.status === 'Auto-Posted').length;
+  const uploadedCount = totalCount;
+  const extractedCount = totalCount - (statusCounts.find(s => s.status === 'Failed')?.count || 0) - (statusCounts.find(s => s.status === 'Processing')?.count || 0);
+  const validatedCount = approvedCount + autoPostedCount;
 
   const funnelData = [
     { stage: 'Uploaded', count: uploadedCount, color: '#1E6FD9', icon: 'Upload' },
@@ -104,10 +121,10 @@ export default function Dashboard() {
 
   // Dynamic Impact Metrics
   const impactMetrics = {
-    timeSaved: Math.round(invoices.length * 3.5 / 60), // assume 3.5 mins saved per invoice
-    manualTouchReduction: Math.round(100 - (pendingCount / (invoices.length || 1)) * 100),
+    timeSaved: Math.round(totalCount * 3.5 / 60), // assume 3.5 mins saved per invoice
+    manualTouchReduction: Math.round(100 - (pendingCount / (totalCount || 1)) * 100),
     accuracyGain: 99,
-    touchlessRatio: Math.round((autoPostedCount / (invoices.length || 1)) * 100),
+    touchlessRatio: Math.round((autoPostedCount / (totalCount || 1)) * 100),
   };
 
   // Removing Radar Aging Data calculations as requested
@@ -166,7 +183,7 @@ export default function Dashboard() {
           <motion.div variants={item}>
             <KPICard
               label="Invoices Processed"
-              value={invoices.length.toLocaleString()}
+              value={totalCount.toLocaleString()}
               trend="up"
               trendValue="0%"
               icon={<FileCheck size={20} />}
