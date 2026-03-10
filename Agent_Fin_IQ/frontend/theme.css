@@ -1,0 +1,787 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Precision Dark Colors */
+  --navy: #0B1623;
+  --navy2: #0f1e2e;
+  --navy3: #162436;
+  --blue: #1E6FD9;
+  --blue2: #2d82f0;
+  --blue-glow: rgba(30, 111, 217, .35);
+  --light-blue: #EBF3FF;
+  --mid-blue: #4A90D9;
+  --subtle: #F0F4FA;
+  --border-app: #D0D9E8;
+  --border2: rgba(208, 217, 232, .5);
+  --text-app: #1A2640;
+  --text-mid: #4A5568;
+  --text-light: #8899AA;
+  --white: #fff;
+  --success: #22C55E;
+  --success-bg: #F0FDF4;
+  --success-dim: #16A34A;
+  --warning: #F59E0B;
+  --warning-bg: #FFFBEB;
+  --error: #EF4444;
+  --error-bg: #FEF2F2;
+  --orange: #EA580C;
+  --orange-bg: #FFF7ED;
+  --purple: #8B5CF6;
+  --purple-bg: #F5F3FF;
+
+  /* Layout Metrics */
+  --sidebar-w: 64px;
+  --sidebar-expanded: 240px;
+  --topbar-h: 56px;
+
+  /* Easings */
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+
+  /* Shadcn BaselineOverrides */
+  --font-size: 16px;
+  --background: #F0F4FA;
+  /* --subtle */
+  --foreground: #1A2640;
+  /* --text-app */
+  --card: #ffffff;
+  --card-foreground: #1A2640;
+  --popover: #ffffff;
+  --popover-foreground: #1A2640;
+  --primary: #1E6FD9;
+  /* --blue */
+  --primary-foreground: #ffffff;
+  --secondary: #EBF3FF;
+  /* --light-blue */
+  --secondary-foreground: #1E6FD9;
+  --muted: #F0F4FA;
+  --muted-foreground: #4A5568;
+  /* --text-mid */
+  --accent: #EBF3FF;
+  --accent-foreground: #1E6FD9;
+  --destructive: #EF4444;
+  /* --error */
+  --destructive-foreground: #ffffff;
+  --border: #D0D9E8;
+  /* --border-app */
+  --input: transparent;
+  --input-background: #F0F4FA;
+  --switch-background: #cbced4;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #1E6FD9;
+  --radius: 0.625rem;
+  --sidebar: #0B1623;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #1E6FD9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #162436;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, .06);
+  --sidebar-ring: #1E6FD9;
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+/* ─── Monochrome / B&W Theme ───────────────────────────────────────────── */
+body.theme-mono {
+  /* Core palette → zinc/black/white */
+  --navy: #09090b;
+  --navy2: #18181b;
+  --navy3: #27272a;
+  --blue: #18181b;
+  --blue2: #3f3f46;
+  --blue-glow: rgba(0, 0, 0, 0.12);
+  --light-blue: #f4f4f5;
+  --mid-blue: #52525b;
+  --subtle: #f4f4f5;
+  --border-app: #e4e4e7;
+  --border2: rgba(228, 228, 231, 0.7);
+  --text-app: #09090b;
+  --text-mid: #3f3f46;
+  --text-light: #71717a;
+  --white: #ffffff;
+
+  /* shadcn tokens */
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #09090b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --border: #e4e4e7;
+  --input: transparent;
+  --input-background: #f4f4f5;
+  --ring: #09090b;
+
+  /* Sidebar stays dark (classic shadcn style) */
+  --sidebar: #09090b;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #fafafa;
+  --sidebar-primary-foreground: #09090b;
+  --sidebar-accent: #27272a;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #ffffff;
+
+  /* Status/semantic colors intentionally NOT overridden
+     green / amber / red / purple / orange badges stay colored */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /**
+  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
+  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
+  */
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h4 {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  label {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  input {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.5;
+  }
+}
+
+/* ─── Mono theme: global element overrides ─────────────────────────────────
+   These rules handle hardcoded Tailwind color classes used in components
+   (charts, KPI cards, dashboard cards, link text, gradients, etc.)
+   Status colors (green/amber/red/purple) are intentionally left out.
+─────────────────────────────────────────────────────────────────────────── */
+
+/* Page / card backgrounds */
+body.theme-mono .bg-\[\#F0F4FA\],
+body.theme-mono .bg-\[\#EBF3FF\],
+body.theme-mono .bg-\[\#f8fafc\],
+body.theme-mono .bg-\[\#F8FAFC\],
+body.theme-mono .bg-blue-50 {
+  background-color: #f4f4f5 !important;
+}
+
+/* White cards — keep white but add zinc border */
+body.theme-mono .border-\[\#D0D9E8\]\/60,
+body.theme-mono .border-\[\#D0D9E8\]\/50,
+body.theme-mono .border-\[\#D0D9E8\] {
+  border-color: #e4e4e7 !important;
+}
+
+/* Primary blue text → near-black */
+body.theme-mono .text-\[\#1E6FD9\],
+body.theme-mono .text-blue-600,
+body.theme-mono .text-\[\#2d82f0\] {
+  color: #09090b !important;
+}
+
+/* Primary blue backgrounds → zinc */
+body.theme-mono .bg-\[\#1E6FD9\],
+body.theme-mono .bg-\[\#1E6FD9\]\/20,
+body.theme-mono .bg-blue-500\/10 {
+  background-color: #e4e4e7 !important;
+}
+
+/* Blue border accents → zinc */
+body.theme-mono .border-\[\#1E6FD9\],
+body.theme-mono .border-blue-100,
+body.theme-mono .border-blue-500\/20 {
+  border-color: #d4d4d8 !important;
+}
+
+/* Blue tinted text inside blue-bg cards */
+body.theme-mono .text-blue-600,
+body.theme-mono .text-indigo-600,
+body.theme-mono .text-\[\#6366F1\] {
+  color: #3f3f46 !important;
+}
+
+body.theme-mono .bg-blue-50,
+body.theme-mono .bg-indigo-50 {
+  background-color: #f4f4f5 !important;
+}
+
+/* Secondary/accent blue bg pills */
+body.theme-mono .bg-\[\#EBF3FF\] {
+  background-color: #f4f4f5 !important;
+}
+
+body.theme-mono .text-\[\#1E6FD9\] {
+  color: #18181b !important;
+}
+
+/* Dashboard text */
+body.theme-mono .text-\[\#1A2640\] {
+  color: #09090b !important;
+}
+
+body.theme-mono .text-\[\#4A5568\] {
+  color: #3f3f46 !important;
+}
+
+body.theme-mono .text-\[\#8899AA\] {
+  color: #71717a !important;
+}
+
+/* KPI card sparkline placeholder colors → gray */
+body.theme-mono .bg-\[\#1E6FD9\]\/20 {
+  background-color: #e4e4e7 !important;
+}
+
+/* AI Insights card rows in mono: remove tinted bg, use zinc */
+body.theme-mono .rounded-\[16px\][style*="backgroundColor"] {
+  background-color: #f4f4f5 !important;
+  border-color: #e4e4e7 !important;
+}
+
+/* Chart stroke/fill for the blue area/bar chart — override via SVG */
+body.theme-mono .recharts-line path,
+body.theme-mono .recharts-area path {
+  stroke: #09090b !important;
+}
+
+/* "Sync Performance" gradient button → black */
+body.theme-mono .from-\[\#1E6FD9\],
+body.theme-mono .to-\[\#6366F1\] {
+  --tw-gradient-from: #09090b !important;
+  --tw-gradient-to: #27272a !important;
+}
+
+/* Dashboard AI insights card — the outer card light gradient */
+body.theme-mono [style*="linear-gradient(135deg, #ffffff"] {
+  background: #ffffff !important;
+}
+
+/* User & Company: System Role gradient card */
+body.theme-mono [style*="linear-gradient"][style*="1E6FD9"],
+body.theme-mono [style*="linear-gradient"][style*="6366F1"] {
+  background: linear-gradient(135deg, #09090b 0%, #27272a 100%) !important;
+}
+
+/* Sidebar active pill (collapsed) */
+body.theme-mono .bg-\[\#1E6FD9\]\/25 {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+body.theme-mono .text-\[\#5B9FEF\] {
+  color: #e4e4e7 !important;
+}
+
+/* Recharts tooltip */
+body.theme-mono .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #ffffff !important;
+  border-color: #e4e4e7 !important;
+}
+
+/* Active nav border in sidebar stays white in mono */
+body.theme-mono .border-l-\[\#1E6FD9\] {
+  border-left-color: #ffffff !important;
+}
+
+body.theme-mono .bg-\[\#1E6FD9\]\/20 {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+
+/* Sidebar active icon text only (not general text) */
+body.theme-mono .sidebar .text-\[\#1E6FD9\],
+body.theme-mono aside .text-\[\#1E6FD9\] {
+  color: #e4e4e7 !important;
+}
+
+/* ─── Doc Hub: Action Deck & Table fixes in mono ──────────────────── */
+
+/* Action deck: Approve button keeps its border, text goes black */
+body.theme-mono .border-\[\#1E6FD9\].text-\[\#1E6FD9\] {
+  border-color: #09090b !important;
+  color: #09090b !important;
+  background-color: #ffffff !important;
+}
+
+body.theme-mono .border-\[\#1E6FD9\].text-\[\#1E6FD9\]:hover {
+  background-color: #f4f4f5 !important;
+}
+
+/* "Bulk Post to ERP" filled blue button → black filled */
+body.theme-mono .bg-\[\#1E6FD9\]:not(aside):not(.sidebar) {
+  background-color: #09090b !important;
+  color: #ffffff !important;
+  border-color: #09090b !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+}
+
+body.theme-mono .bg-\[\#1E6FD9\]:not(aside):not(.sidebar):hover {
+  background-color: #27272a !important;
+}
+
+body.theme-mono .hover\:bg-\[\#1557B0\]:hover {
+  background-color: #27272a !important;
+}
+
+/* "Re-validate" button bg */
+body.theme-mono .bg-\[\#F8FAFC\] {
+  background-color: #f4f4f5 !important;
+}
+
+/* Batch ID text in table — must be clearly black, not the sidebar override color */
+body.theme-mono table .text-\[\#1E6FD9\] {
+  color: #09090b !important;
+}
+
+/* Batch ID when selected row */
+body.theme-mono table .text-\[\#1A2640\] {
+  color: #09090b !important;
+}
+
+/* Table row hover background */
+body.theme-mono table .group-hover\:bg-\[\#F8FAFC\]:hover,
+body.theme-mono table tbody tr:hover td {
+  background-color: #f4f4f5 !important;
+}
+
+body.theme-mono table .group-hover\:bg-\[\#F8FAFC\] {
+  --tw-bg-opacity: 1;
+}
+
+/* Selected row highlight → zinc instead of blue */
+body.theme-mono table .bg-\[\#F0F7FF\] {
+  background-color: #f4f4f5 !important;
+}
+
+body.theme-mono table .border-\[\#1E6FD9\]\/40 {
+  border-color: #d4d4d8 !important;
+}
+
+/* Table header stays dark (it's already dark in color mode) */
+body.theme-mono .bg-\[\#1A2738\] {
+  background-color: #09090b !important;
+}
+
+/* "N DOCUMENTS SELECTED" badge → black */
+body.theme-mono .bg-\[\#1E6FD9\].text-white.rounded-full {
+  background-color: #09090b !important;
+}
+
+/* Upload zone: browse link text */
+body.theme-mono .text-\[\#1E6FD9\].hover\:underline {
+  color: #09090b !important;
+}
+
+body.theme-mono .hover\:border-\[\#1E6FD9\]:hover {
+  border-color: #09090b !important;
+}
+
+body.theme-mono .border-\[\#1E6FD9\] {
+  border-color: #09090b !important;
+}
+
+body.theme-mono .bg-\[\#F0F7FF\] {
+  background-color: #f4f4f5 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COMPREHENSIVE MONO OVERRIDES — All Pages
+   Covers: hero banners, gradient buttons, toggle switches, icon rings,
+   indigo/violet/purple chart colours, section headers, agent FAB, etc.
+   STATUS COLOURS (green · amber · red) are intentionally NOT overridden.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Inline linear-gradient headers / hero banners ─────────────────── */
+/* Config, UserProfile, AgentPage dark blue hero → near-black */
+body.theme-mono [style*="linear-gradient"][style*="0B1623"],
+body.theme-mono [style*="linear-gradient"][style*="1A2738"],
+body.theme-mono [style*="linear-gradient"][style*="0F2044"],
+body.theme-mono [style*="linear-gradient"][style*="1a0533"] {
+  background: linear-gradient(135deg, #09090b 0%, #18181b 100%) !important;
+}
+
+/* ─── Toggle switch: on-state stays black ───────────────────────────── */
+body.theme-mono [style*="linear-gradient"][style*="1E6FD9"][style*="7C3AED"] {
+  background: linear-gradient(135deg, #18181b 0%, #27272a 100%) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ─── Config: icon accent ring (orange/yellow posting mode, green auto-post) */
+/* Keep green/amber icon backgrounds for Posting Mode — those are semantic  */
+/* but strip the blue/indigo gradient icon wrapper in the hero             */
+body.theme-mono [style*="linear-gradient"][style*="7C3AED"],
+body.theme-mono [style*="linear-gradient"][style*="6366F1"]:not([style*="stopColor"]) {
+  background: linear-gradient(135deg, #18181b 0%, #27272a 100%) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* ─── "Sync Performance" and gradient CTA buttons ──────────────────────  */
+body.theme-mono [style*="linear-gradient"][style*="059669"],
+body.theme-mono [style*="linear-gradient"][style*="10B981"] {
+  background: linear-gradient(135deg, #18181b 0%, #27272a 100%) !important;
+  box-shadow: none !important;
+}
+
+/* ─── Tailwind gradient buttons (from-[#1E6FD9] to-[#6366F1]) ──────── */
+body.theme-mono .from-\[\#6366F1\] {
+  --tw-gradient-from: #18181b !important;
+}
+
+body.theme-mono .to-\[\#818CF8\] {
+  --tw-gradient-to: #3f3f46 !important;
+}
+
+body.theme-mono .bg-gradient-to-r.from-\[\#1E6FD9\] {
+  background: linear-gradient(to right, #09090b, #27272a) !important;
+}
+
+body.theme-mono .bg-gradient-to-br.from-\[\#1E6FD9\].to-\[\#6366F1\] {
+  background: linear-gradient(135deg, #09090b, #27272a) !important;
+}
+
+body.theme-mono .bg-gradient-to-br.from-\[\#1E6FD9\].to-\[\#2563EB\] {
+  background: linear-gradient(135deg, #09090b, #27272a) !important;
+}
+
+/* ─── Indigo / violet text ──────────────────────────────────────────── */
+body.theme-mono .text-\[\#6366F1\] {
+  color: #27272a !important;
+}
+
+body.theme-mono .text-indigo-600,
+body.theme-mono .text-\[\\#7C3AED\] {
+  color: #27272a !important;
+}
+
+/* ─── Colored bg rings on icon thumbnails ───────────────────────────── */
+body.theme-mono .bg-\[\#EEF2FF\] {
+  background-color: #f4f4f5 !important;
+}
+
+body.theme-mono .border-\[\#C7D2FE\] {
+  border-color: #d4d4d8 !important;
+}
+
+/* ─── Dashboard: Recharts indigo stroke / fill → zinc ───────────────── */
+body.theme-mono .recharts-line-curve[stroke="#6366F1"],
+body.theme-mono .recharts-area-curve[stroke="#6366F1"] {
+  stroke: #52525b !important;
+}
+
+body.theme-mono .recharts-area-area[fill="url(#colorHuman)"] {
+  fill: #f4f4f5 !important;
+}
+
+/* Override recharts by wrapping SVG stops */
+body.theme-mono stop[stop-color="#6366F1"] {
+  stop-color: #52525b !important;
+}
+
+body.theme-mono stop[stop-color="#1E6FD9"] {
+  stop-color: #71717a !important;
+}
+
+/* ─── Dashboard system synergy chart legend text ─────────────────────── */
+body.theme-mono .text-\[\#4A90D9\] {
+  color: #52525b !important;
+}
+
+/* UserProfile avatar gradient ring + online dot color */
+body.theme-mono .ring-\[\#1E6FD9\]\/40 {
+  --tw-ring-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ─── "Approve & Post" (green) in invoice preview — KEEP green (semantic) ─
+   "Bulk Post to ERP" → black (already handled above)
+
+   ─── Floating FAB agent button ──────────────────────────────────────── */
+body.theme-mono .fixed.bottom-\[24px\].right-\[24px\] button:last-child,
+body.theme-mono [style*="linear-gradient(135deg, #1E6FD9 0%, #6366F1 100%)"][class*="rounded-full"] {
+  background: #09090b !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ─── Floating FAB popover background ───────────────────────────────── */
+body.theme-mono [style*="linear-gradient(160deg, #0B1623"] {
+  background: #09090b !important;
+}
+
+/* ─── AgentPage hero ─────────────────────────────────────────────────── */
+body.theme-mono [style*="linear-gradient(135deg, #0B1623 0%, #0F1E38"] {
+  background: linear-gradient(135deg, #09090b 0%, #18181b 100%) !important;
+}
+
+/* ─── AgentPage chat bubble (user, gradient blue) ────────────────────── */
+body.theme-mono .bg-gradient-to-br.from-\[\#1E6FD9\] {
+  background: #09090b !important;
+}
+
+/* ─── Config: accentColor passed as inline style on icon containers ─── */
+/* These are too specific to override via class; catch all small inline-style
+   coloured divs that contain an icon (they use style="background: #xxx...") */
+body.theme-mono [style*="linear-gradient"][style*="F59E0B"] {
+  /* Posting mode orange icon — keep amber since it's semantic but tone down */
+  filter: grayscale(0.7) !important;
+}
+
+/* ─── Any remaining from-[#6366F1] backgrounds ──────────────────────── */
+body.theme-mono [class*="from-\\[\\#6366F1\\]"] {
+  --tw-gradient-from: #27272a !important;
+}
+
+/* ─── Generic gradient backgrounds with blue ────────────────────────── */
+body.theme-mono .bg-\[\#EBF3FF\] {
+  background-color: #f4f4f5 !important;
+}
+
+body.theme-mono .border-\[\#C7D2FE\],
+body.theme-mono .border-\[\#A5B4FC\] {
+  border-color: #d4d4d8 !important;
+}
+
+/* ─── Dashboard: gradient hero AI card ─────────────────────────────── */
+/* Light blue gradient on AI Insights card → white */
+body.theme-mono [style*="linear-gradient(135deg, #ffffff 60%, #EBF3FF"] {
+  background: #ffffff !important;
+}
+
+/* ─── Dashboard: amber "accuracy" number ────────────────────────────── */
+body.theme-mono .text-\[\#F59E0B\]:not(.status-badge *):not([class*="badge"]) {
+  color: #52525b !important;
+}
+
+/* ─── Sync Performance button / Analyse button (gradient) ───────────── */
+body.theme-mono button[style*="linear-gradient"] {
+  background: linear-gradient(135deg, #09090b 0%, #27272a 100%) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ─── Checkbox accent color ─────────────────────────────────────────── */
+body.theme-mono input[type="checkbox"] {
+  accent-color: #09090b !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CLASS HOOK OVERRIDES (reliable — targets className strings in TSX)
+   These are immune to inline-style attribute selector issues.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Page hero banners (Config, UserProfile, AuditTrail, etc.) ──────── */
+body.theme-mono .page-hero {
+  background: linear-gradient(135deg, #09090b 0%, #18181b 100%) !important;
+  box-shadow: none !important;
+}
+
+body.theme-mono .page-hero * {
+  box-shadow: none !important;
+}
+
+/* ─── Hero icon circle (Config page icon with gradient) ─────────────── */
+body.theme-mono .page-hero-icon {
+  background: #27272a !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ─── ConfigCard colored icon squares ───────────────────────────────── */
+body.theme-mono .page-card-icon {
+  background: #27272a !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* ─── Config toggle switch (on-state) ───────────────────────────────── */
+body.theme-mono .config-toggle[data-state="checked"] {
+  background: #18181b !important;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ─── Config toggle knob (always white) ─────────────────────────────── */
+body.theme-mono .toggle-knob {
+  background-color: #ffffff !important;
+}
+
+/* ─── UserProfile avatar ─────────────────────────────────────────────── */
+body.theme-mono .user-avatar {
+  background: #18181b !important;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ─── UserProfile tab active indicator ──────────────────────────────── */
+body.theme-mono .user-tab-active-bg {
+  background: #09090b !important;
+}
+
+/* ─── UserProfile Finance Manager Role badge ────────────────────────── */
+body.theme-mono .user-role-badge {
+  background: #18181b !important;
+  box-shadow: none !important;
+}
+
+/* ─── UserProfile GST Compliance badge — intentionally keeps green (semantic) */
+
+/* ─── ToggleRow checked row backgrounds (blue-tinted) ────────────────── */
+/* #F0F9FF → zinc, #BFDBFE → zinc border */
+body.theme-mono .config-toggle~* [style*="F0F9FF"],
+body.theme-mono [style*="background: rgb(240, 249, 255)"],
+body.theme-mono [style*="background: #F0F9FF"] {
+  background: #f4f4f5 !important;
+}
+
+body.theme-mono [style*="border: 1px solid rgb(191, 219, 254)"],
+body.theme-mono [style*="border: 1px solid #BFDBFE"] {
+  border-color: #d4d4d8 !important;
+}
+
+/* ─── Source config ToggleRow checked icon (blue tint) ─────────────── */
+body.theme-mono [style*="background: rgb(219, 234, 254)"],
+body.theme-mono [style*="background: #DBEAFE"] {
+  background: #e4e4e7 !important;
+}
+
+body.theme-mono [style*="color: rgb(30, 111, 217)"],
+body.theme-mono [style*="color: #1E6FD9"] {
+  color: #3f3f46 !important;
+}
+
+/* ─── "Edit Profile" button (solid blue) ────────────────────────────── */
+body.theme-mono .bg-\[\#1E6FD9\].text-white {
+  background-color: #09090b !important;
+  box-shadow: none !important;
+}
+
+/* ─── AgentPage hero (class-based) ──────────────────────────────────── */
+body.theme-mono .flex.flex-col.h-full>div:first-child {
+  background: linear-gradient(135deg, #09090b 0%, #18181b 100%) !important;
+}
+
+/* ─── Reports / Dashboard: indigo chart stroke via Recharts ──────────── */
+body.theme-mono .recharts-line[stroke="#6366F1"] path,
+body.theme-mono .recharts-area[stroke="#6366F1"] path {
+  stroke: #52525b !important;
+}
+
+body.theme-mono .recharts-dot[fill="#6366F1"] {
+  fill: #52525b !important;
+}

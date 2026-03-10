@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+dist/
+release/
+
+# Config secrets
+config/.env
+
+# Data directories
+data/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary
+*.tmp
+*.bak

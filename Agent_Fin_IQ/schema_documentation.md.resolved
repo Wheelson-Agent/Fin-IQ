@@ -1,0 +1,88 @@
+# Agent Tally Database Schema & Component Linkages
+
+This document outlines the 5 core PostgreSQL tables that power the application and explains exactly how each field connects to the frontend UI.
+
+---
+
+## 1. `invoices`
+This is the central table of the application. Every document uploaded creates a row here.
+
+| Database Field | Type | What it is | Where it shows in the UI |
+| :--- | :--- | :--- | :--- |
+| **[id](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/lib/api.ts#48-57)** | UUID | Unique database ID | Used in URLs (e.g., `/detail/[id]`) |
+| **`file_name`** | TEXT | Original uploaded file name | Doc Hub list, Detail View header |
+| **`file_path`** | TEXT | Absolute path to the file on the user's local disk | Used to load the PDF viewer in Detail View |
+| **`batch_id`** | TEXT | Groups multiple files uploaded at the same time | Doc Hub (Batch ID column), Dashboard KPI "Batches Processed" |
+| **`invoice_no`** | TEXT | The invoice number extracted by the AI | Doc Hub list, Detail View |
+| **`vendor_name`** | TEXT | The vendor name extracted by the AI | Doc Hub list, Detail View |
+| **[date](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/components/at/ProcessingPipeline.tsx#197-206)** | DATE | Invoice Issue Date | Doc Hub (Upload Date / Invoice Date), Detail View |
+| **`due_date`** | DATE | Invoice Payment Due Date | Detail View, AP Monitor |
+| **`amount`** | DECIMAL | The Sub-total extracted | Detail View (Sub-total) |
+| **`gst`** | DECIMAL | The total Tax/GST extracted | Detail View (GST) |
+| **`total`** | DECIMAL | The Grand Total extracted | Detail View (Total), AP Monitor |
+| **`status`** | TEXT | Current state: [Processing](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/lib/api.ts#130-138), `Pending Approval`, `Auto-Posted`, `Failed` | Doc Hub "Status" badge, Dashboard KPIs, Detail View actions |
+| **`confidence`** | FLOAT | AI Trust Score / Confidence percentage (0-100) | Doc Hub (Trust Score bar), Detail View |
+| **`processing_time`** | TEXT | How long the backend took (e.g. "12s") | Doc Hub (Processing Time) |
+| **`failure_reason`** | TEXT | Why extraction or validation failed | Doc Hub tooltip, Detail View error message |
+| **`failure_category`**| TEXT | Used for grouping errors | Dashboard "Bottlenecks" chart |
+| **`ocr_raw_data`** | JSONB | The complete JSON response from Google Document AI / external OCR. Contains line items. | Detail View "Extracted Data Points" side-panel |
+| **`posted_to_tally_json`** | JSONB| The response received back from Tally Prime after a successful sync | Detail View "Tally Sync Success" flag |
+
+---
+
+## 2. `vendors`
+Holds the vendor master data. This powers the **AP Monitor** and is cross-referenced when invoices are processed.
+
+| Database Field | Type | What it is | Where it shows in the UI |
+| :--- | :--- | :--- | :--- |
+| **[id](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/lib/api.ts#48-57)** | UUID | Unique vendor ID | Used by the backend to join with invoices |
+| **`name`** | TEXT | Vendor display name | AP Monitor (Vendor Name), Detail View |
+| **`gstin`** | TEXT | GST Identification Number | AP Monitor, Detail View |
+| **`oldest_due`** | DATE | The oldest unpaid invoice date | AP Monitor (Oldest due) |
+| **`aging_bucket`** | TEXT | E.g. "0-30", "31-60", "90+" | AP Monitor "Aging" badge |
+| **`status`** | TEXT | Current | At Risk | Overdue | AP Monitor "Vendor Status" |
+
+*Note: The **`Total Due`** and **`Invoice Count`** shown in the AP Monitor are NOT stored in this table. They are dynamically calculated inside [backend/database/queries.ts](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/backend/database/queries.ts) by summing up all invoices that belong to this vendor.*
+
+---
+
+## 3. `audit_logs`
+This table acts as the "Audit Trail" tracking every single action performed in the system.
+
+| Database Field | Type | What it is | Where it shows in the UI |
+| :--- | :--- | :--- | :--- |
+| **`invoice_id`** | UUID | Which invoice this event belongs to | Links log to specific invoice |
+| **`event_type`** | TEXT | "Created", "Edited", "Approved", "Auto-Posted" | Audit Logs view |
+| **`user_name`** | TEXT | The name of the user who clicked the button (or "System") | Audit Logs view |
+| **`description`** | TEXT | Human readable explanation of what happened | Audit Logs view |
+| **`before_data`** | JSONB | Snapshot of the data BEFORE the edit | Audit Logs diff viewer |
+| **`after_data`** | JSONB | Snapshot of the data AFTER the edit | Audit Logs diff viewer |
+
+---
+
+## 4. `processing_jobs`
+This tracks the ultra-granular steps of the pipeline (Uploading, Rasterizing, Extracting, Validating) for the animated **ProcessingPipeline.tsx** component.
+
+| Database Field | Type | What it is | Where it shows in the UI |
+| :--- | :--- | :--- | :--- |
+| **`invoice_id`** | UUID | Links to the invoice | Groups jobs by invoice |
+| **`stage`** | TEXT | e.g. "Image Extraction", "Data Validation" | The text labels in the animated Processing modal |
+| **`status`** | TEXT | RUNNING, PASSED, FAILED | Changes the checkmarks/spinners in the UI |
+
+---
+
+## 5. `users`
+Handles application login and Role-Based Access Control (RBAC).
+
+| Database Field | Type | What it is | Where it shows it the UI |
+| :--- | :--- | :--- | :--- |
+| **`email`** | TEXT | Login Email | Login Screen |
+| **`role`** | TEXT | "admin", "approver", "operator", "viewer" | Determines if buttons like "Approve & Post" are visible or hidden in the UI |
+
+---
+
+## How it flows:
+1. User drops a file -> UI calls `invoices:upload` (IPC)
+2. Backend creates a row in `invoices` table and `processing_jobs` table.
+3. Once OCR is complete, backend updates the `invoices` row (setting `amount`, `vendor_name`, `status`, etc.).
+4. The [InvoiceHub.tsx](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/pages/InvoiceHub.tsx) runs `SELECT * FROM invoices` to re-draw the React component with the new data.
