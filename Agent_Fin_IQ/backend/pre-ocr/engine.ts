@@ -696,7 +696,7 @@ export async function runStage6(jobId: string): Promise<void> {
  */
 export async function runStage7(jobId: string): Promise<DecisionOutput> {
     const job = loadJob(jobId);
-    if (!job) return { route: 'FAILED', confidence: 0, reasons: ['Job not found'] };
+    if (!job) return { route: 'FAILED', reasons: ['Job not found'] };
 
     const s7 = job.stages['Decision Engine'];
     s7.status = 'RUNNING';
@@ -711,20 +711,15 @@ export async function runStage7(jobId: string): Promise<DecisionOutput> {
     const blurryRatio = blurryCount / totalPages;
 
     let route: DecisionOutput['route'] = 'OCR_READY';
-    let confidence = 95;
     const reasons: string[] = [];
-
-    // Check for encryption
     if (s2.reasonCodes.includes('ENCRYPTED_PDF')) {
         route = 'MANUAL_REVIEW';
-        confidence = 20;
         reasons.push('Encrypted PDF requires manual handling');
     }
 
     // Check blur ratio
     if (blurryRatio > 0.5) {
         route = 'ENHANCE_REQUIRED';
-        confidence = Math.max(confidence - 30, 40);
         reasons.push(`${blurryCount}/${totalPages} pages are blurry`);
     }
 
@@ -732,7 +727,6 @@ export async function runStage7(jobId: string): Promise<DecisionOutput> {
     for (const stageName of PRE_OCR_STAGES.slice(0, 6)) {
         if (job.stages[stageName].status === 'FAILED') {
             route = 'FAILED';
-            confidence = 0;
             reasons.push(`Stage "${stageName}" failed`);
             break;
         }
@@ -742,13 +736,13 @@ export async function runStage7(jobId: string): Promise<DecisionOutput> {
         reasons.push('All quality checks passed');
     }
 
-    const decision: DecisionOutput = { route, confidence, reasons };
+    const decision: DecisionOutput = { route, reasons };
     job.decisionOutput = decision;
     s7.metrics.decision = decision;
     s7.status = 'PASSED';
     s7.endedAt = now();
     job.status = route === 'FAILED' ? 'failed' : 'completed';
-    addEvent(job, 'Decision Engine', `Decision: ${route} (confidence: ${confidence}%)`, 'INFO');
+    addEvent(job, 'Decision Engine', `Decision: ${route}`, 'INFO');
     saveJob(jobId, job);
 
     return decision;
@@ -783,21 +777,21 @@ export async function runFullPipeline(
     await runStage2(jobId);
     let job = loadJob(jobId)!;
     if (job.status === 'failed') {
-        return { jobId, decision: { route: 'FAILED', confidence: 0, reasons: ['Validation failed'] }, job };
+        return { jobId, decision: { route: 'FAILED', reasons: ['Validation failed'] }, job };
     }
 
     // Stage 3: Image Extraction
     await runStage3(jobId);
     job = loadJob(jobId)!;
     if (job.status === 'failed') {
-        return { jobId, decision: { route: 'FAILED', confidence: 0, reasons: ['Image extraction failed'] }, job };
+        return { jobId, decision: { route: 'FAILED', reasons: ['Image extraction failed'] }, job };
     }
 
     // Stage 4: Quality Assessment
     await runStage4(jobId);
     job = loadJob(jobId)!;
     if (job.status === 'failed') {
-        return { jobId, decision: { route: 'FAILED', confidence: 0, reasons: ['Quality check failed'] }, job };
+        return { jobId, decision: { route: 'FAILED', reasons: ['Quality check failed'] }, job };
     }
 
     // Stage 5: Enhancement

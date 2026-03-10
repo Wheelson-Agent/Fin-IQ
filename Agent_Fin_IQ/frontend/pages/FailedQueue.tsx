@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router';
 import { Search, ChevronUp, ChevronDown, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SectionHeader } from '../components/at/SectionHeader';
-import { ConfidenceBar } from '../components/at/ConfidenceBar';
+
 import { getInvoices } from '../lib/api';
 import type { Invoice } from '../lib/types';
 
 const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
-type SortField = 'vendor' | 'date' | 'amount' | 'confidence' | 'failureCategory' | null;
+type SortField = 'vendor' | 'date' | 'amount' | 'failureCategory' | null;
 type SortDir = 'asc' | 'desc';
 
 export default function FailedQueue() {
@@ -56,6 +56,7 @@ export default function FailedQueue() {
         if (!sortField) return 0;
         let va: any = (a as any)[sortField], vb: any = (b as any)[sortField];
         if (sortField === 'date') { va = new Date(a.date || 0).getTime(); vb = new Date(b.date || 0).getTime(); }
+        if (sortField === 'amount') { va = a.total || 0; vb = b.total || 0; }
         return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
     });
 
@@ -131,6 +132,9 @@ export default function FailedQueue() {
                                     </th>
                                     <th className={thClass} onClick={() => handleSort('failureCategory')}>
                                         <div className="flex items-center gap-1 hover:text-white/80">Failure Category <SortIcon field="failureCategory" /></div>
+                                    </th>
+                                    <th className={thClass} onClick={() => handleSort('amount')}>
+                                        <div className="flex items-center gap-1 hover:text-white/80">Amount <SortIcon field="amount" /></div>
                                     </th>
                                     <th className={thClass}>Retries</th>
                                     <th className={`${thClass} !border-r-0`} />

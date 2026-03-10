@@ -375,7 +375,6 @@ export function registerIpcHandlers() {
             await queries.updateInvoiceWithOCR(invoiceId, {
                 status: 'Pending Approval',
                 ocr_raw_data: ocrResult.documentai_document,
-                confidence: 90 // Placeholder or extracted from python script 
             });
 
             return { success: true, decision: result.decision };

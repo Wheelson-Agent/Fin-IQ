@@ -1,25 +1,23 @@
 import React from 'react';
 import { AT } from '../../lib/tokens';
 
-type StatusType = 'Auto-Posted' | 'Pending Approval' | 'Failed' | 'Passed' | 'Manual Review' | 'Low Confidence' | 'Processing';
-type FailureType = 'GST Validation Error' | 'Duplicate Document' | 'Vendor Not Found' | 'Amount Mismatch' | 'Low Confidence';
+type StatusType = 'Auto-Posted' | 'Pending Approval' | 'Failed' | 'Passed' | 'Manual Review' | 'Processing';
+type FailureType = 'GST Validation Error' | 'Duplicate Document' | 'Vendor Not Found' | 'Amount Mismatch';
 
 const statusConfig: Record<StatusType, { bg: string; color: string; label: string }> = {
   'Auto-Posted': { bg: AT.successBg, color: AT.success, label: 'Auto-Posted' },
   'Pending Approval': { bg: AT.warningBg, color: AT.warning, label: 'Pending Approval' },
   'Failed': { bg: AT.errorBg, color: AT.error, label: 'Failed' },
   'Passed': { bg: AT.successBg, color: AT.success, label: 'Passed' },
-  'Manual Review': { bg: AT.blueBg, color: AT.blue, label: 'Manual Review' },
-  'Low Confidence': { bg: AT.orangeBg, color: AT.orangeText, label: 'Low Confidence' },
-  'Processing': { bg: '#F0F4FF', color: AT.midBlue, label: 'Processing' },
+  'Processing': { bg: '#F8FAFC', color: AT.textMid, label: 'Processing' },
+  'Manual Review': { bg: AT.orangeBg, color: AT.orangeText, label: 'Manual Review' }
 };
 
 const failureConfig: Record<FailureType, { bg: string; color: string }> = {
   'GST Validation Error': { bg: AT.errorBg, color: AT.error },
-  'Duplicate Document': { bg: AT.orangeBg, color: AT.orangeText },
-  'Vendor Not Found': { bg: AT.purpleBg, color: AT.purpleText },
-  'Amount Mismatch': { bg: AT.warningBg, color: AT.warning },
-  'Low Confidence': { bg: '#FAFAFA', color: AT.textMid },
+  'Amount Mismatch': { bg: '#FEE2E2', color: '#DC2626' },
+  'Duplicate Document': { bg: '#FFF7ED', color: '#EA580C' },
+  'Vendor Not Found': { bg: '#FEF2F2', color: '#EF4444' }
 };
 
 interface StatusBadgeProps {
@@ -55,7 +53,8 @@ interface FailureBadgeProps {
 }
 
 export function FailureBadge({ type }: FailureBadgeProps) {
-  const config = failureConfig[type] || failureConfig['Low Confidence'];
+  const fallbackConfig = { bg: '#FEE2E2', color: '#DC2626', label: type };
+  const config = failureConfig[type] || fallbackConfig;
   return (
     <span
       style={{

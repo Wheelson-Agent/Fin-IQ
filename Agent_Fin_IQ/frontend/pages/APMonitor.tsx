@@ -4,7 +4,7 @@ import { motion, Variants, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router';
 import { SectionHeader } from '../components/at/SectionHeader';
 import { StatusBadge } from '../components/at/StatusBadge';
-import { ConfidenceBar } from '../components/at/ConfidenceBar';
+
 import { Dropdown } from '../components/at/Dropdown';
 import { getInvoices, getVendors } from '../lib/api';
 import type { Invoice, Vendor } from '../lib/types';
@@ -442,15 +442,11 @@ export default function APMonitor() {
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-[24px] scrollbar-thin scrollbar-thumb-[#D0D9E8] scrollbar-track-transparent">
-                    <div className="flex items-center gap-[12px] mb-[20px]">
-                      <StatusBadge status={previewInvoice.status as any} />
-                      {previewInvoice.confidence >= 90 && (
-                        <span className="bg-[#D1FAE5] text-[#059669] text-[10px] font-bold px-[10px] py-[4px] rounded-full flex items-center gap-1 border border-[#A7F3D0]">
-                          ✦ ENHANCEMENTS APPLIED
-                        </span>
-                      )}
+                    <div className="flex flex-col gap-1 items-end mt-1">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[12px] font-bold text-slate-700">{previewInvoice.status}</span>
+                      </div>
                     </div>
-
                     <div className="bg-[#E2E8F0] border border-[#CBD5E1] rounded-[12px] h-[280px] flex flex-col items-center justify-center mb-[24px] relative overflow-hidden group shadow-inner">
                       <div className="w-[85%] bg-white rounded-[6px] p-[20px] shadow-[0_4px_16px_rgba(0,0,0,0.08)] transform group-hover:scale-[1.02] transition-transform duration-300">
                         <div className="flex justify-between mb-[16px]">
