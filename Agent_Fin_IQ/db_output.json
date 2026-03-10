@@ -1,0 +1,37 @@
+[
+  {
+    "id": "ffdf94fd-34f9-42ba-b7e4-64af3479eece",
+    "status": "Processing",
+    "pre_ocr_status": null,
+    "failure_reason": null,
+    "file_path": "C:\\Users\\Admin\\Desktop\\agent_tally\\agent_ai_tally\\data\\batches\\jothi_20260303_1718\\source\\12237-24G02674_page-0004.jpg"
+  },
+  {
+    "id": "f77bdb38-7fc6-473c-9e69-af9d2741ff37",
+    "status": "Processing",
+    "pre_ocr_status": null,
+    "failure_reason": null,
+    "file_path": "C:\\Users\\Admin\\Desktop\\agent_tally\\agent_ai_tally\\data\\batches\\jothi_20260303_1448\\source\\12237-24G02674_page-0004.jpg"
+  },
+  {
+    "id": "eac19ec8-21af-4674-b0b8-ea4bf5a696b9",
+    "status": "Processing",
+    "pre_ocr_status": null,
+    "failure_reason": null,
+    "file_path": null
+  },
+  {
+    "id": "daacc619-8244-4bed-b9c3-13d58b9dcd1c",
+    "status": "Failed",
+    "pre_ocr_status": "FAILED",
+    "failure_reason": "File not found on disk",
+    "file_path": "C:\\Users\\Admin\\Desktop\\agent_tally\\agent_ai_tally\\data\\batches\\jothi_20260303_1740\\source\\12237-24G02674_page-0004.jpg"
+  },
+  {
+    "id": "c3fe825b-12ec-43e0-90d2-886ff50caab0",
+    "status": "Processing",
+    "pre_ocr_status": null,
+    "failure_reason": null,
+    "file_path": "C:\\Users\\Admin\\Desktop\\agent_tally\\agent_ai_tally\\data\\batches\\jothi_20260303_1702\\source\\12237-24G02674_page-0004.jpg"
+  }
+]

@@ -1,0 +1,71 @@
+﻿[dotenv@17.3.1] injecting env (13) from config\.env -- tip: ΓÜÖ∩╕Å  override existing env vars with { override: true }
+[DB] Query executed in 600ms ΓÇö SELECT column_name, data_type FROM information_schema.columns WHERE table_name =...
+--- INVOICES TABLE COLUMNS ---
+id: uuid
+file_name: text
+file_path: text
+batch_id: text
+vendor_id: uuid
+vendor_name: text
+invoice_no: text
+date: date
+due_date: date
+amount: numeric
+gst: numeric
+total: numeric
+po_number: text
+gl_account: text
+status: text
+confidence: integer
+processing_time: text
+validation_time: text
+approval_delay_time: text
+failure_reason: text
+failure_category: text
+retry_count: integer
+is_mapped: boolean
+is_high_amount: boolean
+pre_ocr_status: text
+pre_ocr_score: integer
+ocr_raw_data: jsonb
+n8n_validation_status: text
+is_posted_to_tally: boolean
+created_at: timestamp with time zone
+updated_at: timestamp with time zone
+file_location: text
+n8n_val_json_data: character varying
+tally_id: text
+doc_type: text
+posted_to_tally_json: jsonb
+all_data_invoice: jsonb
+uploader_name: text
+vendor_gst: character varying
+[DB] Query executed in 59ms ΓÇö SELECT column_name, data_type FROM information_schema.columns WHERE table_name =...
+
+--- VENDORS TABLE COLUMNS ---
+id: uuid
+name: text
+gstin: text
+under_group: text
+state: text
+total_due: numeric
+invoice_count: integer
+oldest_due: date
+aging: text
+status: text
+created_at: timestamp with time zone
+address: text
+tds_nature: text
+[DB] Query executed in 56ms ΓÇö SELECT column_name, data_type FROM information_schema.columns WHERE table_name =...
+
+--- INVOICE_ITEMS TABLE COLUMNS ---
+id: uuid
+invoice_id: uuid
+description: text
+ledger: text
+tax: text
+quantity: numeric
+rate: numeric
+discount: numeric
+amount: numeric
+created_at: timestamp with time zone

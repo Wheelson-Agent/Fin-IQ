@@ -1,0 +1,9 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+body {
+  font-family: 'Sora', sans-serif;
+  overflow: hidden;
+  /* App Shell behavior */
+}
