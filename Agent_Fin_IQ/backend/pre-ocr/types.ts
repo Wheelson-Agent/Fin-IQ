@@ -67,7 +67,6 @@ export interface JobEvent {
  */
 export interface DecisionOutput {
     route: 'OCR_READY' | 'ENHANCE_REQUIRED' | 'MANUAL_REVIEW' | 'FAILED';
-    confidence: number;
     reasons: string[];
 }
 

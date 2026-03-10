@@ -5,7 +5,7 @@ import {
   AlertCircle, CheckCircle, ChevronDown, Calendar, Edit2, Plus, X, UserPlus, Database
 } from 'lucide-react';
 import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
-import { ConfidenceBar } from '../components/at/ConfidenceBar';
+
 import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany } from '../lib/api';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
@@ -317,7 +317,7 @@ export default function DetailView() {
           </div>
         )}
         <StatusBadge status={invoice.status as any} />
-        {invoice.confidence >= 90 && <EnhancementBadge />}
+        <EnhancementBadge />
       </div>
 
       {/* Main Content */}
@@ -532,7 +532,7 @@ export default function DetailView() {
                   </div>
                 )}
 
-                {(isVendorMapped && !invoice.is_high_amount && (invoice.confidence < 90 || isFailed)) && (
+                {(isVendorMapped && !invoice.is_high_amount && isFailed) && (
                   <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-[10px] p-[16px_20px] flex items-center justify-between shadow-sm">
                     <div className="flex items-center gap-[12px]">
                       <AlertCircle size={20} className="text-[#D97706]" />

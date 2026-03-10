@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS invoices (
     po_number             TEXT,                               -- Purchase order reference
     gl_account            TEXT,                               -- General ledger account
     status                TEXT DEFAULT 'Processing',          -- Processing | Pending Approval | Auto-Posted | Failed | Manual Review
-    confidence            INT DEFAULT 0,                      -- AI trust score (0–100)
     processing_time       TEXT,                               -- Time taken to process
     validation_time       TEXT,                               -- Time spent in validation
     approval_delay_time  TEXT,                               -- Time spent waiting for approval

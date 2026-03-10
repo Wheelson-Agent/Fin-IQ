@@ -10,7 +10,7 @@ import { SectionHeader } from '../components/at/SectionHeader';
 import { Dropdown } from '../components/at/Dropdown';
 import { DateRangeFilter } from '../components/at/DateRangeFilter';
 import { StatusBadge, FailureBadge } from '../components/at/StatusBadge';
-import { ConfidenceBar } from '../components/at/ConfidenceBar';
+
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { getInvoices } from '../lib/api';
 import type { Invoice } from '../lib/types';
@@ -70,9 +70,7 @@ export default function InvoiceHub() {
   const autoPostedCount = invoices.filter(i => i.status === 'Auto-Posted').length;
   const pendingCount = invoices.filter(i => i.status === 'Pending Approval').length;
   const failedCount = invoices.filter(i => i.status === 'Failed').length;
-  const avgConfidence = invoices.length > 0
-    ? (invoices.reduce((acc, inv) => acc + inv.confidence, 0) / invoices.length).toFixed(0) + '%'
-    : '0%';
+  const avgConfidence = 'N/A';
   const batchCount = new Set(invoices.map(i => i.batch_id).filter(Boolean)).size;
   const todayStr = new Date().toISOString().split('T')[0];
   const todayUploads = invoices.filter(i => (i.date || (i.created_at ? new Date(i.created_at).toISOString().split('T')[0] : '')) === todayStr).length;
@@ -506,6 +504,7 @@ export default function InvoiceHub() {
                             <div className={`w-[36px] h-[36px] rounded-[10px] flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-white shadow-sm' : 'bg-[#F0F4FA] group-hover:bg-white'}`}>
                               <FileText size={18} className="text-[#1E6FD9]" />
                             </div>
+                            {/* Extracted Data Group */}
                             <div>
                               <div className="text-[13.5px] font-black text-[#1A2640] mb-[4px]">{inv.file_name}</div>
                               <div className="flex items-center gap-[5px] flex-wrap">
@@ -664,14 +663,7 @@ export default function InvoiceHub() {
               {/* Panel Content */}
               <div className="flex-1 overflow-y-auto p-[24px] scrollbar-thin scrollbar-thumb-[#D0D9E8] scrollbar-track-transparent">
                 {/* Status + Enhancement */}
-                <div className="flex items-center gap-[12px] mb-[20px]">
-                  <StatusBadge status={previewInvoice.status as any} />
-                  {previewInvoice.confidence >= 90 && (
-                    <span className="bg-[#D1FAE5] text-[#059669] text-[10px] font-bold px-[10px] py-[4px] rounded-full flex items-center gap-1 border border-[#A7F3D0]">
-                      ✦ ENHANCEMENTS APPLIED
-                    </span>
-                  )}
-                </div>
+                <div className="flex items-center gap-3"></div>
 
                 {/* Document Preview */}
                 <div className="bg-[#E2E8F0] border border-[#CBD5E1] rounded-[12px] h-[340px] flex flex-col items-center justify-center mb-[24px] relative overflow-hidden group shadow-inner bg-slate-100">
@@ -851,7 +843,7 @@ export default function InvoiceHub() {
                         </button>
                       </>
                     ) : s === 'Manual Review' ? (
-                      <div className="flex-1 flex flex-col gap-[10px]">
+                      <div className="flex flex-col gap-1 items-end pt-[2px]">
                         <div className="flex items-start gap-[10px] bg-[#FFFBEB] border border-[#F59E0B]/40 rounded-[10px] p-[12px_14px]">
                           <span className="text-[#D97706] text-[18px] shrink-0">⚠</span>
                           <div>

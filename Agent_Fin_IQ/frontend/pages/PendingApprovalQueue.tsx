@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router';
 import { Search, ChevronUp, ChevronDown, FileText, CheckCircle, Clock, CheckSquare, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SectionHeader } from '../components/at/SectionHeader';
-import { ConfidenceBar } from '../components/at/ConfidenceBar';
+
 import { getInvoices } from '../lib/api';
 import type { Invoice } from '../lib/types';
 
 const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
-type SortField = 'vendor' | 'date' | 'amount' | 'confidence' | 'approvalDelayTime' | null;
+type SortField = 'vendor' | 'date' | 'amount' | 'approvalDelayTime' | null;
 type SortDir = 'asc' | 'desc';
 
 export default function PendingApprovalQueue() {
