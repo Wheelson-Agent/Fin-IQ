@@ -1,0 +1,2844 @@
+
+--- WEBHOOK SENT 2026-03-10T11:57:50.234Z ---
+Payload: {
+  "file_name": "12658-24G02846_page-0005.jpg",
+  "processed_at": "20260310_172749",
+  "ocr_text": "Tax Invoice\ne-Invoice\nIRN\n: e52104e87f8be006e00e4ef8f5011e615d8de78f64e495d4-\nca39b3e127d6e7f2\nAck No.\n: 152520521391475\nAck Date\n: 24-Jan-25\nM/s.Jaga India Sourcing Company\n277/1 Anna Private Industrial Estate\nVilankurichi Road\nCoimbatore\nGSTIN/UIN: 33AFDPJ1786L1ZA\nState Name: Tamil Nadu, Code: 33\nE-Mail: rjagasourcing1@gmail.com\nBuyer (Bill to)\nEppinger Tooling Asia (P) LTd\nSF No. 345/2A-2B, Kondampatty Village,\nKinathukadavu, Pollachi Taluk, Coimbatore\nInvoice No.\ne-Way Bill No.\n521763038029\nDated\n24-Jan-25\nDelivery Note\nJI/534-L\nReference No. & Date.\nBuyer's Order No.\nMode/Terms of Payment\nOther References\nDated\nDelivery Note Date\nDispatch Doc No.\nGSTIN/UIN\n: 33AABCE4760D1Z3\nDispatched through\nState Name\n: Tamil Nadu, Code: 33\nTerms of Delivery\nSI\nNo.\nDescription of Goods\nHSN/SAC\nQuantity\nRate\nper\nAmount\nD90100817A HS Shaft(L)\nOrder No: 816963\nWo No: 11519\n✔\n84669310\n20 nos\n240.00\nnos\n4,800.00\n2D90170447 Housing Input (L)\nOrder No: 816461\nWo No: 11171\n8 D90140827 Flange Motor (L)\nOrder No:816576\nWo No: 11606\n84669310\n84669310\n16 nos\n15 nos\n690.00\nnos\n938.00\nnos\n11,040.00\n14,070.00\n4 D90140469 Flange Motor (L)\nOrder No: 816454\nWo No: 11438\nCGST\nSGST\nRound Off\n84669310\n90 nos\nETA\nDATE\n848.00\nnos\n1,06,230.00\n6,373.80\nMIN No. 138621-624\n6,373.80\n0.40\n25/1/25\n76,320.00\nTotal\n141 nos\n1,18,978.00\nDestination\nAmount Chargeable (in words)\nΕ. & Ο.Ε\nRupees One Lakh Eighteen Thousand Nine Hundred Seventy Eight Only\nHSN/SAC\nTaxable\nValue\nRate\nCGST\nAmount\nRate\nSGST/UTGST\nAmount\nTotal\nTax Amount\n84669310\n1,06,230.00\n6%\n6,373.80\n6%\n6,373.80\n12,747.60\nTotal 1,06,230.00\n6,373.80\n6,373.80\n12,747.60\nTax Amount (in words): Rupees Twelve Thousand Seven Hundred Forty Seven and Sixty paise Only\nCompany's PAN\nDeclaration\n: AFDPJ1786L\nWe declare that this invoice shows the actual price of the\ngoods described and that all particulars are true and correct.\nCompany's Bank Details\nA/c Holder's Name\nBank Name\nA/c No.\nBranch & IFS Code\n: M/s.Jaga India Sourcing Company\n: Indian Bank C/A.No.417157494\n: 417157494\n: GANAPATHY & IDIB000G059\nfor M/s.Jaga India Sourcing Company\nAuthorised Signatory\nThis is a Computer Generated Invoice\n",
+  "documentai_document": {
+    "entities": [
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "105",
+              "end_index": "120"
+            }
+          ]
+        },
+        "type_": "Ack_No",
+        "mention_text": "152520521391475",
+        "confidence": 0.99992764,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.16048387,
+                    "y": 0.14253135
+                  },
+                  {
+                    "x": 0.28870967,
+                    "y": 0.14253135
+                  },
+                  {
+                    "x": 0.28870967,
+                    "y": 0.149943
+                  },
+                  {
+                    "x": 0.16048387,
+                    "y": 0.149943
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "1"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "349",
+              "end_index": "378"
+            }
+          ]
+        },
+        "type_": "Buyer_name",
+        "mention_text": "Eppinger Tooling Asia (P) LTd",
+        "confidence": 0.99982786,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.063709676,
+                    "y": 0.29304448
+                  },
+                  {
+                    "x": 0.30483872,
+                    "y": 0.29304448
+                  },
+                  {
+                    "x": 0.30483872,
+                    "y": 0.3050171
+                  },
+                  {
+                    "x": 0.063709676,
+                    "y": 0.3050171
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "3"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "487",
+              "end_index": "499"
+            }
+          ]
+        },
+        "type_": "E_Way_Bill_No",
+        "mention_text": "521763038029",
+        "confidence": 0.9998802,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.59193546,
+                    "y": 0.1995439
+                  },
+                  {
+                    "x": 0.6782258,
+                    "y": 0.1995439
+                  },
+                  {
+                    "x": 0.6782258,
+                    "y": 0.20923603
+                  },
+                  {
+                    "x": 0.59193546,
+                    "y": 0.20923603
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "5"
+      },
+      {
+        "type_": "Line_item",
+        "confidence": 1,
+        "id": "6",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "875",
+                  "end_index": "883"
+                }
+              ]
+            },
+            "type_": "HSN_SAC_code",
+            "mention_text": "84669310",
+            "confidence": 0.9999579,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.47903225,
+                        "y": 0.48346636
+                      },
+                      {
+                        "x": 0.5516129,
+                        "y": 0.48346636
+                      },
+                      {
+                        "x": 0.5516129,
+                        "y": 0.490878
+                      },
+                      {
+                        "x": 0.47903225,
+                        "y": 0.490878
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "7"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "820",
+                  "end_index": "830"
+                }
+              ]
+            },
+            "type_": "Product_Code_invoice",
+            "mention_text": "D90100817A",
+            "confidence": 0.9906482,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.088709675,
+                        "y": 0.48232612
+                      },
+                      {
+                        "x": 0.18870968,
+                        "y": 0.48232612
+                      },
+                      {
+                        "x": 0.18870968,
+                        "y": 0.49828961
+                      },
+                      {
+                        "x": 0.088709675,
+                        "y": 0.49828961
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "8"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "898",
+                  "end_index": "901"
+                }
+              ]
+            },
+            "type_": "UNIT",
+            "mention_text": "nos",
+            "confidence": 0.99994123,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.7403226,
+                        "y": 0.48403648
+                      },
+                      {
+                        "x": 0.76370966,
+                        "y": 0.48403648
+                      },
+                      {
+                        "x": 0.76370966,
+                        "y": 0.4914481
+                      },
+                      {
+                        "x": 0.7403226,
+                        "y": 0.4914481
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "9"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "902",
+                  "end_index": "910"
+                }
+              ]
+            },
+            "type_": "amount",
+            "mention_text": "4,800.00",
+            "confidence": 0.99998236,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.8169355,
+                        "y": 0.48517674
+                      },
+                      {
+                        "x": 0.88870966,
+                        "y": 0.48517674
+                      },
+                      {
+                        "x": 0.88870966,
+                        "y": 0.49429876
+                      },
+                      {
+                        "x": 0.8169355,
+                        "y": 0.49429876
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "10"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "831",
+                  "end_index": "842"
+                }
+              ]
+            },
+            "type_": "description",
+            "mention_text": "HS Shaft(L)",
+            "confidence": 0.91943145,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.19193548,
+                        "y": 0.48232612
+                      },
+                      {
+                        "x": 0.28225806,
+                        "y": 0.48232612
+                      },
+                      {
+                        "x": 0.28225806,
+                        "y": 0.49828961
+                      },
+                      {
+                        "x": 0.19193548,
+                        "y": 0.49828961
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "11"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "853",
+                  "end_index": "859"
+                }
+              ]
+            },
+            "type_": "order_number",
+            "mention_text": "816963",
+            "confidence": 0.999677,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.18387097,
+                        "y": 0.4960091
+                      },
+                      {
+                        "x": 0.23467742,
+                        "y": 0.4960091
+                      },
+                      {
+                        "x": 0.23467742,
+                        "y": 0.50285065
+                      },
+                      {
+                        "x": 0.18387097,
+                        "y": 0.50285065
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "12"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "884",
+                  "end_index": "886"
+                }
+              ]
+            },
+            "type_": "quantity",
+            "mention_text": "20",
+            "confidence": 0.99688715,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.5862903,
+                        "y": 0.48403648
+                      },
+                      {
+                        "x": 0.608871,
+                        "y": 0.48403648
+                      },
+                      {
+                        "x": 0.608871,
+                        "y": 0.49258837
+                      },
+                      {
+                        "x": 0.5862903,
+                        "y": 0.49258837
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "13"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "891",
+                  "end_index": "897"
+                }
+              ]
+            },
+            "type_": "unit_price",
+            "mention_text": "240.00",
+            "confidence": 0.9999896,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.67741936,
+                        "y": 0.48403648
+                      },
+                      {
+                        "x": 0.7266129,
+                        "y": 0.48403648
+                      },
+                      {
+                        "x": 0.7266129,
+                        "y": 0.4914481
+                      },
+                      {
+                        "x": 0.67741936,
+                        "y": 0.4914481
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "14"
+          }
+        ]
+      },
+      {
+        "type_": "Line_item",
+        "confidence": 1,
+        "id": "15",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1028",
+                  "end_index": "1036"
+                }
+              ]
+            },
+            "type_": "HSN_SAC_code",
+            "mention_text": "84669310",
+            "confidence": 0.9999851,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.47903225,
+                        "y": 0.52166474
+                      },
+                      {
+                        "x": 0.55080646,
+                        "y": 0.52166474
+                      },
+                      {
+                        "x": 0.55080646,
+                        "y": 0.5296465
+                      },
+                      {
+                        "x": 0.47903225,
+                        "y": 0.5296465
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "16"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "912",
+                  "end_index": "921"
+                }
+              ]
+            },
+            "type_": "Product_Code_invoice",
+            "mention_text": "D90170447",
+            "confidence": 0.99283355,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.061290324,
+                        "y": 0.5159635
+                      },
+                      {
+                        "x": 0.1766129,
+                        "y": 0.5159635
+                      },
+                      {
+                        "x": 0.1766129,
+                        "y": 0.5330673
+                      },
+                      {
+                        "x": 0.061290324,
+                        "y": 0.5330673
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "17"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1067",
+                  "end_index": "1070"
+                }
+              ]
+            },
+            "type_": "UNIT",
+            "mention_text": "nos",
+            "confidence": 0.9999958,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.73951614,
+                        "y": 0.5222349
+                      },
+                      {
+                        "x": 0.76370966,
+                        "y": 0.5222349
+                      },
+                      {
+                        "x": 0.76370966,
+                        "y": 0.53021663
+                      },
+                      {
+                        "x": 0.73951614,
+                        "y": 0.53021663
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "18"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1082",
+                  "end_index": "1091"
+                }
+              ]
+            },
+            "type_": "amount",
+            "mention_text": "11,040.00",
+            "confidence": 0.9999862,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.808871,
+                        "y": 0.52280504
+                      },
+                      {
+                        "x": 0.88870966,
+                        "y": 0.52280504
+                      },
+                      {
+                        "x": 0.88870966,
+                        "y": 0.5330673
+                      },
+                      {
+                        "x": 0.808871,
+                        "y": 0.5330673
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "19"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "922",
+                  "end_index": "939"
+                }
+              ]
+            },
+            "type_": "description",
+            "mention_text": "Housing Input (L)",
+            "confidence": 0.99985445,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.18145162,
+                        "y": 0.5159635
+                      },
+                      {
+                        "x": 0.32983872,
+                        "y": 0.5159635
+                      },
+                      {
+                        "x": 0.32983872,
+                        "y": 0.5330673
+                      },
+                      {
+                        "x": 0.18145162,
+                        "y": 0.5330673
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "20"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "950",
+                  "end_index": "956"
+                }
+              ]
+            },
+            "type_": "order_number",
+            "mention_text": "816461",
+            "confidence": 0.9999684,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.18306452,
+                        "y": 0.5342075
+                      },
+                      {
+                        "x": 0.23467742,
+                        "y": 0.5342075
+                      },
+                      {
+                        "x": 0.23467742,
+                        "y": 0.5427594
+                      },
+                      {
+                        "x": 0.18306452,
+                        "y": 0.5427594
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "21"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1046",
+                  "end_index": "1048"
+                }
+              ]
+            },
+            "type_": "quantity",
+            "mention_text": "16",
+            "confidence": 0.99998474,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.5862903,
+                        "y": 0.52166474
+                      },
+                      {
+                        "x": 0.6153226,
+                        "y": 0.52166474
+                      },
+                      {
+                        "x": 0.6153226,
+                        "y": 0.53078675
+                      },
+                      {
+                        "x": 0.5862903,
+                        "y": 0.53078675
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "22"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1060",
+                  "end_index": "1066"
+                }
+              ]
+            },
+            "type_": "unit_price",
+            "mention_text": "690.00",
+            "confidence": 0.9999938,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.6782258,
+                        "y": 0.5222349
+                      },
+                      {
+                        "x": 0.7274194,
+                        "y": 0.5222349
+                      },
+                      {
+                        "x": 0.7274194,
+                        "y": 0.53021663
+                      },
+                      {
+                        "x": 0.6782258,
+                        "y": 0.53021663
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "23"
+          }
+        ]
+      },
+      {
+        "type_": "Line_item",
+        "confidence": 1,
+        "id": "24",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1037",
+                  "end_index": "1045"
+                }
+              ]
+            },
+            "type_": "HSN_SAC_code",
+            "mention_text": "84669310",
+            "confidence": 0.9999944,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.4782258,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.55080646,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.55080646,
+                        "y": 0.56841505
+                      },
+                      {
+                        "x": 0.4782258,
+                        "y": 0.56841505
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "25"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "972",
+                  "end_index": "981"
+                }
+              ]
+            },
+            "type_": "Product_Code_invoice",
+            "mention_text": "D90140827",
+            "confidence": 0.9987913,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.089516126,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.1766129,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.1766129,
+                        "y": 0.5746864
+                      },
+                      {
+                        "x": 0.089516126,
+                        "y": 0.5746864
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "26"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1078",
+                  "end_index": "1081"
+                }
+              ]
+            },
+            "type_": "UNIT",
+            "mention_text": "nos",
+            "confidence": 0.9999964,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.7387097,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.7629032,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.7629032,
+                        "y": 0.56898516
+                      },
+                      {
+                        "x": 0.7387097,
+                        "y": 0.56898516
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "27"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1092",
+                  "end_index": "1101"
+                }
+              ]
+            },
+            "type_": "amount",
+            "mention_text": "14,070.00",
+            "confidence": 0.9999932,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.808871,
+                        "y": 0.5621437
+                      },
+                      {
+                        "x": 0.8879032,
+                        "y": 0.5621437
+                      },
+                      {
+                        "x": 0.8879032,
+                        "y": 0.57240593
+                      },
+                      {
+                        "x": 0.808871,
+                        "y": 0.57240593
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "28"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "982",
+                  "end_index": "998"
+                }
+              ]
+            },
+            "type_": "description",
+            "mention_text": "Flange Motor (L)",
+            "confidence": 0.99990404,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.18145162,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.32096773,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.32096773,
+                        "y": 0.5746864
+                      },
+                      {
+                        "x": 0.18145162,
+                        "y": 0.5746864
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "29"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1008",
+                  "end_index": "1014"
+                }
+              ]
+            },
+            "type_": "order_number",
+            "mention_text": "816576",
+            "confidence": 0.99993813,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.1782258,
+                        "y": 0.5735462
+                      },
+                      {
+                        "x": 0.23225807,
+                        "y": 0.5735462
+                      },
+                      {
+                        "x": 0.23225807,
+                        "y": 0.58152795
+                      },
+                      {
+                        "x": 0.1782258,
+                        "y": 0.58152795
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "30"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1053",
+                  "end_index": "1055"
+                }
+              ]
+            },
+            "type_": "quantity",
+            "mention_text": "15",
+            "confidence": 0.99999166,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.5862903,
+                        "y": 0.56100345
+                      },
+                      {
+                        "x": 0.61129034,
+                        "y": 0.56100345
+                      },
+                      {
+                        "x": 0.61129034,
+                        "y": 0.5701254
+                      },
+                      {
+                        "x": 0.5862903,
+                        "y": 0.5701254
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "31"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1071",
+                  "end_index": "1077"
+                }
+              ]
+            },
+            "type_": "unit_price",
+            "mention_text": "938.00",
+            "confidence": 0.99999225,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.67741936,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.7266129,
+                        "y": 0.56043327
+                      },
+                      {
+                        "x": 0.7266129,
+                        "y": 0.5695553
+                      },
+                      {
+                        "x": 0.67741936,
+                        "y": 0.5695553
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "32"
+          }
+        ]
+      },
+      {
+        "type_": "Line_item",
+        "confidence": 1,
+        "id": "33",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1181",
+                  "end_index": "1189"
+                }
+              ]
+            },
+            "type_": "HSN_SAC_code",
+            "mention_text": "84669310",
+            "confidence": 0.9999895,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.4782258,
+                        "y": 0.599772
+                      },
+                      {
+                        "x": 0.5483871,
+                        "y": 0.599772
+                      },
+                      {
+                        "x": 0.5483871,
+                        "y": 0.6071836
+                      },
+                      {
+                        "x": 0.4782258,
+                        "y": 0.6071836
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "34"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1104",
+                  "end_index": "1113"
+                }
+              ]
+            },
+            "type_": "Product_Code_invoice",
+            "mention_text": "D90140469",
+            "confidence": 0.9999019,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.08548387,
+                        "y": 0.5986317
+                      },
+                      {
+                        "x": 0.175,
+                        "y": 0.5986317
+                      },
+                      {
+                        "x": 0.175,
+                        "y": 0.61060435
+                      },
+                      {
+                        "x": 0.08548387,
+                        "y": 0.61060435
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "35"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1213",
+                  "end_index": "1216"
+                }
+              ]
+            },
+            "type_": "UNIT",
+            "mention_text": "nos",
+            "confidence": 0.99999523,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.73790324,
+                        "y": 0.599772
+                      },
+                      {
+                        "x": 0.76209676,
+                        "y": 0.599772
+                      },
+                      {
+                        "x": 0.76209676,
+                        "y": 0.6077537
+                      },
+                      {
+                        "x": 0.73790324,
+                        "y": 0.6077537
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "36"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1279",
+                  "end_index": "1288"
+                }
+              ]
+            },
+            "type_": "amount",
+            "mention_text": "76,320.00",
+            "confidence": 0.9999809,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.8080645,
+                        "y": 0.6009122
+                      },
+                      {
+                        "x": 0.88709676,
+                        "y": 0.6009122
+                      },
+                      {
+                        "x": 0.88709676,
+                        "y": 0.61060435
+                      },
+                      {
+                        "x": 0.8080645,
+                        "y": 0.61060435
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "37"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1114",
+                  "end_index": "1130"
+                }
+              ]
+            },
+            "type_": "description",
+            "mention_text": "Flange Motor (L)",
+            "confidence": 0.999708,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.18064517,
+                        "y": 0.5986317
+                      },
+                      {
+                        "x": 0.30967742,
+                        "y": 0.5986317
+                      },
+                      {
+                        "x": 0.30967742,
+                        "y": 0.61060435
+                      },
+                      {
+                        "x": 0.18064517,
+                        "y": 0.61060435
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "38"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1141",
+                  "end_index": "1147"
+                }
+              ]
+            },
+            "type_": "order_number",
+            "mention_text": "816454",
+            "confidence": 0.999967,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.18306452,
+                        "y": 0.6128848
+                      },
+                      {
+                        "x": 0.23548387,
+                        "y": 0.6128848
+                      },
+                      {
+                        "x": 0.23548387,
+                        "y": 0.6208666
+                      },
+                      {
+                        "x": 0.18306452,
+                        "y": 0.6208666
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "39"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1190",
+                  "end_index": "1192"
+                }
+              ]
+            },
+            "type_": "quantity",
+            "mention_text": "90",
+            "confidence": 0.99999166,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.5862903,
+                        "y": 0.6003421
+                      },
+                      {
+                        "x": 0.60967743,
+                        "y": 0.6003421
+                      },
+                      {
+                        "x": 0.60967743,
+                        "y": 0.60889393
+                      },
+                      {
+                        "x": 0.5862903,
+                        "y": 0.60889393
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "40"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1206",
+                  "end_index": "1212"
+                }
+              ]
+            },
+            "type_": "unit_price",
+            "mention_text": "848.00",
+            "confidence": 0.99999464,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.6766129,
+                        "y": 0.599772
+                      },
+                      {
+                        "x": 0.7258065,
+                        "y": 0.599772
+                      },
+                      {
+                        "x": 0.7258065,
+                        "y": 0.6083238
+                      },
+                      {
+                        "x": 0.6766129,
+                        "y": 0.6083238
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "41"
+          }
+        ]
+      },
+      {
+        "type_": "Payment_Details",
+        "confidence": 1,
+        "id": "42",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "2033",
+                  "end_index": "2044"
+                }
+              ]
+            },
+            "type_": "IFSC",
+            "mention_text": "IDIB000G059",
+            "confidence": 0.9957532,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.74112904,
+                        "y": 0.9036488
+                      },
+                      {
+                        "x": 0.83064514,
+                        "y": 0.9036488
+                      },
+                      {
+                        "x": 0.83064514,
+                        "y": 0.9127708
+                      },
+                      {
+                        "x": 0.74112904,
+                        "y": 0.9127708
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "43"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "2009",
+                  "end_index": "2018"
+                }
+              ]
+            },
+            "type_": "account_no",
+            "mention_text": "417157494",
+            "confidence": 0.98888373,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.62580645,
+                        "y": 0.8922463
+                      },
+                      {
+                        "x": 0.70403224,
+                        "y": 0.8922463
+                      },
+                      {
+                        "x": 0.70403224,
+                        "y": 0.8996579
+                      },
+                      {
+                        "x": 0.62580645,
+                        "y": 0.8996579
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "44"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1978",
+                  "end_index": "1989"
+                }
+              ]
+            },
+            "type_": "bank_name",
+            "mention_text": "Indian Bank",
+            "confidence": 0.83047646,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.6282258,
+                        "y": 0.8797035
+                      },
+                      {
+                        "x": 0.7129032,
+                        "y": 0.8797035
+                      },
+                      {
+                        "x": 0.7129032,
+                        "y": 0.8882554
+                      },
+                      {
+                        "x": 0.6282258,
+                        "y": 0.8882554
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "45"
+          }
+        ]
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1543",
+              "end_index": "1545"
+            }
+          ]
+        },
+        "type_": "SGST_Percentage",
+        "mention_text": "6%",
+        "confidence": 0.99993014,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.67258066,
+                    "y": 0.8118586
+                  },
+                  {
+                    "x": 0.6951613,
+                    "y": 0.8118586
+                  },
+                  {
+                    "x": 0.6951613,
+                    "y": 0.81927025
+                  },
+                  {
+                    "x": 0.67258066,
+                    "y": 0.81927025
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "46"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "349",
+              "end_index": "378"
+            }
+          ]
+        },
+        "type_": "customer_name",
+        "mention_text": "Eppinger Tooling Asia (P) LTd",
+        "confidence": 0.99982786,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.063709676,
+                    "y": 0.29304448
+                  },
+                  {
+                    "x": 0.30483872,
+                    "y": 0.29304448
+                  },
+                  {
+                    "x": 0.30483872,
+                    "y": 0.3050171
+                  },
+                  {
+                    "x": 0.063709676,
+                    "y": 0.3050171
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "50"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "487",
+              "end_index": "499"
+            }
+          ]
+        },
+        "type_": "eway_bill_number",
+        "mention_text": "521763038029",
+        "confidence": 0.9998802,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.59193546,
+                    "y": 0.1995439
+                  },
+                  {
+                    "x": 0.6782258,
+                    "y": 0.1995439
+                  },
+                  {
+                    "x": 0.6782258,
+                    "y": 0.20923603
+                  },
+                  {
+                    "x": 0.59193546,
+                    "y": 0.20923603
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "51"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "506",
+              "end_index": "515"
+            }
+          ]
+        },
+        "type_": "invoice_date",
+        "mention_text": "24-Jan-25",
+        "confidence": 0.9998821,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.6879032,
+                    "y": 0.1995439
+                  },
+                  {
+                    "x": 0.76532257,
+                    "y": 0.1995439
+                  },
+                  {
+                    "x": 0.76532257,
+                    "y": 0.2086659
+                  },
+                  {
+                    "x": 0.6879032,
+                    "y": 0.2086659
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "53"
+      },
+      {
+        "type_": "logistics_details",
+        "confidence": 1,
+        "id": "56",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "530",
+                  "end_index": "538"
+                }
+              ]
+            },
+            "type_": "delivery_note",
+            "mention_text": "JI/534-L",
+            "confidence": 0.9969501,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.48064515,
+                        "y": 0.20125428
+                      },
+                      {
+                        "x": 0.5435484,
+                        "y": 0.20125428
+                      },
+                      {
+                        "x": 0.5435484,
+                        "y": 0.20809577
+                      },
+                      {
+                        "x": 0.48064515,
+                        "y": 0.20809577
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "57"
+          }
+        ]
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1266",
+              "end_index": "1270"
+            }
+          ]
+        },
+        "type_": "round_off",
+        "mention_text": "0.40",
+        "confidence": 0.99997044,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.8508065,
+                    "y": 0.6927024
+                  },
+                  {
+                    "x": 0.8879032,
+                    "y": 0.6927024
+                  },
+                  {
+                    "x": 0.8879032,
+                    "y": 0.70125425
+                  },
+                  {
+                    "x": 0.8508065,
+                    "y": 0.70125425
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "58"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1257",
+              "end_index": "1265"
+            }
+          ]
+        },
+        "type_": "sgst_amount",
+        "mention_text": "6,373.80",
+        "confidence": 0.99991155,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.81935483,
+                    "y": 0.6795895
+                  },
+                  {
+                    "x": 0.88870966,
+                    "y": 0.6795895
+                  },
+                  {
+                    "x": 0.88870966,
+                    "y": 0.68928164
+                  },
+                  {
+                    "x": 0.81935483,
+                    "y": 0.68928164
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "59"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "174",
+              "end_index": "239"
+            }
+          ]
+        },
+        "type_": "supplier_address",
+        "mention_text": "277/1 Anna Private Industrial Estate\nVilankurichi Road\nCoimbatore",
+        "confidence": 0.99937755,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.06451613,
+                    "y": 0.20011403
+                  },
+                  {
+                    "x": 0.33387098,
+                    "y": 0.20011403
+                  },
+                  {
+                    "x": 0.33387098,
+                    "y": 0.23489168
+                  },
+                  {
+                    "x": 0.06451613,
+                    "y": 0.23489168
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "61"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "251",
+              "end_index": "266"
+            }
+          ]
+        },
+        "type_": "supplier_gstin",
+        "mention_text": "33AFDPJ1786L1ZA",
+        "confidence": 0.99994123,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.16129032,
+                    "y": 0.23945267
+                  },
+                  {
+                    "x": 0.30967742,
+                    "y": 0.23945267
+                  },
+                  {
+                    "x": 0.30967742,
+                    "y": 0.24800456
+                  },
+                  {
+                    "x": 0.16129032,
+                    "y": 0.24800456
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "64"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1732",
+              "end_index": "1742"
+            }
+          ]
+        },
+        "type_": "supplier_pan",
+        "mention_text": "AFDPJ1786L",
+        "confidence": 0.9996783,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.26209676,
+                    "y": 0.9013683
+                  },
+                  {
+                    "x": 0.3532258,
+                    "y": 0.9013683
+                  },
+                  {
+                    "x": 0.3532258,
+                    "y": 0.9087799
+                  },
+                  {
+                    "x": 0.26209676,
+                    "y": 0.9087799
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "68"
+      },
+      {
+        "type_": "tax_summary_item",
+        "confidence": 1,
+        "id": "70",
+        "properties": [
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1534",
+                  "end_index": "1542"
+                }
+              ]
+            },
+            "type_": "cgst_amount",
+            "mention_text": "6,373.80",
+            "confidence": 0.9989101,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.5782258,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.64354837,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.64354837,
+                        "y": 0.8198404
+                      },
+                      {
+                        "x": 0.5782258,
+                        "y": 0.8198404
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "71"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1531",
+                  "end_index": "1533"
+                }
+              ]
+            },
+            "type_": "cgst_rate",
+            "mention_text": "6%",
+            "confidence": 0.98052603,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.5217742,
+                        "y": 0.8112885
+                      },
+                      {
+                        "x": 0.5451613,
+                        "y": 0.8112885
+                      },
+                      {
+                        "x": 0.5451613,
+                        "y": 0.81927025
+                      },
+                      {
+                        "x": 0.5217742,
+                        "y": 0.81927025
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "72"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1510",
+                  "end_index": "1518"
+                }
+              ]
+            },
+            "type_": "hsn_sac",
+            "mention_text": "84669310",
+            "confidence": 0.9037133,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.05967742,
+                        "y": 0.81014824
+                      },
+                      {
+                        "x": 0.13225806,
+                        "y": 0.81014824
+                      },
+                      {
+                        "x": 0.13225806,
+                        "y": 0.81813
+                      },
+                      {
+                        "x": 0.05967742,
+                        "y": 0.81813
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "73"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1546",
+                  "end_index": "1554"
+                }
+              ]
+            },
+            "type_": "sgst_amount",
+            "mention_text": "6,373.80",
+            "confidence": 0.9999529,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.7266129,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.7919355,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.7919355,
+                        "y": 0.8198404
+                      },
+                      {
+                        "x": 0.7266129,
+                        "y": 0.8198404
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "74"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1543",
+                  "end_index": "1545"
+                }
+              ]
+            },
+            "type_": "sgst_rate",
+            "mention_text": "6%",
+            "confidence": 0.99993014,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.67258066,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.6951613,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.6951613,
+                        "y": 0.81927025
+                      },
+                      {
+                        "x": 0.67258066,
+                        "y": 0.81927025
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "75"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1519",
+                  "end_index": "1530"
+                }
+              ]
+            },
+            "type_": "taxable_value",
+            "mention_text": "1,06,230.00",
+            "confidence": 0.9749617,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.4064516,
+                        "y": 0.81071836
+                      },
+                      {
+                        "x": 0.49274194,
+                        "y": 0.81071836
+                      },
+                      {
+                        "x": 0.49274194,
+                        "y": 0.8198404
+                      },
+                      {
+                        "x": 0.4064516,
+                        "y": 0.8198404
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "76"
+          },
+          {
+            "text_anchor": {
+              "text_segments": [
+                {
+                  "start_index": "1555",
+                  "end_index": "1564"
+                }
+              ]
+            },
+            "type_": "total_tax_amount",
+            "mention_text": "12,747.60",
+            "confidence": 0.9999658,
+            "page_anchor": {
+              "page_refs": [
+                {
+                  "bounding_poly": {
+                    "normalized_vertices": [
+                      {
+                        "x": 0.8145161,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.88709676,
+                        "y": 0.8118586
+                      },
+                      {
+                        "x": 0.88709676,
+                        "y": 0.8209806
+                      },
+                      {
+                        "x": 0.8145161,
+                        "y": 0.8209806
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "id": "77"
+          }
+        ]
+      },
+      {
+        "type_": "tax_in_words",
+        "mention_text": "Rupees Twelve Thousand Seven Hundred Forty Seven and Sixty paise Only",
+        "confidence": 0.99890876,
+        "page_anchor": {
+          "page_refs": [
+            {}
+          ]
+        },
+        "id": "69"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1303",
+              "end_index": "1314"
+            }
+          ]
+        },
+        "type_": "total_amount",
+        "mention_text": "1,18,978.00",
+        "confidence": 0.9998554,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.7798387,
+                    "y": 0.7417332
+                  },
+                  {
+                    "x": 0.88709676,
+                    "y": 0.7417332
+                  },
+                  {
+                    "x": 0.88709676,
+                    "y": 0.7537058
+                  },
+                  {
+                    "x": 0.7798387,
+                    "y": 0.7537058
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "78"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1555",
+              "end_index": "1564"
+            }
+          ]
+        },
+        "type_": "total_tax_amount",
+        "mention_text": "12,747.60",
+        "confidence": 0.9999658,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.8145161,
+                    "y": 0.8118586
+                  },
+                  {
+                    "x": 0.88709676,
+                    "y": 0.8118586
+                  },
+                  {
+                    "x": 0.88709676,
+                    "y": 0.8209806
+                  },
+                  {
+                    "x": 0.8145161,
+                    "y": 0.8209806
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "80"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "530",
+              "end_index": "538"
+            }
+          ]
+        },
+        "type_": "invoice_number",
+        "mention_text": "JI/534-L",
+        "confidence": 0.9969501,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.48064515,
+                    "y": 0.20125428
+                  },
+                  {
+                    "x": 0.5435484,
+                    "y": 0.20125428
+                  },
+                  {
+                    "x": 0.5435484,
+                    "y": 0.20809577
+                  },
+                  {
+                    "x": 0.48064515,
+                    "y": 0.20809577
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "54"
+      },
+      {
+        "type_": "total_in_words",
+        "mention_text": "Rupees One Lakh Eighteen Thousand Nine Hundred Seventy Eight Only",
+        "confidence": 0.99697447,
+        "page_anchor": {
+          "page_refs": [
+            {}
+          ]
+        },
+        "id": "79"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "672",
+              "end_index": "687"
+            }
+          ]
+        },
+        "type_": "Buyer_GSTin",
+        "mention_text": "33AABCE4760D1Z3",
+        "confidence": 0.9945444,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.21532258,
+                    "y": 0.33352336
+                  },
+                  {
+                    "x": 0.3669355,
+                    "y": 0.33352336
+                  },
+                  {
+                    "x": 0.3669355,
+                    "y": 0.34207526
+                  },
+                  {
+                    "x": 0.21532258,
+                    "y": 0.34207526
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "2"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "672",
+              "end_index": "687"
+            }
+          ]
+        },
+        "type_": "customer_gstin",
+        "mention_text": "33AABCE4760D1Z3",
+        "confidence": 0.9945444,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.21532258,
+                    "y": 0.33352336
+                  },
+                  {
+                    "x": 0.3669355,
+                    "y": 0.33352336
+                  },
+                  {
+                    "x": 0.3669355,
+                    "y": 0.34207526
+                  },
+                  {
+                    "x": 0.21532258,
+                    "y": 0.34207526
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "49"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1531",
+              "end_index": "1533"
+            }
+          ]
+        },
+        "type_": "CGST_Percentage",
+        "mention_text": "6%",
+        "confidence": 0.98052603,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.5217742,
+                    "y": 0.8112885
+                  },
+                  {
+                    "x": 0.5451613,
+                    "y": 0.8112885
+                  },
+                  {
+                    "x": 0.5451613,
+                    "y": 0.81927025
+                  },
+                  {
+                    "x": 0.5217742,
+                    "y": 0.81927025
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "4"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "142",
+              "end_index": "173"
+            }
+          ]
+        },
+        "type_": "supplier_name",
+        "mention_text": "M/s.Jaga India Sourcing Company",
+        "confidence": 0.978035,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.06532258,
+                    "y": 0.18757127
+                  },
+                  {
+                    "x": 0.33951613,
+                    "y": 0.18757127
+                  },
+                  {
+                    "x": 0.33951613,
+                    "y": 0.19897377
+                  },
+                  {
+                    "x": 0.06532258,
+                    "y": 0.19897377
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "65"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "142",
+              "end_index": "173"
+            }
+          ]
+        },
+        "type_": "supplier_name_recipt",
+        "mention_text": "M/s.Jaga India Sourcing Company",
+        "confidence": 0.978035,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.06532258,
+                    "y": 0.18757127
+                  },
+                  {
+                    "x": 0.33951613,
+                    "y": 0.18757127
+                  },
+                  {
+                    "x": 0.33951613,
+                    "y": 0.19897377
+                  },
+                  {
+                    "x": 0.06532258,
+                    "y": 0.19897377
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "67"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1519",
+              "end_index": "1530"
+            }
+          ]
+        },
+        "type_": "Total_amout_with_out_tax",
+        "mention_text": "1,06,230.00",
+        "confidence": 0.9749617,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.4064516,
+                    "y": 0.81071836
+                  },
+                  {
+                    "x": 0.49274194,
+                    "y": 0.81071836
+                  },
+                  {
+                    "x": 0.49274194,
+                    "y": 0.8198404
+                  },
+                  {
+                    "x": 0.4064516,
+                    "y": 0.8198404
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "47"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1519",
+              "end_index": "1530"
+            }
+          ]
+        },
+        "type_": "subtotal",
+        "mention_text": "1,06,230.00",
+        "confidence": 0.9749617,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.4064516,
+                    "y": 0.81071836
+                  },
+                  {
+                    "x": 0.49274194,
+                    "y": 0.81071836
+                  },
+                  {
+                    "x": 0.49274194,
+                    "y": 0.8198404
+                  },
+                  {
+                    "x": 0.4064516,
+                    "y": 0.8198404
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "60"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1510",
+              "end_index": "1518"
+            }
+          ]
+        },
+        "type_": "hsn_sac",
+        "mention_text": "84669310",
+        "confidence": 0.9037133,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.05967742,
+                    "y": 0.81014824
+                  },
+                  {
+                    "x": 0.13225806,
+                    "y": 0.81014824
+                  },
+                  {
+                    "x": 0.13225806,
+                    "y": 0.81813
+                  },
+                  {
+                    "x": 0.05967742,
+                    "y": 0.81813
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "52"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "1229",
+              "end_index": "1237"
+            }
+          ]
+        },
+        "type_": "cgst_amount",
+        "mention_text": "6,373.80",
+        "confidence": 0.76207995,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.8169355,
+                    "y": 0.6659065
+                  },
+                  {
+                    "x": 0.8895161,
+                    "y": 0.6659065
+                  },
+                  {
+                    "x": 0.8895161,
+                    "y": 0.67616874
+                  },
+                  {
+                    "x": 0.8169355,
+                    "y": 0.67616874
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "48"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "28",
+              "end_index": "94"
+            }
+          ]
+        },
+        "type_": "irn",
+        "mention_text": "e52104e87f8be006e00e4ef8f5011e615d8de78f64e495d4-\nca39b3e127d6e7f2",
+        "confidence": 0.58992475,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.16129032,
+                    "y": 0.11630559
+                  },
+                  {
+                    "x": 0.5629032,
+                    "y": 0.11630559
+                  },
+                  {
+                    "x": 0.5629032,
+                    "y": 0.13625997
+                  },
+                  {
+                    "x": 0.16129032,
+                    "y": 0.13625997
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "55"
+      },
+      {
+        "text_anchor": {
+          "text_segments": [
+            {
+              "start_index": "132",
+              "end_index": "141"
+            }
+          ]
+        },
+        "type_": "Ack_Date",
+        "mention_text": "24-Jan-25",
+        "confidence": 0.57056636,
+        "page_anchor": {
+          "page_refs": [
+            {
+              "bounding_poly": {
+                "normalized_vertices": [
+                  {
+                    "x": 0.16129032,
+                    "y": 0.15564424
+                  },
+                  {
+                    "x": 0.23145162,
+                    "y": 0.15564424
+                  },
+                  {
+                    "x": 0.23145162,
+                    "y": 0.16305587
+                  },
+                  {
+                    "x": 0.16129032,
+                    "y": 0.16305587
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "id": "0"
+      }
+    ]
+  }
+}
+Status: Success
+--------------------------

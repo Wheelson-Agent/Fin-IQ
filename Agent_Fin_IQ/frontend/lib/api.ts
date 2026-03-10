@@ -16,7 +16,8 @@
 
 import type {
     Invoice, Vendor, AuditEvent, ProcessingJob, User, StatusCount, InvoiceItem,
-    LedgerMaster, TdsSection, Company
+    LedgerMaster, TdsSection, Company, PurchaseOrder, GoodsReceipt, ServiceEntrySheet,
+    DashboardMetrics
 } from './types';
 
 /**
@@ -60,10 +61,11 @@ export async function validateToken(token: string) {
 
 /**
  * Fetch all invoices for the Doc Hub.
+ * @param companyId - Optional company ID to filter by
  * @returns Array of invoices (most recent first)
  */
-export async function getInvoices(): Promise<Invoice[]> {
-    return invoke<Invoice[]>('invoices:get-all');
+export async function getInvoices(companyId?: string): Promise<Invoice[]> {
+    return invoke<Invoice[]>('invoices:get-all', { companyId });
 }
 
 /**
@@ -100,10 +102,11 @@ export async function updateInvoiceStatus(id: string, status: string, userName?:
 
 /**
  * Get invoice counts grouped by status (for Dashboard KPIs).
+ * @param companyId - Optional company ID to filter by
  * @returns Array of { status, count }
  */
-export async function getStatusCounts(): Promise<StatusCount[]> {
-    return invoke<StatusCount[]>('invoices:status-counts');
+export async function getStatusCounts(companyId?: string): Promise<StatusCount[]> {
+    return invoke<StatusCount[]>('invoices:status-counts', { companyId });
 }
 
 // ─── VENDORS ──────────────────────────────────────────────
@@ -129,10 +132,11 @@ export async function mapVendorToInvoice(invoiceId: string, vendorId: string): P
 
 /**
  * Fetch all vendors with dynamically calculated totals.
+ * @param companyId - Optional company ID to filter by
  * @returns Array of vendors
  */
-export async function getVendors(): Promise<Vendor[]> {
-    return invoke<Vendor[]>('vendors:get-all');
+export async function getVendors(companyId?: string): Promise<Vendor[]> {
+    return invoke<Vendor[]>('vendors:get-all', { companyId });
 }
 
 /**
@@ -171,6 +175,22 @@ export async function getActiveCompany(): Promise<Company | null> {
     return invoke<Company | null>('companies:get-active');
 }
 
+/**
+ * Fetch all companies for the global filter.
+ * @returns Array of Company objects
+ */
+export async function getCompanies(): Promise<Company[]> {
+    return invoke<Company[]>('companies:get-all');
+}
+
+/**
+ * Fetch all audit trail logs.
+ * @returns Array of audit events
+ */
+export async function getAuditLogs(): Promise<AuditEvent[]> {
+    return invoke<AuditEvent[]>('audit:get-logs');
+}
+
 // ─── INVOICE ITEMS ────────────────────────────────────────
 
 /**
@@ -192,34 +212,44 @@ export async function saveInvoiceItems(invoiceId: string, items: Partial<Invoice
     return invoke<InvoiceItem[]>('invoices:save-items', { invoiceId, items });
 }
 
-// ─── AUDIT ────────────────────────────────────────────────
-
 /**
- * Fetch audit trail events.
- * @returns Array of audit events (most recent first)
+ * Run the processing pipeline for an invoice.
+ * @param invoiceId - Invoice UUID
+ * @param filePath  - Storage path
+ * @param fileName  - Original display name
  */
-export async function getAuditLogs(): Promise<AuditEvent[]> {
-    return invoke<AuditEvent[]>('audit:get-logs');
+export async function runPipeline(invoiceId: string, filePath: string, fileName: string) {
+    return invoke<{ success: boolean; decision?: any; error?: string }>('processing:run-pipeline', { invoiceId, filePath, fileName });
 }
 
-// ─── PROCESSING ───────────────────────────────────────────
+// ─── ERP MODULES ──────────────────────────────────────────
 
-/**
- * Fetch pipeline processing jobs for a specific invoice.
- * @param invoiceId - Invoice UUID
- * @returns Array of processing job stages
- */
-export async function getProcessingJobs(invoiceId: string): Promise<ProcessingJob[]> {
-    return invoke<ProcessingJob[]>('processing:get-jobs', { invoiceId });
+export async function getPurchaseOrders(companyId?: string): Promise<PurchaseOrder[]> {
+    return invoke<PurchaseOrder[]>('po:get-all', { companyId });
 }
 
 /**
- * Run the full Pre-OCR and OCR processing pipeline for a specific invoice.
- * @param invoiceId - Invoice UUID
- * @param filePath - Path to file
- * @param fileName - File name
- * @returns Result of the pipeline execution
+ * Fetch a single PO by ID.
+ * @param id - PO UUID
  */
-export async function runPipeline(invoiceId: string, filePath: string, fileName: string): Promise<any> {
-    return invoke<any>('processing:run-pipeline', { invoiceId, filePath, fileName });
+export async function getPurchaseOrderById(id: string): Promise<PurchaseOrder | null> {
+    return invoke<PurchaseOrder | null>('po:get-by-id', { id });
+}
+
+export async function getGoodsReceipts(companyId?: string): Promise<GoodsReceipt[]> {
+    return invoke<GoodsReceipt[]>('grn:get-all', { companyId });
+}
+
+export async function getServiceEntrySheets(companyId?: string): Promise<ServiceEntrySheet[]> {
+    return invoke<ServiceEntrySheet[]>('ses:get-all', { companyId });
+}
+
+// ─── DASHBOARD ──────────────────────────────────────────────
+
+/**
+ * Fetch aggregated dashboard metrics.
+ * @param companyId - Optional company ID to filter by
+ */
+export async function getDashboardMetrics(companyId?: string): Promise<DashboardMetrics> {
+    return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
 }

@@ -20,20 +20,27 @@
 import { query } from './connection';
 
 // ─────────────────────────────────────────────────────────────
-// INVOICES
+// AP INVOICES
 // ─────────────────────────────────────────────────────────────
 
 /**
  * Fetch all invoices, ordered by most recent first.
- * Used by: Doc Hub, Dashboard KPI calculations.
+ * Supports optional company filtering.
  *
+ * @param companyId - Optional UUID or 'ALL'
  * @returns Array of invoice rows
  */
-export async function getAllInvoices() {
-    const result = await query(`
-    SELECT * FROM invoices 
-    ORDER BY created_at DESC
-  `);
+export async function getAllInvoices(companyId?: string) {
+    let sql = 'SELECT * FROM ap_invoices';
+    const params: any[] = [];
+
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE company_id = $1';
+        params.push(companyId);
+    }
+
+    sql += ' ORDER BY created_at DESC';
+    const result = await query(sql, params);
     return result.rows;
 }
 
@@ -45,7 +52,7 @@ export async function getAllInvoices() {
  * @returns Single invoice row or null
  */
 export async function getInvoiceById(id: string) {
-    const result = await query('SELECT * FROM invoices WHERE id = $1', [id]);
+    const result = await query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
     return result.rows[0] || null;
 }
 
@@ -65,7 +72,7 @@ export async function createInvoice(data: {
     uploader_name?: string;
 }) {
     const result = await query(
-        `INSERT INTO invoices (file_name, file_path, file_location, batch_id, status, uploader_name)
+        `INSERT INTO ap_invoices (file_name, file_path, file_location, batch_id, processing_status, uploader_name)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
         [data.file_name, data.file_path, data.file_location || data.file_path, data.batch_id || null, data.status || 'Processing', data.uploader_name || 'System']
@@ -108,31 +115,30 @@ export async function updateInvoiceWithOCR(id: string, data: {
 }) {
     const result = await query(
 
-        `UPDATE invoices SET
-       invoice_no = COALESCE($2, invoice_no),
+        `UPDATE ap_invoices SET
+       invoice_number = COALESCE($2, invoice_number),
        vendor_name = COALESCE($3, vendor_name),
-       date = COALESCE($4::date, date),
+       invoice_date = COALESCE($4::date, invoice_date),
        due_date = COALESCE($5::date, due_date),
-       amount = COALESCE($6, amount),
-       gst = COALESCE($7, gst),
-       total = COALESCE($8, total),
+       sub_total = COALESCE($6, sub_total),
+       tax_total = COALESCE($7, tax_total),
+       grand_total = COALESCE($8, grand_total),
        po_number = COALESCE($9, po_number),
        gl_account = COALESCE($10, gl_account),
-       confidence = COALESCE($11, confidence),
-       ocr_raw_data = COALESCE($12::jsonb, ocr_raw_data),
-       status = COALESCE($13, status),
-       processing_time = COALESCE($14, processing_time),
-       doc_type = COALESCE($15, doc_type),
-       posted_to_tally_json = COALESCE($16::jsonb, posted_to_tally_json),
-       all_data_invoice = COALESCE($17::jsonb, all_data_invoice),
-       file_location = COALESCE($18, file_location),
-       file_path = COALESCE($19, file_path),
-       tally_id = COALESCE($20, tally_id),
-       uploader_name = COALESCE($21, uploader_name),
-       vendor_id = COALESCE($22::uuid, vendor_id),
-       is_mapped = COALESCE($23, is_mapped),
-       vendor_gst = COALESCE($24, vendor_gst),
-       validation_time = COALESCE($25, validation_time),
+       ocr_raw_payload = COALESCE($11::jsonb, ocr_raw_payload),
+       processing_status = COALESCE($12, processing_status),
+       processing_time = COALESCE($13, processing_time),
+       doc_type = COALESCE($14, doc_type),
+       posted_to_tally_json = COALESCE($15::jsonb, posted_to_tally_json),
+       all_data_invoice = COALESCE($16::jsonb, all_data_invoice),
+       file_location = COALESCE($17, file_location),
+       file_path = COALESCE($18, file_path),
+       tally_id = COALESCE($19, tally_id),
+       uploader_name = COALESCE($20, uploader_name),
+       vendor_id = COALESCE($21::uuid, vendor_id),
+       is_mapped = COALESCE($22, is_mapped),
+       vendor_gst = COALESCE($23, vendor_gst),
+       validation_time = COALESCE($24, validation_time),
        updated_at = NOW()
       WHERE id = $1
       RETURNING *`,
@@ -170,7 +176,7 @@ export async function updateInvoiceWithOCR(id: string, data: {
  */
 export async function updateInvoiceStatus(id: string, status: string) {
     const result = await query(
-        `UPDATE invoices SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        `UPDATE ap_invoices SET processing_status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
         [id, status]
     );
     return result.rows[0];
@@ -187,7 +193,7 @@ export async function updateInvoiceStatus(id: string, status: string) {
  */
 export async function updateInvoiceFailureReason(id: string, failure_reason: string, pre_ocr_status?: string) {
     const result = await query(
-        `UPDATE invoices SET status = 'Failed', failure_reason = $2, pre_ocr_status = COALESCE($3, pre_ocr_status), updated_at = NOW() WHERE id = $1 RETURNING *`,
+        `UPDATE ap_invoices SET processing_status = 'Failed', failure_reason = $2, pre_ocr_status = COALESCE($3, pre_ocr_status), updated_at = NOW() WHERE id = $1 RETURNING *`,
         [id, failure_reason, pre_ocr_status || null]
     );
     return result.rows[0];
@@ -202,9 +208,9 @@ export async function updateInvoiceFailureReason(id: string, failure_reason: str
  */
 export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string) {
     await query(
-        `UPDATE invoices SET 
+        `UPDATE ap_invoices SET 
           is_posted_to_tally = true, 
-          status = 'Auto-Posted', 
+          processing_status = 'Auto-Posted', 
           posted_to_tally_json = COALESCE($2::jsonb, posted_to_tally_json),
           tally_id = COALESCE($3, tally_id),
           updated_at = NOW() 
@@ -214,17 +220,26 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
 }
 
 /**
- * Get invoice counts grouped by status.
- * Used by: Dashboard KPI chips, Doc Hub summary.
+ * Get invoice counts grouped by status (for Dashboard KPIs).
+ * Supports optional company filtering.
  *
- * @returns Object with status counts
+ * @param companyId - Optional UUID or 'ALL'
+ * @returns Array of status counts
  */
-export async function getInvoiceStatusCounts() {
-    const result = await query(`
-    SELECT status, COUNT(*)::int as count
-    FROM invoices
-    GROUP BY status
-  `);
+export async function getInvoiceStatusCounts(companyId?: string) {
+    let sql = `
+    SELECT processing_status as status, COUNT(*)::int as count
+    FROM ap_invoices
+  `;
+    const params: any[] = [];
+
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE company_id = $1';
+        params.push(companyId);
+    }
+
+    sql += ' GROUP BY processing_status';
+    const result = await query(sql, params);
     return result.rows;
 }
 
@@ -233,7 +248,7 @@ export async function getInvoiceStatusCounts() {
 // ─────────────────────────────────────────────────────────────
 
 export async function getLedgerMasters(companyId?: string) {
-    let sql = `SELECT * FROM ledger_masters WHERE is_active = true`;
+    let sql = `SELECT id, account_name as name, parent_group, account_type as ledger_type, erp_sync_id as tally_guid, is_active FROM gl_accounts WHERE is_active = true`;
     const params: any[] = [];
 
     // Optional company filtering, though expense/tax ledgers might be global (NULL)
@@ -241,20 +256,31 @@ export async function getLedgerMasters(companyId?: string) {
         sql += ` AND (company_id = $1 OR company_id IS NULL)`;
         params.push(companyId);
     }
-    sql += ` ORDER BY ledger_type, name`;
+    sql += ` ORDER BY account_type, account_name`;
 
     const { rows } = await query(sql, params);
     return rows;
 }
 
 export async function getTdsSections() {
-    const { rows } = await query(`SELECT * FROM tds_sections WHERE is_active = true ORDER BY section`);
+    // temporary mapping for old frontend
+    const { rows } = await query(`SELECT tax_code as section, description, rate_percentage as rate_individual, rate_percentage as rate_company, is_active FROM tax_codes WHERE tax_authority = 'TDS' AND is_active = true ORDER BY tax_code`);
     return rows;
 }
 
 export async function getActiveCompany() {
     const { rows } = await query(`SELECT * FROM companies WHERE is_active = true LIMIT 1`);
     return rows[0] || null;
+}
+
+/**
+ * Fetch all companies for the global filter.
+ * 
+ * @returns Array of company rows
+ */
+export async function getAllCompanies() {
+    const { rows } = await query(`SELECT id, name, gstin, is_active FROM companies ORDER BY name ASC`);
+    return rows;
 }
 
 
@@ -264,23 +290,33 @@ export async function getActiveCompany() {
 
 /**
  * Fetch all vendors with dynamically calculated total_due and invoice_count.
- * These values are computed from the invoices table, NOT stored.
- * Used by: AP Monitor, Vendor management page.
+ * Supports optional company filtering.
  *
+ * @param companyId - Optional UUID or 'ALL'
  * @returns Array of vendor rows with calculated fields
  */
-export async function getAllVendors() {
-    const result = await query(`
+export async function getAllVendors(companyId?: string) {
+    let sql = `
     SELECT 
       v.*,
       COALESCE(COUNT(i.id), 0)::int AS invoice_count,
-      COALESCE(SUM(CASE WHEN i.is_posted_to_tally = false THEN i.total ELSE 0 END), 0) AS total_due,
+      COALESCE(SUM(CASE WHEN i.is_posted_to_tally = false THEN i.grand_total ELSE 0 END), 0) AS total_due,
       MIN(CASE WHEN i.is_posted_to_tally = false THEN i.due_date END) AS oldest_due_calc
     FROM vendors v
-    LEFT JOIN invoices i ON i.vendor_id = v.id
+    LEFT JOIN ap_invoices i ON i.vendor_id = v.id
+  `;
+    const params: any[] = [];
+
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE v.company_id = $1';
+        params.push(companyId);
+    }
+
+    sql += `
     GROUP BY v.id
     ORDER BY v.name ASC
-  `);
+  `;
+    const result = await query(sql, params);
     return result.rows;
 }
 
@@ -352,7 +388,7 @@ export async function saveVendor(data: {
  * Used by: Detail View items table.
  */
 export async function getInvoiceItems(invoiceId: string) {
-    const result = await query('SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY created_at ASC', [invoiceId]);
+    const result = await query('SELECT *, unit_price as rate, line_amount as amount, gl_account_id as ledger FROM ap_invoice_lines WHERE ap_invoice_id = $1 ORDER BY created_at ASC', [invoiceId]);
     return result.rows;
 }
 
@@ -362,7 +398,7 @@ export async function getInvoiceItems(invoiceId: string) {
  */
 export async function saveInvoiceItems(invoiceId: string, items: any[]) {
     // 1. Delete existing items
-    await query('DELETE FROM invoice_items WHERE invoice_id = $1', [invoiceId]);
+    await query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [invoiceId]);
 
     // 2. Insert new items
     if (items.length === 0) return [];
@@ -370,8 +406,8 @@ export async function saveInvoiceItems(invoiceId: string, items: any[]) {
     const results = [];
     for (const item of items) {
         const res = await query(
-            `INSERT INTO invoice_items 
-        (invoice_id, description, ledger, tax, quantity, rate, discount, amount)
+            `INSERT INTO ap_invoice_lines 
+        (ap_invoice_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
             [
                 invoiceId, item.description, item.ledger, item.tax,
@@ -546,4 +582,83 @@ export async function createUser(data: {
         [data.email, data.password_hash, data.display_name, data.role]
     );
     return result.rows[0];
+}
+// ─────────────────────────────────────────────────────────────
+// PURCHASE ORDERS (PO)
+// ─────────────────────────────────────────────────────────────
+
+export async function getAllPurchaseOrders(companyId?: string) {
+    let sql = 'SELECT * FROM purchase_orders';
+    const params: any[] = [];
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE company_id = $1';
+        params.push(companyId);
+    }
+    sql += ' ORDER BY po_date DESC';
+    const { rows } = await query(sql, params);
+    return rows;
+}
+
+export async function getPurchaseOrderById(id: string) {
+    const { rows } = await query('SELECT * FROM purchase_orders WHERE id = $1', [id]);
+    return rows[0] || null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// GOODS RECEIPTS (GRN)
+// ─────────────────────────────────────────────────────────────
+
+export async function getAllGoodsReceipts(companyId?: string) {
+    let sql = 'SELECT * FROM goods_receipts';
+    const params: any[] = [];
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE company_id = $1';
+        params.push(companyId);
+    }
+    sql += ' ORDER BY receipt_date DESC';
+    const { rows } = await query(sql, params);
+    return rows;
+}
+
+// ─────────────────────────────────────────────────────────────
+// SERVICE ENTRY SHEETS (SES)
+// ─────────────────────────────────────────────────────────────
+
+export async function getAllServiceEntrySheets(companyId?: string) {
+    let sql = 'SELECT * FROM service_entry_sheets';
+    const params: any[] = [];
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE company_id = $1';
+        params.push(companyId);
+    }
+    sql += ' ORDER BY service_date DESC';
+    const { rows } = await query(sql, params);
+    return rows;
+}
+
+// ─────────────────────────────────────────────────────────────
+// DASHBOARD & ANALYTICS
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Get aggregated metrics for the dashboard.
+ * @param companyId - Filter by company
+ */
+export async function getDashboardMetrics(companyId?: string) {
+    const whereClause = companyId && companyId !== 'ALL' ? 'WHERE company_id = $1' : '';
+    const params = companyId && companyId !== 'ALL' ? [companyId] : [];
+
+    const totalInvoices = await query(`SELECT COUNT(*)::int as count FROM ap_invoices ${whereClause}`, params);
+    const totalAmount = await query(`SELECT SUM(grand_total)::numeric as total FROM ap_invoices ${whereClause}`, params);
+    const pendingApproval = await query(`SELECT COUNT(*)::int as count FROM ap_invoices ${whereClause} ${whereClause ? 'AND' : 'WHERE'} processing_status = 'Pending Approval'`, params);
+
+    // Status counts for pie charts
+    const statusCounts = await getInvoiceStatusCounts(companyId);
+
+    return {
+        totalInvoices: totalInvoices.rows[0].count,
+        totalAmount: Number(totalAmount.rows[0].total || 0),
+        pendingApproval: pendingApproval.rows[0].count,
+        statusCounts
+    };
 }
