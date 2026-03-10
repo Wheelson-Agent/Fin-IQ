@@ -91,7 +91,6 @@ export async function updateInvoiceWithOCR(id: string, data: {
     total?: number;
     po_number?: string;
     gl_account?: string;
-    confidence?: number;
     ocr_raw_data?: object;
     status?: string;
     processing_time?: string;
@@ -141,7 +140,7 @@ export async function updateInvoiceWithOCR(id: string, data: {
             id,
             data.invoice_no, data.vendor_name, data.date, data.due_date,
             data.amount, data.gst, data.total, data.po_number, data.gl_account,
-            data.confidence, data.ocr_raw_data ? JSON.stringify(data.ocr_raw_data) : null,
+            data.ocr_raw_data ? JSON.stringify(data.ocr_raw_data) : null,
             data.status, data.processing_time,
             data.doc_type,
             data.posted_to_tally_json ? JSON.stringify(data.posted_to_tally_json) : null,

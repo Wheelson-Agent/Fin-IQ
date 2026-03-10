@@ -37,12 +37,10 @@ export type StatusType =
   | 'Pending Approval'
   | 'Failed'
   | 'Passed'
-  | 'Manual Review'
-  | 'Low Confidence';
+  | 'Manual Review';
 
 export type FailureBadgeType =
   | 'GST Validation Error'
   | 'Duplicate Document'
   | 'Vendor Not Found'
-  | 'Amount Mismatch'
-  | 'Low Confidence';
+  | 'Amount Mismatch';
