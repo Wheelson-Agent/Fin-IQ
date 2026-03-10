@@ -33,7 +33,6 @@ export interface Invoice {
     po_number: string | null;
     gl_account: string | null;
     status: InvoiceStatus;
-    confidence: number;
     processing_time: string | null;
     failure_reason: string | null;
     failure_category: string | null;

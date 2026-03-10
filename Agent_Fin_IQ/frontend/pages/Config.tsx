@@ -186,7 +186,7 @@ export default function Config() {
         sources: { email: true, drive: true, sharepoint: false, onedrive: false },
         destination: 'tally',
         reports: { gmail: true, teams: true, sharepoint: false },
-        criteria: { confidence: '95', knownVendor: true, valueLimit: '100000', poMatch: true },
+        criteria: { knownVendor: true, valueLimit: '100000', poMatch: true },
         sourceConfigs: {
             email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: '••••••••••••' },
             sharepoint: { tenantId: '8a91-4c...', siteUrl: 'https://sigma.sharepoint.com', secret: '' },
@@ -459,8 +459,8 @@ export default function Config() {
                                     key={c.id}
                                     whileHover={{ x: 2 }}
                                     className={`flex items-center gap-[14px] p-[14px_18px] rounded-[12px] border transition-all cursor-pointer ${c.isActive
-                                            ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm'
-                                            : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'
+                                        ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm'
+                                        : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'
                                         }`}
                                     onClick={() => handleSetActive(c.id)}
                                 >
@@ -816,27 +816,7 @@ export default function Config() {
                                         <SlidersHorizontal size={14} /> ACTIVE CRITERIA
                                     </div>
 
-                                    {/* Confidence Threshold */}
-                                    <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex items-center justify-between">
-                                        <div className="flex items-center gap-[12px]">
-                                            <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#1E6FD9]"><Target size={16} /></div>
-                                            <div>
-                                                <div className="text-[13px] font-bold text-[#1A2640]">Confidence Score Minimum</div>
-                                                <div className="text-[11px] text-[#94A3B8]">AI extraction must meet this threshold</div>
-                                            </div>
-                                        </div>
-                                        <select
-                                            className="bg-white border border-[#CBD5E1] rounded-[8px] text-[12px] font-bold text-[#1E6FD9] px-[12px] py-[6px] outline-none cursor-pointer"
-                                            value={criteria.confidence}
-                                            onChange={(e) => setCriteria({ ...criteria, confidence: e.target.value })}
-                                        >
-                                            <option value="90">&gt; 90% Confidence</option>
-                                            <option value="95">&gt; 95% Confidence</option>
-                                            <option value="98">&gt; 98% Confidence</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Known Vendor */}
+                                    {/* Known Vendor Status */}
                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex items-center justify-between">
                                         <div className="flex items-center gap-[12px]">
                                             <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#8B5CF6]"><UserCheck size={16} /></div>
