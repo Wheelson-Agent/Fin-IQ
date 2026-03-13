@@ -66,17 +66,11 @@ export function CommandPalette({ open, setOpen }: CommandPaletteProps) {
                                         </div>
                                         Dashboard
                                     </Command.Item>
-                                    <Command.Item onSelect={() => handleSelect('/invoices')} className="flex items-center gap-[12px] px-[10px] py-[8px] rounded-lg cursor-pointer text-[13px] font-medium text-[#1A2640] hover:bg-[#EBF3FF] aria-selected:bg-[#EBF3FF] mb-1">
-                                        <div className="w-[30px] h-[30px] rounded-[8px] bg-[#F0F4FA] flex items-center justify-center text-[#4A5568] shrink-0">
-                                            <FileText className="w-4 h-4" />
-                                        </div>
-                                        Doc Hub
-                                    </Command.Item>
-                                    <Command.Item onSelect={() => handleSelect('/payables')} className="flex items-center gap-[12px] px-[10px] py-[8px] rounded-lg cursor-pointer text-[13px] font-medium text-[#1A2640] hover:bg-[#EBF3FF] aria-selected:bg-[#EBF3FF] mb-1">
+                                    <Command.Item onSelect={() => handleSelect('/ap-workspace')} className="flex items-center gap-[12px] px-[10px] py-[8px] rounded-lg cursor-pointer text-[13px] font-medium text-[#1A2640] hover:bg-[#EBF3FF] aria-selected:bg-[#EBF3FF] mb-1">
                                         <div className="w-[30px] h-[30px] rounded-[8px] bg-[#F0F4FA] flex items-center justify-center text-[#4A5568] shrink-0">
                                             <CreditCard size={18} className="text-[#8899AA] group-hover:text-[#1E6FD9] transition-colors" />
                                         </div>
-                                        Accounts Payable
+                                        AP Workspace
                                     </Command.Item>
                                 </Command.Group>
 

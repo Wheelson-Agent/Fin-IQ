@@ -8,6 +8,73 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================
+-- MIGRATIONS / UPDATES FOR EXISTING TABLES (PRIORITY)
+-- ============================================================
+
+-- Rename gl_accounts to ledger_master if gl_accounts exists
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename  = 'gl_accounts') AND
+     NOT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'ledger_master') THEN
+    ALTER TABLE gl_accounts RENAME TO ledger_master;
+    
+    -- Rename columns if they don't match the new schema
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ledger_master' AND column_name='account_name') THEN
+        ALTER TABLE ledger_master RENAME COLUMN account_name TO name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ledger_master' AND column_name='account_code') THEN
+        ALTER TABLE ledger_master RENAME COLUMN account_code TO ledger_code;
+    END IF;
+  END IF;
+END $$;
+
+-- If ledger_master exists but columns are missing, add them (handled by CREATE TABLE IF NOT EXISTS usually, but let's be safe for existing tables)
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'ledger_master') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ledger_master' AND column_name='parent_group') THEN
+        ALTER TABLE ledger_master ADD COLUMN parent_group TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ledger_master' AND column_name='gst_details') THEN
+        ALTER TABLE ledger_master ADD COLUMN gst_details JSONB;
+    END IF;
+  END IF;
+END $$;
+
+-- Update ap_invoices to have ledger_id
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'ap_invoices') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ap_invoices' AND column_name='ledger_id') THEN
+      ALTER TABLE ap_invoices ADD COLUMN ledger_id UUID;
+    END IF;
+  END IF;
+END $$;
+
+-- Update ap_invoice_lines to have item_id and ledger_id
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'ap_invoice_lines') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ap_invoice_lines' AND column_name='item_id') THEN
+      ALTER TABLE ap_invoice_lines ADD COLUMN item_id UUID;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ap_invoice_lines' AND column_name='ledger_id') THEN
+      ALTER TABLE ap_invoice_lines ADD COLUMN ledger_id UUID;
+    END IF;
+  END IF;
+END $$;
+
+-- Update purchase_order_lines to have item_id
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'purchase_order_lines') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_order_lines' AND column_name='item_id') THEN
+      ALTER TABLE purchase_order_lines ADD COLUMN item_id UUID;
+    END IF;
+  END IF;
+END $$;
+
+-- ============================================================
 -- TABLE: companies (Base Entity)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS companies (
@@ -101,20 +168,25 @@ CREATE TABLE IF NOT EXISTS vendors (
 );
 
 -- ============================================================
--- TABLE: gl_accounts (Replaces ledger_masters)
+-- TABLE: ledger_master (Formerly gl_accounts)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS gl_accounts (
+CREATE TABLE IF NOT EXISTS ledger_master (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
-    account_code          TEXT,
-    account_name          TEXT NOT NULL,
+    ledger_code           TEXT,
+    name                  TEXT NOT NULL,
     account_type          TEXT DEFAULT 'expense',
     erp_sync_id           TEXT,
-    parent_group          TEXT,
+    parent_group          TEXT,  -- e.g., Indirect Expenses
+    gst_details           JSONB, -- GST registration type, etc.
     is_active             BOOLEAN DEFAULT true,
     synced_at             TIMESTAMPTZ,
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Note: Migrate existing data from gl_accounts if it exists
+-- INSERT INTO ledger_master (id, company_id, name, account_type, erp_sync_id, parent_group, is_active, created_at)
+-- SELECT id, company_id, account_name, account_type, erp_sync_id, parent_group, is_active, created_at FROM gl_accounts;
 
 -- ============================================================
 -- TABLE: tax_codes (Replaces tds_sections)
@@ -127,6 +199,23 @@ CREATE TABLE IF NOT EXISTS tax_codes (
     rate_percentage       DECIMAL(5,2),
     tax_authority         TEXT,
     erp_sync_id           TEXT,
+    is_active             BOOLEAN DEFAULT true,
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- TABLE: item_master (New Table)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS item_master (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    item_name             TEXT NOT NULL,
+    item_code             TEXT, -- SKU/Part No
+    hsn_sac               TEXT,
+    uom                   TEXT DEFAULT 'Nos',
+    base_price            DECIMAL(15,2),
+    tax_rate              DECIMAL(5,2),
+    default_ledger_id     UUID REFERENCES ledger_master(id) ON DELETE SET NULL,
     is_active             BOOLEAN DEFAULT true,
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
@@ -153,12 +242,13 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 CREATE TABLE IF NOT EXISTS purchase_order_lines (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     po_id                 UUID REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    item_id               UUID REFERENCES item_master(id) ON DELETE SET NULL,
     line_number           INT NOT NULL,
     item_description      TEXT NOT NULL,
     quantity              DECIMAL(15,3) DEFAULT 1,
     unit_price            DECIMAL(15,2) DEFAULT 0,
     total_amount          DECIMAL(15,2) DEFAULT 0,
-    gl_account_id         UUID REFERENCES gl_accounts(id) ON DELETE SET NULL
+    gl_account_id         UUID REFERENCES ledger_master(id) ON DELETE SET NULL
 );
 
 -- ============================================================
@@ -228,6 +318,7 @@ CREATE TABLE IF NOT EXISTS ap_invoices (
     company_id            UUID REFERENCES companies(id) ON DELETE SET NULL,
     vendor_id             UUID REFERENCES vendors(id) ON DELETE SET NULL,
     purchase_order_id     UUID,
+    ledger_id             UUID REFERENCES ledger_master(id) ON DELETE SET NULL,
     
     invoice_number        TEXT,
     invoice_date          DATE,
@@ -286,12 +377,13 @@ CREATE TABLE IF NOT EXISTS ap_invoices (
 CREATE TABLE IF NOT EXISTS ap_invoice_lines (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ap_invoice_id         UUID REFERENCES ap_invoices(id) ON DELETE CASCADE,
+    item_id               UUID REFERENCES item_master(id) ON DELETE SET NULL,
     line_number           INT,
     description           TEXT NOT NULL,
     quantity              DECIMAL(15,3) DEFAULT 1,
     unit_price            DECIMAL(15,2) DEFAULT 0,
     line_amount           DECIMAL(15,2) DEFAULT 0,
-    gl_account_id         UUID REFERENCES gl_accounts(id) ON DELETE SET NULL,
+    gl_account_id         UUID REFERENCES ledger_master(id) ON DELETE SET NULL,
     cost_center_id        UUID,
     tax                   TEXT,
     discount              DECIMAL(5,2) DEFAULT 0,
@@ -354,6 +446,21 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
 );
 
 -- ============================================================
+-- TABLE: tally_sync_logs (New Table)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tally_sync_logs (
+    id                    SERIAL PRIMARY KEY,
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    entity_type           TEXT NOT NULL, -- 'invoice', 'ledger', 'item'
+    entity_id             UUID NOT NULL,
+    request_xml           TEXT,
+    response_xml          TEXT,
+    status                TEXT, -- 'Success', 'Error'
+    error_message         TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 -- TABLE: integration_queues
 -- ============================================================
 CREATE TABLE IF NOT EXISTS integration_queues (
@@ -390,7 +497,7 @@ ON CONFLICT (email) DO NOTHING;
 -- ============================================================
 -- SEED DATA
 -- ============================================================
-INSERT INTO gl_accounts (account_name, parent_group, account_type) VALUES
+INSERT INTO ledger_master (name, parent_group, account_type) VALUES
     ('IT Expenses',                'Indirect Expenses', 'expense'),
     ('Professional Fees',          'Indirect Expenses', 'expense'),
     ('Cloud Services',             'Indirect Expenses', 'expense'),
@@ -426,11 +533,25 @@ CREATE INDEX IF NOT EXISTS idx_ap_invoices_vendor ON ap_invoices(vendor_id);
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_date ON ap_invoices(invoice_date);
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_company ON ap_invoices(company_id);
 CREATE INDEX IF NOT EXISTS idx_vendors_company ON vendors(company_id);
-CREATE INDEX IF NOT EXISTS idx_gl_accounts_company ON gl_accounts(company_id);
-CREATE INDEX IF NOT EXISTS idx_gl_accounts_type ON gl_accounts(account_type);
+CREATE INDEX IF NOT EXISTS idx_ledger_master_company ON ledger_master(company_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_master_type ON ledger_master(account_type);
+CREATE INDEX IF NOT EXISTS idx_item_master_company ON item_master(company_id);
+CREATE INDEX IF NOT EXISTS idx_tally_sync_logs_company ON tally_sync_logs(company_id);
+CREATE INDEX IF NOT EXISTS idx_tally_sync_logs_entity ON tally_sync_logs(entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_invoice ON audit_logs(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_invoice ON processing_jobs(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_integration_queues_entity ON integration_queues(entity_id);
 CREATE INDEX IF NOT EXISTS idx_batches_company ON batches(company_id);
+
+-- Update companies
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='companies' AND column_name='tally_port') THEN
+    ALTER TABLE companies ADD COLUMN tally_port INT DEFAULT 9000;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='companies' AND column_name='tally_version') THEN
+    ALTER TABLE companies ADD COLUMN tally_version TEXT;
+  END IF;
+END $$;

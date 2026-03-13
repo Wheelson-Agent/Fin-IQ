@@ -48,6 +48,7 @@ const poolConfig: pg.PoolConfig = {
 };
 
 // Add SSL configuration if required (Aiven cloud requires SSL)
+console.log(`[DB_DEBUG] Connecting to host: ${process.env.DB_HOST}, database: ${process.env.DB_NAME}`);
 if (process.env.DB_SSL === 'require') {
     poolConfig.ssl = { rejectUnauthorized: false };
 }
