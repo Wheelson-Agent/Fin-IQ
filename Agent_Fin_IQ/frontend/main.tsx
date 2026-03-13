@@ -20,15 +20,16 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 // Pages — one file per page
 import Root from './pages/Root';
 import Dashboard from './pages/Dashboard';
-import InvoiceHub from './pages/InvoiceHub';
 import DetailView from './pages/DetailView';
-import APMonitor from './pages/APMonitor';
+import APWorkspace from './pages/APWorkspace';
 import AuditTrail from './pages/AuditTrail';
 import Config from './pages/Config';
 import Login from './pages/Login';
 import AgentPage from './pages/AgentPage';
 import Reports from './pages/Reports';
 import Vendors from './pages/Vendors';
+import ItemMaster from './pages/ItemMaster';
+import TallySyncLogs from './pages/TallySyncLogs';
 import UserProfile from './pages/UserProfile';
 import NotFound from './pages/NotFound';
 
@@ -50,14 +51,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 {/* Main app with sidebar layout */}
                 <Route element={<Root />}>
                     <Route path="/" element={<Dashboard />} />
-                    <Route path="/invoices" element={<InvoiceHub />} />
                     <Route path="/detail/:id" element={<DetailView />} />
-                    <Route path="/payables" element={<APMonitor />} />
+                    <Route path="/ap-workspace" element={<APWorkspace />} />
                     <Route path="/audit" element={<AuditTrail />} />
                     <Route path="/config" element={<Config />} />
                     <Route path="/agent" element={<AgentPage />} />
                     <Route path="/reports" element={<Reports />} />
                     <Route path="/vendors" element={<Vendors />} />
+                    <Route path="/items" element={<ItemMaster />} />
+                    <Route path="/tally-logs" element={<TallySyncLogs />} />
                     <Route path="/profile" element={<UserProfile />} />
                 </Route>
 

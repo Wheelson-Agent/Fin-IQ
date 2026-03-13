@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle, XCircle, Loader2, Upload, FileSearch, Cpu, Zap, X } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, Upload, FileSearch, Cpu, Zap, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { uploadInvoice, runPipeline } from '../../lib/api';
+import { Button } from '../../components/ui/button';
 
 /* ─────────────────────────── Types ─────────────────────────── */
 export type StageStatus = 'idle' | 'active' | 'done' | 'error';
@@ -205,6 +206,8 @@ function StageNode({ stage, index, showParticles }: { stage: PipelineStage; inde
 }
 
 /* ─────────────────── Main Component ─────────────────────────── */
+const processedBatches = new Set<string>();
+
 export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, fileDataArrays, onComplete, onDismiss, uploaderName }: ProcessingPipelineProps) {
     const STAGES_INIT: PipelineStage[] = [
         { id: 'uploading', label: 'Uploaded', sublabel: isBatch ? `Transferring ${fileNames.length} files...` : 'File secured', icon: <Upload size={28} />, status: 'active' },
@@ -218,6 +221,7 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
     const [stages, setStages] = useState<PipelineStage[]>(STAGES_INIT);
     const [particles, setParticles] = useState<Record<string, boolean>>({});
     const [batchCount, setBatchCount] = useState(0);
+    const [activeFileName, setActiveFileName] = useState<string>('');
     const timers = useRef<ReturnType<typeof setTimeout>[] | ReturnType<typeof setInterval>[]>([]);
 
     const updateStage = (id: string, status: StageStatus, errorMsg?: string, overrides: Partial<PipelineStage> = {}) => {
@@ -230,12 +234,12 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
         }
     };
 
-    const hasRun = useRef(false);
-
     useEffect(() => {
         if (!filePaths || filePaths.length === 0) return;
-        if (hasRun.current) return;
-        hasRun.current = true;
+        
+        // Prevent React 18 Strict Mode double-firing the pipeline for the exact same batch
+        if (batchName && processedBatches.has(batchName)) return;
+        if (batchName) processedBatches.add(batchName);
 
         // Reset state on new files
         setStages(STAGES_INIT);
@@ -249,8 +253,9 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 // Step 1: Uploading
                 updateStage('uploading', 'active');
 
-                const uploadedData = await runWithConcurrency(filePaths, 5, async (fp, i) => {
+                const uploadedData = await runWithConcurrency(filePaths, 1, async (fp, i) => {
                     const name = fileNames[i] || `file_${i}`;
+                    setActiveFileName(name);
                     const fileData = fileDataArrays?.[i];
                     console.log(`[Pipeline] Uploading: ${name} (${fileData ? fileData.length + ' bytes' : 'no data'})`);
                     // @ts-ignore - added uploaderName last
@@ -281,10 +286,14 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 // Step 2 & 3: Run pipeline for all files in parallel (Pre-OCR -> OCR)
                 updateStage('analyzing', 'active');
 
-                const pipelineResults = await runWithConcurrency(uploadedData, 5, async (data) => {
+                setBatchCount(0); // Reset for pipeline tracking if desired, or keep total
+                const pipelineResults = await runWithConcurrency(uploadedData, 1, async (data) => {
                     if (!data.invoice) return { success: false, error: 'No invoice record' };
+                    setActiveFileName(data.name);
                     // Use the correct file path from the created invoice record
-                    return await runPipeline(data.invoice.id, data.invoice.file_path, data.name);
+                    const res = await runPipeline(data.invoice.id, data.invoice.file_path, data.name);
+                    setBatchCount(prev => prev + 1);
+                    return res;
                 });
 
                 const hasError = pipelineResults.some(r => !r.success);
@@ -340,7 +349,13 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 onComplete();
             } catch (err: any) {
                 console.error('Pipeline error:', err);
-                updateStage('uploading', 'error', 'Upload failed');
+                // Improved technical error mapping
+                const errMsg = err.message || 'Unknown error';
+                updateStage('uploading', 'error', 'Upload failed', { 
+                    sublabel: errMsg.includes('disk') ? 'Disk space error' : 
+                              errMsg.includes('permission') ? 'Folder permission denied' : 
+                              `Technical error: ${errMsg}`
+                });
             }
         };
 
@@ -351,110 +366,92 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
     const allDone = stages[3].status === 'done';
 
     return (
-        <motion.div
-            className="bg-white rounded-[20px] border border-[#D0D9E8] shadow-[0_8px_40px_rgba(13,27,42,0.08)] overflow-hidden"
-            initial={{ opacity: 0, y: 24, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-        >
-            {/* Header bar */}
-            <div className="px-[28px] py-[16px] flex items-center justify-between border-b border-[#E2E8F0]"
-                style={{ background: 'linear-gradient(135deg, #0B1623 0%, #1A2738 100%)' }}>
-                <div className="flex items-center gap-[12px]">
-                    <motion.div
-                        className="w-[10px] h-[10px] rounded-full"
-                        style={{ background: hasFailed ? '#EF4444' : allDone ? '#22C55E' : '#1E6FD9' }}
-                        animate={!hasFailed && !allDone ? { opacity: [1, 0.3, 1], scale: [1, 1.3, 1] } : {}}
-                        transition={{ duration: 1, repeat: Infinity }}
-                    />
-                    <span className="text-white font-bold text-[14px]">
-                        {hasFailed ? 'Processing Halted' : allDone ? 'Processing Completed' : `Pipeline Active${isBatch ? ` — ${fileNames.length} documents` : ` — ${fileNames[0]}`}`}
-                    </span>
-                    {isBatch && !allDone && !hasFailed && (
-                        <motion.span
-                            className="bg-white/10 px-2 py-0.5 rounded-full text-[11px] font-mono font-bold text-white/80 ml-2"
-                            animate={{ opacity: [0.7, 1, 0.7] }}
-                            transition={{ duration: 1.2, repeat: Infinity }}
-                        >
-                            Batch Progress: {batchCount}/{fileNames.length}
-                        </motion.span>
-                    )}
-                </div>
-                {(allDone || hasFailed) && onDismiss && (
-                    <button
-                        onClick={onDismiss}
-                        className="p-1 rounded bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors flex items-center gap-1 text-[12px] font-bold"
-                    >
-                        Close <X size={14} />
-                    </button>
-                )}
-            </div>
-
-            {/* Body */}
-            <div className="px-[40px] py-[40px]">
-                <div className="flex items-start justify-between gap-[0px]">
-                    {stages.map((stage, i) => (
-                        <React.Fragment key={stage.id}>
-                            <StageNode stage={stage} index={i} showParticles={particles[stage.id] ?? false} />
-                            {i < stages.length - 1 && (
-                                <ConnectorBeam
-                                    active={stage.status === 'done' || stages[i + 1].status === 'active'}
-                                    done={stages[i + 1].status === 'done' || (hasFailed && i < stages.findIndex(s => s.status === 'error'))}
-                                    error={stages[i + 1].status === 'error'}
-                                />
+        <div className="w-full h-full flex flex-col pt-4">
+            {/* Steps Container */}
+            <div className="flex-1 overflow-y-auto px-4 pb-12">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-8">
+                    <div className="bg-[#1A2640] px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                            <h3 className="text-white font-bold tracking-tight text-sm">
+                                {hasFailed ? 'Processing Halted' : allDone ? 'Internal Processing Complete' : `Processing: ${activeFileName || 'Initializing...'}`}
+                            </h3>
+                            {isBatch && !allDone && !hasFailed && (
+                                <span className="text-[10px] bg-white/10 text-blue-200 px-2 py-0.5 rounded-full font-mono border border-white/5">
+                                    Item {batchCount}/{fileNames.length}
+                                </span>
                             )}
-                        </React.Fragment>
-                    ))}
-                </div>
-
-                {/* Batch info footer */}
-                {isBatch && hasFailed === false && allDone && (
-                    <motion.div
-                        className="mt-[32px] overflow-hidden rounded-[16px] relative shadow-[0_8px_32px_rgba(34,197,94,0.15)]"
-                        initial={{ opacity: 0, y: 15, scale: 0.98 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        transition={{ delay: 0.2, type: 'spring', stiffness: 300, damping: 25 }}
-                    >
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#22C55E] to-[#10B981] opacity-10" />
-                        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEiIGZpbGw9IiMyMkM1NUUiIGZpbGwtb3BhY2l0eT0iMC4yNCIvPjwvc3ZnPg==')] opacity-30" />
-                        <div className="relative px-[24px] py-[20px] border border-[#86EFAC]/50 flex items-center justify-between bg-white/40 backdrop-blur-md">
-                            <div className="flex items-center gap-[16px]">
-                                <div className="w-[48px] h-[48px] bg-gradient-to-br from-[#22C55E] to-[#10B981] rounded-[14px] flex items-center justify-center shadow-[0_4px_12px_rgba(34,197,94,0.3)] shrink-0">
-                                    <CheckCircle size={28} className="text-white" />
-                                </div>
-                                <div>
-                                    <div className="text-[15px] font-black text-[#065F46] tracking-tight mb-[2px]">
-                                        Pipeline Execution Spectacularly Successful
-                                    </div>
-                                    <div className="text-[13px] text-[#047857] font-medium">
-                                        All <span className="font-bold text-[#064E3B]">{fileNames.length}</span> documents analyzed, categorized, and finalized with zero errors.
-                                    </div>
-                                </div>
-                            </div>
-                            <button onClick={onDismiss} className="bg-white hover:bg-[#F0FDF4] border border-[#86EFAC] text-[#059669] px-[16px] py-[10px] rounded-[10px] text-[13px] font-bold shadow-sm transition-all focus:ring-2 focus:ring-[#22C55E]/50 cursor-pointer">
-                                Acknowledge
-                            </button>
                         </div>
-                    </motion.div>
-                )}
+                        {onDismiss && (
+                            <button 
+                                onClick={onDismiss}
+                                className="text-slate-400 hover:text-white transition-colors text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5"
+                            >
+                                <X size={14} /> Close
+                            </button>
+                        )}
+                    </div>
 
-                {/* Failure message */}
-                <AnimatePresence>
-                    {hasFailed && !isBatch && (
-                        <motion.div
-                            className="mt-[32px] bg-[#FEF2F2] border border-[#FECACA] rounded-[12px] p-[16px] text-center"
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                        >
-                            <div className="flex justify-center mb-2"><XCircle size={24} className="text-[#DC2626]" /></div>
-                            <div className="text-[14px] font-bold text-[#DC2626] mb-[4px]">Pipeline Halted</div>
-                            <div className="text-[13px] text-[#7F1D1D]">
-                                A critical error occurred during document extraction. Please verify the file integrity or provide a clearer scan.
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                    <div className="p-10">
+                        <div className="relative flex items-center justify-between gap-4">
+                            {/* Horizontal Line Background */}
+                            <div className="absolute top-[35px] left-0 right-0 h-[2px] bg-slate-100 -z-0" />
+                            
+                            {stages.map((stage, i) => (
+                                <React.Fragment key={stage.id}>
+                                    <StageNode stage={stage} index={i} showParticles={particles[stage.id] ?? false} />
+                                    {/* Connectors are handled by the space-between + StageNode margin logic or internal drawing */}
+                                </React.Fragment>
+                            ))}
+                        </div>
+
+                        {/* Summary Message */}
+                        <AnimatePresence>
+                            {hasFailed && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="mt-12 p-8 rounded-xl bg-red-50/50 border border-red-100 flex flex-col items-center text-center gap-3"
+                                >
+                                    <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-red-600 shadow-sm">
+                                        <AlertCircle size={24} />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        <h4 className="text-lg font-bold text-red-900">Pipeline Halted</h4>
+                                        <p className="text-sm text-red-600/80 max-w-md font-medium">
+                                            A technical error occurred during processing. Please verify configurations or provide a clearer scan.
+                                        </p>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {allDone && !hasFailed && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="mt-12 p-8 rounded-xl bg-emerald-50/50 border border-emerald-100 flex flex-col items-center text-center gap-3 shadow-sm"
+                                >
+                                    <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                                        <CheckCircle2 size={24} />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        <h4 className="text-lg font-bold text-emerald-900">All Operations Finished</h4>
+                                        <p className="text-sm text-emerald-600/80 font-medium">
+                                            Documents are now available in the "Ready" or "Received" tabs.
+                                        </p>
+                                    </div>
+                                    <Button 
+                                        onClick={onDismiss} 
+                                        className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white border-none shadow-md"
+                                    >
+                                        Back to Dashboard
+                                    </Button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                </div>
             </div>
-        </motion.div>
+        </div>
     );
 }

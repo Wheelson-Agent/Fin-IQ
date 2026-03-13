@@ -31,7 +31,16 @@ import { query } from './connection';
  * @returns Array of invoice rows
  */
 export async function getAllInvoices(companyId?: string) {
-    let sql = 'SELECT * FROM ap_invoices';
+    let sql = `
+        SELECT *, 
+               invoice_number as invoice_no, 
+               invoice_date as date, 
+               processing_status as status,
+               sub_total as amount,
+               tax_total as gst,
+               grand_total as total
+        FROM ap_invoices
+    `;
     const params: any[] = [];
 
     if (companyId && companyId !== 'ALL') {
@@ -52,7 +61,17 @@ export async function getAllInvoices(companyId?: string) {
  * @returns Single invoice row or null
  */
 export async function getInvoiceById(id: string) {
-    const result = await query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+    const result = await query(`
+        SELECT *, 
+               invoice_number as invoice_no, 
+               invoice_date as date, 
+               processing_status as status,
+               sub_total as amount,
+               tax_total as gst,
+               grand_total as total
+        FROM ap_invoices 
+        WHERE id = $1
+    `, [id]);
     return result.rows[0] || null;
 }
 
@@ -220,6 +239,18 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
 }
 
 /**
+ * Delete an invoice record and its associated lines.
+ * 
+ * @param id - Invoice UUID
+ */
+export async function deleteInvoice(id: string) {
+    await query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [id]);
+    await query('DELETE FROM ap_invoice_taxes WHERE ap_invoice_id = $1', [id]);
+    await query('DELETE FROM ap_invoices WHERE id = $1', [id]);
+    return true;
+}
+
+/**
  * Get invoice counts grouped by status (for Dashboard KPIs).
  * Supports optional company filtering.
  *
@@ -248,7 +279,7 @@ export async function getInvoiceStatusCounts(companyId?: string) {
 // ─────────────────────────────────────────────────────────────
 
 export async function getLedgerMasters(companyId?: string) {
-    let sql = `SELECT id, account_name as name, parent_group, account_type as ledger_type, erp_sync_id as tally_guid, is_active FROM gl_accounts WHERE is_active = true`;
+    let sql = `SELECT id, name, parent_group, account_type as ledger_type, erp_sync_id as tally_guid, is_active FROM ledger_master WHERE is_active = true`;
     const params: any[] = [];
 
     // Optional company filtering, though expense/tax ledgers might be global (NULL)
@@ -256,7 +287,7 @@ export async function getLedgerMasters(companyId?: string) {
         sql += ` AND (company_id = $1 OR company_id IS NULL)`;
         params.push(companyId);
     }
-    sql += ` ORDER BY account_type, account_name`;
+    sql += ` ORDER BY account_type, name`;
 
     const { rows } = await query(sql, params);
     return rows;
@@ -388,7 +419,16 @@ export async function saveVendor(data: {
  * Used by: Detail View items table.
  */
 export async function getInvoiceItems(invoiceId: string) {
-    const result = await query('SELECT *, unit_price as rate, line_amount as amount, gl_account_id as ledger FROM ap_invoice_lines WHERE ap_invoice_id = $1 ORDER BY created_at ASC', [invoiceId]);
+    const result = await query(`
+        SELECT *, 
+               item_id as item, 
+               unit_price as rate, 
+               line_amount as amount, 
+               COALESCE(ledger_id, gl_account_id) as ledger 
+        FROM ap_invoice_lines 
+        WHERE ap_invoice_id = $1 
+        ORDER BY created_at ASC
+    `, [invoiceId]);
     return result.rows;
 }
 
@@ -407,10 +447,10 @@ export async function saveInvoiceItems(invoiceId: string, items: any[]) {
     for (const item of items) {
         const res = await query(
             `INSERT INTO ap_invoice_lines 
-        (ap_invoice_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        (ap_invoice_id, item_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
             [
-                invoiceId, item.description, item.ledger, item.tax,
+                invoiceId, item.item || null, item.description, item.ledger || null, item.tax,
                 item.quantity || 1, item.rate || 0, item.discount || 0,
                 item.amount || (Number(item.quantity || 1) * Number(item.rate || 0))
             ]
@@ -418,6 +458,293 @@ export async function saveInvoiceItems(invoiceId: string, items: any[]) {
         results.push(res.rows[0]);
     }
     return results;
+}
+
+// ─────────────────────────────────────────────────────────────
+// N8N INGESTION
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Ingest the entire JSON payload from the n8n validation webhook.
+ * Replaces direct n8n DB insertion to prevent UUID mismatches.
+ * Now dynamically maps incoming fields to actual Database columns.
+ */
+export async function ingestN8nData(invoiceId: string, n8nData: any) {
+    // 0. Handle structure mismatch (n8n might send an Array or a single Object)
+    let payload: any;
+    if (Array.isArray(n8nData)) {
+        payload = n8nData[0];
+    } else {
+        payload = n8nData;
+    }
+
+    if (!payload || !payload.ap_invoices || payload.ap_invoices.length === 0) {
+        console.warn('[DB] ingestN8nData: Missing ap_invoices in payload', payload);
+        throw new Error('Invalid n8n data payload: missing ap_invoices');
+    }
+
+    const invData = payload.ap_invoices[0];
+    console.log(`[DB] Ingesting Invoice: ${invoiceId} - Number: ${invData.invoice_number || invData.invoiceNo}`);
+    const rawValData = invData.n8n_val_json_data || {};
+    const valString = typeof rawValData === 'string' ? rawValData : JSON.stringify(rawValData);
+
+    // Key aliases for invoice (handling various naming conventions from different n8n flows)
+    if (invData.invoice_no !== undefined && invData.invoice_number === undefined) invData.invoice_number = invData.invoice_no;
+    if (invData.invoiceNo !== undefined && invData.invoice_number === undefined) invData.invoice_number = invData.invoiceNo;
+    if (invData.date !== undefined && invData.invoice_date === undefined) invData.invoice_date = invData.date;
+    if (invData.invoiceDate !== undefined && invData.invoice_date === undefined) invData.invoice_date = invData.invoiceDate;
+    if (invData.amount !== undefined && invData.sub_total === undefined) invData.sub_total = invData.amount;
+    if (invData.subTotal !== undefined && invData.sub_total === undefined) invData.sub_total = invData.subTotal;
+    if (invData.gst !== undefined && invData.tax_total === undefined) invData.tax_total = invData.gst;
+    if (invData.taxTotal !== undefined && invData.tax_total === undefined) invData.tax_total = invData.taxTotal;
+    if (invData.total !== undefined && invData.grand_total === undefined) invData.grand_total = invData.total;
+    if (invData.grandTotal !== undefined && invData.grand_total === undefined) invData.grand_total = invData.grandTotal;
+
+    // 1. Upsert Vendor if missing
+    let vendorId = invData.vendor_id || null;
+    if (invData.vendor_name) {
+        const existingVendor = await query('SELECT * FROM vendors WHERE LOWER(name) = LOWER($1)', [invData.vendor_name]);
+        if (existingVendor.rows.length > 0) {
+            vendorId = existingVendor.rows[0].id;
+        } else {
+            const newVendor = await query(
+                `INSERT INTO vendors (name, gstin) VALUES ($1, $2) RETURNING id`,
+                [invData.vendor_name, invData.vendor_gst || null]
+            );
+            vendorId = newVendor.rows[0].id;
+        }
+    }
+
+    // Determine status
+    let finalStatus = 'Ready';
+    if (invData.n8n_validation_status === 'Failed' || !vendorId || !invData.invoice_number) {
+        finalStatus = 'Awaiting Input';
+    } else if (invData.processing_status && invData.processing_status !== 'Processing') {
+        finalStatus = invData.processing_status;
+    }
+
+    // --- DYNAMIC DATABASE SCHEMAS --- 
+    const allowedApInvoicesCols = [
+        "ocr_raw_payload", "company_id", "vendor_id", "purchase_order_id", "invoice_date", "due_date",
+        "sub_total", "tax_total", "grand_total", "currency_id", "erp_sync_logs", "retry_count",
+        "is_mapped", "is_high_amount", "pre_ocr_score", "is_posted_to_tally", "posted_to_tally_json",
+        "all_data_invoice", "ack_date", "ledger_id", "processing_time", "validation_time",
+        "approval_delay_time", "failure_reason", "failure_category", "uploader_name", "n8n_val_json_data",
+        "invoice_number", "tally_id", "pre_ocr_status", "vendor_gst", "n8n_validation_status", "irn",
+        "doc_type", "processing_status", "ack_no", "erp_sync_id", "erp_sync_status", "eway_bill_no",
+        "file_name", "file_path", "file_location", "batch_id", "vendor_name", "po_number", "gl_account"
+    ];
+
+    const allowedLinesCols = [
+        "ledger_id", "ap_invoice_id", "line_number", "line_amount", "gl_account_id", "cost_center_id",
+        "discount", "tds_amount", "item_id", "quantity", "unit_price", "description", "hsn_sac",
+        "tds_section", "possible_gl_names", "order_no", "unit", "tax", "part_no"
+    ];
+
+    const allowedTaxCols = [
+        "ap_invoice_id", "tax_code_id", "tax_amount", "base_amount"
+    ];
+    
+    // Default Overrides
+    invData.vendor_id = vendorId;
+    invData.n8n_val_json_data = valString;
+    invData.n8n_validation_status = invData.n8n_validation_status || 'Pending';
+    invData.processing_status = finalStatus;
+    invData.validation_time = new Date().toISOString();
+    invData.doc_type = invData.doc_type || 'goods';
+
+    // 2. Dynamic Update Invoice Row
+    const invoiceKeys = Object.keys(invData).filter(k => allowedApInvoicesCols.includes(k) && invData[k] !== undefined);
+    if (invoiceKeys.length > 0) {
+        let updateSql = `UPDATE ap_invoices SET `;
+        const updateParams = [invoiceId];
+        const setClauses = invoiceKeys.map((key, idx) => {
+            updateParams.push(invData[key]);
+            return `${key} = $${idx + 2}`;
+        });
+        updateSql += setClauses.join(', ') + ` WHERE id = $1`;
+        await query(updateSql, updateParams);
+    }
+
+    // 3. Line Items Mapping
+    if (payload.ap_invoice_lines) {
+        await query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [invoiceId]);
+
+        for (const line of payload.ap_invoice_lines) {
+            // LEDGER RESOLUTION LOGIC
+            // Look in order: mapped_ledger -> gl_account_id -> ledger -> possible_gl_names
+            const ledgerCandidates = [
+                line.mapped_ledger,
+                line.gl_account_id,
+                line.ledger,
+                line.possible_gl_names
+            ].filter(v => v && typeof v === 'string');
+
+            let resolvedLedgerId = null;
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+            for (const candidate of ledgerCandidates) {
+                // If it's already a valid UUID, use it
+                if (uuidRegex.test(candidate)) {
+                    resolvedLedgerId = candidate;
+                    break;
+                }
+                // Try to find by name in ledger_master
+                const ledgerRes = await query('SELECT id FROM ledger_master WHERE LOWER(name) = LOWER($1)', [candidate]);
+                if (ledgerRes.rows.length > 0) {
+                    resolvedLedgerId = ledgerRes.rows[0].id;
+                    break;
+                }
+            }
+
+            // Field Aliases for lines
+            if (line.qty !== undefined && line.quantity === undefined) line.quantity = line.qty;
+            if (line.quantity_pcs !== undefined && line.quantity === undefined) line.quantity = line.quantity_pcs;
+            if (line.rate_per_pcs !== undefined && line.unit_price === undefined) line.unit_price = line.rate_per_pcs;
+            if (line.unitPrice !== undefined && line.unit_price === undefined) line.unit_price = line.unitPrice;
+            if (line.total_amount !== undefined && line.line_amount === undefined) line.line_amount = line.total_amount;
+            if (line.lineAmount !== undefined && line.line_amount === undefined) line.line_amount = line.lineAmount;
+
+            line.ap_invoice_id = invoiceId;
+            
+            // Critical Fix: Ensure gl_account_id and ledger_id are ONLY UUIDs or null
+            line.gl_account_id = resolvedLedgerId;
+            line.ledger_id = resolvedLedgerId;
+
+            // Strict UUID cleaning for any potential UUID column
+            const uuidCols = ["gl_account_id", "ledger_id", "ap_invoice_id", "item_id", "cost_center_id"];
+            const uuidRegexLooser = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            
+            for (const col of uuidCols) {
+                if (line[col] && typeof line[col] === 'string') {
+                    if (!uuidRegexLooser.test(line[col])) {
+                        console.warn(`[DB] Rejecting invalid UUID for column ${col}: "${line[col]}"`);
+                        line[col] = null;
+                    }
+                }
+            }
+
+            const lineKeys = Object.keys(line).filter(k => allowedLinesCols.includes(k) && line[k] !== undefined);
+            if(lineKeys.length === 0) continue;
+
+            const lineParams = lineKeys.map(k => line[k]);
+            const paramPlaceholders = lineKeys.map((_, idx) => `$${idx + 1}`).join(', ');
+            
+            const insertLineSql = `INSERT INTO ap_invoice_lines (${lineKeys.join(', ')}) VALUES (${paramPlaceholders})`;
+            console.log(`[DB] Inserting Line: ${line.line_number || '?'}`);
+            await query(insertLineSql, lineParams);
+        }
+    } else {
+        console.warn(`[DB] No lines found in payload for invoice: ${invoiceId}`);
+    }
+
+    // 4. Ingest Taxes
+    if (payload.ap_invoice_taxes) {
+        await query('DELETE FROM ap_invoice_taxes WHERE ap_invoice_id = $1', [invoiceId]);
+
+        for (const tax of payload.ap_invoice_taxes) {
+            let taxCodeId = null;
+            const taxCandidates = [tax.tax_code_id, tax.tax_code, tax.description].filter(v => v);
+
+            for (const candidate of taxCandidates) {
+                if (candidate.length > 20 && candidate.includes('-')) {
+                    taxCodeId = candidate;
+                    break;
+                }
+                const taxRes = await query('SELECT id FROM tax_codes WHERE LOWER(tax_code) = LOWER($1) OR LOWER(description) = LOWER($1)', [candidate]);
+                if (taxRes.rows.length > 0) {
+                    taxCodeId = taxRes.rows[0].id;
+                    break;
+                }
+            }
+
+            tax.ap_invoice_id = invoiceId;
+            tax.tax_code_id = taxCodeId;
+
+            const taxKeys = Object.keys(tax).filter(k => allowedTaxCols.includes(k) && tax[k] !== undefined);
+            if(taxKeys.length === 0) continue;
+            
+            const taxParams = taxKeys.map(k => tax[k]);
+            const paramPlaceholders = taxKeys.map((_, idx) => `$${idx + 1}`).join(', ');
+
+            const insertTaxSql = `INSERT INTO ap_invoice_taxes (${taxKeys.join(', ')}) VALUES (${paramPlaceholders})`;
+            await query(insertTaxSql, taxParams);
+        }
+    }
+
+    return { success: true, id: invoiceId };
+}
+
+// ─────────────────────────────────────────────────────────────
+// ITEM MASTER
+// ─────────────────────────────────────────────────────────────
+
+export async function getAllItems(companyId?: string) {
+    let sql = 'SELECT * FROM item_master';
+    const params: any[] = [];
+    if (companyId && companyId !== 'ALL') {
+        sql += ' WHERE company_id = $1';
+        params.push(companyId);
+    }
+    sql += ' ORDER BY item_name ASC';
+    const { rows } = await query(sql, params);
+    return rows;
+}
+
+export async function getItemById(id: string) {
+    const { rows } = await query('SELECT * FROM item_master WHERE id = $1', [id]);
+    return rows[0] || null;
+}
+
+export async function saveItem(data: any) {
+    if (data.id) {
+        const result = await query(
+            `UPDATE item_master SET 
+            item_name = $2, item_code = $3, hsn_sac = $4, uom = $5, base_price = $6, tax_rate = $7, default_ledger_id = $8, is_active = $9
+            WHERE id = $1 RETURNING *`,
+            [data.id, data.item_name, data.item_code, data.hsn_sac, data.uom, data.base_price, data.tax_rate, data.default_ledger_id, data.is_active]
+        );
+        return result.rows[0];
+    } else {
+        const result = await query(
+            `INSERT INTO item_master (company_id, item_name, item_code, hsn_sac, uom, base_price, tax_rate, default_ledger_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            [data.company_id, data.item_name, data.item_code, data.hsn_sac, data.uom, data.base_price, data.tax_rate, data.default_ledger_id]
+        );
+        return result.rows[0];
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// TALLY SYNC LOGS
+// ─────────────────────────────────────────────────────────────
+
+export async function createTallySyncLog(data: {
+    company_id: string;
+    entity_type: string;
+    entity_id: string;
+    request_xml?: string;
+    response_xml?: string;
+    status: string;
+    error_message?: string;
+}) {
+    await query(
+        `INSERT INTO tally_sync_logs (company_id, entity_type, entity_id, request_xml, response_xml, status, error_message)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [data.company_id, data.entity_type, data.entity_id, data.request_xml, data.response_xml, data.status, data.error_message]
+    );
+}
+
+export async function getTallySyncLogs(entityId?: string) {
+    let sql = 'SELECT * FROM tally_sync_logs';
+    const params: any[] = [];
+    if (entityId) {
+        sql += ' WHERE entity_id = $1';
+        params.push(entityId);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 100';
+    const { rows } = await query(sql, params);
+    return rows;
 }
 
 

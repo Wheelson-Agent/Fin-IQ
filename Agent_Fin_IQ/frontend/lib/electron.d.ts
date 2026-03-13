@@ -4,10 +4,12 @@
  */
 interface ElectronAPI {
     invoke: (channel: string, data?: any) => Promise<any>;
+    on: (channel: string, callback: (data: any) => void) => void;
+    getPathForFile: (file: File) => string;
     checkN8nStatus?: () => Promise<boolean>;
     checkOcrStatus?: () => Promise<boolean>;
 }
 
 interface Window {
-    electronAPI?: ElectronAPI;
+    api: ElectronAPI;
 }

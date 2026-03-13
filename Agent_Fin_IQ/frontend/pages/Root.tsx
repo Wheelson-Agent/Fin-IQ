@@ -7,6 +7,7 @@ import { NotificationPanel } from '../components/NotificationPanel';
 import { FloatingAgent } from '../components/FloatingAgent';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 import { CompanyProvider, useCompany } from '../context/CompanyContext';
+import { DateProvider, useDateFilter } from '../context/DateContext';
 
 function AppShell() {
   const location = useLocation();
@@ -15,6 +16,7 @@ function AppShell() {
   const [notifOpen, setNotifOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { selectedCompany, setSelectedCompany, selectedCompanyName, companies } = useCompany();
+  const { dateFilter, setDateFilter } = useDateFilter();
 
   const handleRefresh = () => {
     window.dispatchEvent(new CustomEvent('app:refresh'));
@@ -22,11 +24,12 @@ function AppShell() {
 
   const getPageTitle = (path: string) => {
     if (path === '/') return 'Dashboard';
-    if (path.startsWith('/invoices')) return 'Doc Hub';
-    if (path.startsWith('/payables')) return 'Accounts Payable';
+    if (path.startsWith('/ap-workspace')) return 'AP Workspace';
     if (path.startsWith('/detail')) return 'Invoice Detail';
     if (path.startsWith('/audit')) return 'Audit Trail';
-    if (path.startsWith('/vendors')) return 'Vendors';
+    if (path.startsWith('/vendors')) return 'Vendor Master';
+    if (path.startsWith('/items')) return 'Item Master';
+    if (path.startsWith('/tally-logs')) return 'Tally Sync Monitor';
     if (path.startsWith('/reports')) return 'Reports';
     if (path.startsWith('/config')) return 'Configuration';
     if (path.startsWith('/user')) return 'User & Company';
@@ -50,6 +53,8 @@ function AppShell() {
           selectedCompanyId={selectedCompany}
           onCompanyChange={setSelectedCompany}
           companies={companies}
+          dateFilter={dateFilter}
+          setDateFilter={setDateFilter}
         />
 
         {location.pathname.startsWith('/agent') ? (
@@ -74,7 +79,9 @@ export default function Root() {
   return (
     <ThemeProvider>
       <CompanyProvider>
-        <AppShell />
+        <DateProvider>
+          <AppShell />
+        </DateProvider>
       </CompanyProvider>
     </ThemeProvider>
   );
