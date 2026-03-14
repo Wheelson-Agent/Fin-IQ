@@ -101,11 +101,25 @@ export async function updateInvoiceStatus(id: string, status: string, userName?:
 }
 
 /**
+ * Update invoice OCR data and main fields.
+ */
+export async function updateInvoiceOCR(id: string, data: any): Promise<Invoice> {
+    return invoke<Invoice>('invoices:update-ocr', { id, data });
+}
+
+/**
  * Delete an invoice permanently.
  * @param id - Invoice UUID
  */
 export async function deleteInvoice(id: string): Promise<{ success: boolean }> {
     return invoke<{ success: boolean }>('invoices:delete', { id });
+}
+
+/**
+ * Update the remarks (failure_reason) of an invoice.
+ */
+export async function updateInvoiceRemarks(id: string, remarks: string): Promise<Invoice> {
+    return invoke<Invoice>('invoices:update-remarks', { id, remarks });
 }
 
 /**

@@ -137,6 +137,13 @@ export function registerIpcHandlers() {
 
 
     /**
+     * Update invoice OCR data and main fields.
+     */
+    ipcMain.handle('invoices:update-ocr', async (_event, { id, data }) => {
+        return await queries.updateInvoiceWithOCR(id, data);
+    });
+
+    /**
      * Handle file upload — creates invoice record and triggers pipeline.
      * Input: { filePath: string, fileName: string, batchId?: string, fileData?: number[] }
      * Output: Created invoice row
@@ -252,6 +259,13 @@ export function registerIpcHandlers() {
         }
 
         return updated;
+    });
+
+    /**
+     * Update invoice remarks.
+     */
+    ipcMain.handle('invoices:update-remarks', async (_event, { id, remarks }) => {
+        return await queries.updateInvoiceRemarks(id, remarks);
     });
 
     /**

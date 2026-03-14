@@ -9,8 +9,19 @@ import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR } from '../lib/api';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
+
+const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  
+  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const y = String(date.getFullYear());
+  return `${d}${m}${y}`;
+};
 
 
 
@@ -36,23 +47,9 @@ export default function DetailView() {
 
   const [newVendor, setNewVendor] = useState({ name: '', underGroup: 'Sundry Creditors', gstin: '', state: 'Karnataka' });
   const [newLedger, setNewLedger] = useState({ name: '', underGroup: 'Indirect Expenses', gstApplicable: 'Yes', hsn: '' });
-
-  const [vendorDetails, setVendorDetails] = useState({
-    vendorName: '',
-    billNumber: '',
-    billingDate: '',
-    dueDate: ''
-  });
-
   const [billingAddress, setBillingAddress] = useState('Karnataka, India');
 
-  const [taxDetails, setTaxDetails] = useState({
-    gstTreatment: 'Regular',
-    gstin: '29AAECT3502F1ZK',
-    sourceOfSupply: 'Karnataka',
-    destinationOfSupply: 'Karnataka'
-  });
-
+  const [docFields, setDocFields] = useState<Record<string, any>>({});
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -112,34 +109,83 @@ export default function DetailView() {
             }
           }
           setIsVendorMapped(vendorVerified);
-          setNewVendor(prev => ({ ...prev, name: invoiceRecord.vendor_name || '' }));
+          // Build unified Document Fields from Invoice table and OCR Raw Payload
+          const fields: Record<string, any> = {
+            irn: invoiceRecord.irn || '',
+            ack_no: invoiceRecord.ack_no || '',
+            ack_date: invoiceRecord.ack_date || '',
+            eway_bill_no: invoiceRecord.eway_bill_no || '',
+            file_name: invoiceRecord.file_name || '',
+            invoice_no: invoiceRecord.invoice_no || invoiceRecord.invoice_number || '',
+            date: formatDateToDDMMYYYY(invoiceRecord.date || invoiceRecord.invoice_date),
+            vendor_name: invoiceRecord.vendor_name || '',
+            vendor_gst: invoiceRecord.vendor_gst || '',
+            supplier_pan: '',
+            supplier_address: '',
+            buyer_name: '',
+            buyer_gst: '',
+            bank_name: '',
+            account_no: '',
+            ifsc_code: '',
+            total_in_words: invoiceRecord.total_in_words || '',
+            sub_total: invoiceRecord.sub_total || 0,
+            round_off: invoiceRecord.round_off || 0,
+            grand_total: invoiceRecord.grand_total || 0,
+            cgst: invoiceRecord.cgst || 0,
+            sgst: invoiceRecord.sgst || 0,
+            tax_total: invoiceRecord.tax_total || 0,
+            doc_type: invoiceRecord.doc_type || 'Services',
+            // Validation Fields (explicitly initialized to show chips)
+            buyer_verification: false,
+            gst_validation_status: false,
+            invoice_ocr_data_valdiation: false,
+            vendor_verification: false,
+            duplicate_check: true, // Default to true so 'Check Passed' is false (Red) if missing
+            line_item_match_status: false,
+          };
 
-          // Fetch full vendor details if mapped
-          let mappedVendor: Vendor | null = null;
-          if (invoiceRecord.vendor_id) {
+          if (invoiceRecord.ocr_raw_payload) {
             try {
-              mappedVendor = await getVendorById(invoiceRecord.vendor_id);
+              const raw = typeof invoiceRecord.ocr_raw_payload === 'string' 
+                ? JSON.parse(invoiceRecord.ocr_raw_payload) 
+                : invoiceRecord.ocr_raw_payload;
+              
+              Object.keys(raw).forEach(key => {
+                const normalizedKey = key.toLowerCase().replace(/ /g, '_');
+                if (fields[normalizedKey] !== undefined) {
+                  fields[normalizedKey] = raw[key];
+                } else if (fields[key] !== undefined) {
+                   fields[key] = raw[key];
+                } else {
+                   fields[normalizedKey] = raw[key];
+                }
+              });
             } catch (e) {
-              console.warn('[DetailView] Failed to fetch mapped vendor details');
+              console.warn('[DetailView] Failed to parse ocr_raw_payload');
             }
           }
 
-          setVendorDetails({
-            vendorName: invoiceRecord.vendor_name || '',
-            billNumber: invoiceRecord.invoice_no || invoiceRecord.invoice_number || '',
-            billingDate: invoiceRecord.date ? (typeof invoiceRecord.date === 'string' ? invoiceRecord.date : new Date(invoiceRecord.date).toLocaleDateString()) : '',
-            dueDate: invoiceRecord.due_date ? (typeof invoiceRecord.due_date === 'string' ? invoiceRecord.due_date : new Date(invoiceRecord.due_date).toLocaleDateString()) : ''
-          });
+          if (invoiceRecord.n8n_val_json_data) {
+            try {
+              const n8nData = typeof invoiceRecord.n8n_val_json_data === 'string' 
+                ? JSON.parse(invoiceRecord.n8n_val_json_data) 
+                : invoiceRecord.n8n_val_json_data;
+              
+              Object.keys(n8nData).forEach(key => {
+                const normalizedKey = key.toLowerCase().replace(/ /g, '_');
+                // Priority: Merge into fields if they exist as validation keys
+                if (fields[normalizedKey] !== undefined) {
+                  fields[normalizedKey] = n8nData[key];
+                } else if (fields[key] !== undefined) {
+                  fields[key] = n8nData[key];
+                }
+              });
+            } catch (e) {
+              console.warn('[DetailView] Failed to parse n8n_val_json_data for fields mapping');
+            }
+          }
 
-          // Use Vendor Master address if available, otherwise fallback to "Karnataka, India"
-          setBillingAddress(mappedVendor?.address || 'Karnataka, India');
-
-          setTaxDetails({
-            gstTreatment: mappedVendor?.under_group || 'Regular',
-            gstin: invoiceRecord.vendor_gst || mappedVendor?.gstin || '29AAECT3502F1ZK',
-            sourceOfSupply: mappedVendor?.state || 'Karnataka',
-            destinationOfSupply: 'Karnataka'
-          });
+          setDocFields(fields);
 
           // Populate Dropdown Options - Safe access
           if (Array.isArray(ledgersRecord)) {
@@ -150,21 +196,50 @@ export default function DetailView() {
           }
 
           if (itemsRecord && itemsRecord.length > 0) {
-            setLineItems(itemsRecord.map(item => ({
-              id: item.id || Math.random(),
-              description: item.description || '',
-              ledger: item.ledger || '',
-              tax: item.tax || '',
-              qty: Number(item.quantity || 0),
-              rate: Number(item.rate || item.unit_price || 0),
-              discount: Number(item.discount || 0)
-            })));
+            setLineItems(itemsRecord.map(item => {
+              const qty = Number(item.quantity || 1);
+              const totalAmount = Number(item.line_amount || 0);
+              let rate = Number(item.rate || item.unit_price || 0);
+              if (rate === 0 && totalAmount > 0) {
+                rate = totalAmount / qty;
+              }
+              
+              let ledger = item.ledger || '';
+              
+              // Services special mapping
+              const lowerDocType = invoiceRecord.doc_type?.toLowerCase() || '';
+              if (lowerDocType.includes('service')) {
+                const raw = typeof invoiceRecord.ocr_raw_payload === 'string' 
+                  ? JSON.parse(invoiceRecord.ocr_raw_payload) 
+                  : invoiceRecord.ocr_raw_payload;
+                
+                if (raw?.line_items && Array.isArray(raw.line_items)) {
+                  // Try to find matching item by description or index
+                  const ocrItem = raw.line_items[itemsRecord.indexOf(item)];
+                  if (ocrItem && ocrItem.mapped_ledger) {
+                    ledger = ocrItem.mapped_ledger;
+                  }
+                }
+              }
+
+              return {
+                id: item.id || Math.random(),
+                description: item.description || '',
+                ledger: ledger,
+                hsn_sac: item.hsn_sac || '',
+                tax: item.tax || '',
+                qty: qty,
+                rate: rate,
+                discount: Number(item.discount || 0)
+              };
+            }));
           } else {
             // No line items in DB — start with one empty row for manual entry
             setLineItems([{
               id: Date.now(),
               description: '',
               ledger: '',
+              hsn_sac: '',
               tax: '',
               qty: 1,
               rate: 0,
@@ -234,7 +309,7 @@ export default function DetailView() {
 
   const handleAddLineItem = () => {
     if (readOnly) return;
-    setLineItems([...lineItems, { id: Date.now(), description: '', ledger: '', tax: '', qty: 1, rate: 0, discount: 0 }]);
+    setLineItems([...lineItems, { id: Date.now(), description: '', ledger: '', hsn_sac: '', tax: '', qty: 1, rate: 0, discount: 0 }]);
   };
 
   const handleRemoveLineItem = (id: number) => {
@@ -395,7 +470,7 @@ export default function DetailView() {
           {/* Form Header */}
           <div className="h-[72px] flex items-center justify-between px-8 bg-white border-b border-slate-100 shrink-0 sticky top-0 z-20">
             <div className="flex items-center gap-3">
-              <h2 className="text-[19px] font-black text-slate-900 tracking-tight">Tally Detail View</h2>
+              <h2 className="text-[19px] font-black text-slate-900 tracking-tight">Detail View</h2>
             </div>
 
             <div className="flex gap-3">
@@ -424,14 +499,17 @@ export default function DetailView() {
                       await saveInvoiceItems(id, lineItems.map(item => ({
                         description: item.description,
                         ledger: item.ledger,
+                        hsn_sac: item.hsn_sac,
                         tax: item.tax,
                         quantity: item.qty,
                         rate: item.rate,
                         discount: item.discount,
                         item: item.item_id || null
                       })));
+                      // Persist dynamic document fields
+                      await updateInvoiceOCR(id, docFields);
                       await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
-                      alert('Document Approved and posted to Tally.');
+                      alert('Document Approved and posted.');
                       navigate('/ap-workspace');
                     } catch (err) {
                       alert('Failed to save and approve: ' + err);
@@ -442,7 +520,7 @@ export default function DetailView() {
                   className="h-10 px-6 bg-[#3b82f6] hover:bg-[#2563eb] text-white font-black rounded-xl shadow-[0_4px_12px_rgba(59,130,246,0.3)] border-none transition-all active:scale-95 flex items-center gap-2"
                 >
                   {saving ? <RefreshCw size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                  Approve & Post to Tally
+                  Approve & Post
                 </Button>
               )}
             </div>
@@ -471,9 +549,9 @@ export default function DetailView() {
                       </div>
                       <div className="flex-1">
                         <p className="text-[14px] font-bold text-[#b91c1c] leading-tight flex items-center gap-2">
-                          Tally Vendor Not Found. 
+                          Vendor Not Found. 
                           <button onClick={() => setShowVendorSlideout(true)} className="text-[#ef4444] underline decoration-2 underline-offset-4 hover:text-[#dc2626] transition-colors">
-                            Create Master record in Tally
+                            Create Master record
                           </button> 
                           to proceed.
                         </p>
@@ -495,85 +573,101 @@ export default function DetailView() {
                   )}
                 </div>
 
-                {/* Form Body */}
-                <div className="px-8 py-8 space-y-10">
-                  {/* Vendor Details Section */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2">
-                       <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Vendor Details</h3>
-                       <div className="h-[2px] flex-1 bg-slate-50" />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-x-12 gap-y-8">
-                       <InputField 
-                        label="Vendor Name" 
-                        value={vendorDetails.vendorName} 
-                        required 
-                        onChange={(val: string) => setVendorDetails({ ...vendorDetails, vendorName: val })} 
-                        Icon={Edit2} 
-                       />
-                       <InputField 
-                        label="Bill Number" 
-                        value={vendorDetails.billNumber} 
-                        required 
-                        onChange={(val: string) => setVendorDetails({ ...vendorDetails, billNumber: val })} 
-                       />
-                       <InputField 
-                        label="Billing Date" 
-                        value={vendorDetails.billingDate} 
-                        required 
-                        onChange={(val: string) => setVendorDetails({ ...vendorDetails, billingDate: val })} 
-                        Icon={Calendar} 
-                       />
-                       <InputField 
-                        label="Due Date" 
-                        value={vendorDetails.dueDate} 
-                        required 
-                        onChange={(val: string) => setVendorDetails({ ...vendorDetails, dueDate: val })} 
-                        Icon={Calendar} 
-                       />
+                  {/* Validation Status Table */}
+                  <div className="mb-6 px-8 pt-4">
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                          <tr>
+                            <th className="py-2.5 px-5 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[60%]">Validation Check</th>
+                            <th className="py-2.5 px-5 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[40%]">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {[
+                            { label: 'Company Verified', key: 'buyer_verification' },
+                            { label: 'GST Validated', key: 'gst_validation_status' },
+                            { label: 'Data Validated', key: 'invoice_ocr_data_valdiation' },
+                            { label: 'Vendor Verified', key: 'vendor_verification' },
+                            { label: 'Duplicate Check Passed', key: 'duplicate_check', inverse: true },
+                            { label: 'Stock Items Matched', key: 'line_item_match_status' },
+                          ].filter(f => {
+                            if (f.key === 'line_item_match_status') {
+                              return !docFields.doc_type?.toLowerCase().includes('service');
+                            }
+                            return true;
+                          }).map(({ label, key, inverse }) => {
+                            const value = docFields[key];
+                            
+                            // Robust boolean check: handles true, "True", "true"
+                            const isValTrue = value === true || 
+                                             (typeof value === 'string' && value.toLowerCase() === 'true');
+                            
+                            const isSuccess = inverse ? !isValTrue : isValTrue;
+                            return (
+                              <tr key={key} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="py-2.5 px-5 text-[13px] font-bold text-slate-700">{label}</td>
+                                <td className="py-2.5 px-5">
+                                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black uppercase tracking-wider ${
+                                    isSuccess 
+                                      ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
+                                      : 'bg-rose-50 text-rose-600 border-rose-100'
+                                  }`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${isSuccess ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                                    {isSuccess ? 'Passed' : 'Failed'}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
 
-                  {/* Tax Details Section */}
+                  {/* Form Body */}
+                <div className="px-8 py-8 space-y-10">
+                  {/* Document Fields Section (Dynamic from OCR & DB) */}
                   <div className="space-y-6">
                     <div className="flex items-center gap-2">
-                       <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Tax Details</h3>
+                       <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Document Fields</h3>
                        <div className="h-[2px] flex-1 bg-slate-50" />
                     </div>
                     
                     <div className="grid grid-cols-2 gap-x-12 gap-y-8">
-                       <InputField 
-                        label="GST Treatment" 
-                        value={taxDetails.gstTreatment} 
-                        required 
-                        onChange={(val: string) => setTaxDetails({ ...taxDetails, gstTreatment: val })} 
-                        Icon={ChevronDown}
-                        selectOptions={['Regular', 'Composition', 'Unregistered', 'Consumer']}
-                       />
-                       <InputField 
-                        label="GSTIN" 
-                        value={taxDetails.gstin} 
-                        required 
-                        onChange={(val: string) => setTaxDetails({ ...taxDetails, gstin: val })} 
-                        Icon={Edit2} 
-                       />
-                       <InputField 
-                        label="Source of supply" 
-                        value={taxDetails.sourceOfSupply} 
-                        required 
-                        onChange={(val: string) => setTaxDetails({ ...taxDetails, sourceOfSupply: val })} 
-                        Icon={ChevronDown}
-                        selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']}
-                       />
-                       <InputField 
-                        label="Destination of supply" 
-                        value={taxDetails.destinationOfSupply} 
-                        required 
-                        onChange={(val: string) => setTaxDetails({ ...taxDetails, destinationOfSupply: val })} 
-                        Icon={ChevronDown}
-                        selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']}
-                       />
+                       {[
+                         { label: 'IRN', key: 'irn' },
+                         { label: 'Ack No', key: 'ack_no' },
+                         { label: 'Ack Date', key: 'ack_date' },
+                         { label: 'E-Way Bill No', key: 'eway_bill_no' },
+                         { label: 'filename', key: 'file_name' },
+                         { label: 'Invoice No', key: 'invoice_no' },
+                         { label: 'Invoice Date', key: 'date' },
+                         { label: 'Seller Name', key: 'vendor_name' },
+                         { label: 'Supplier GST', key: 'vendor_gst' },
+                         { label: 'Supplier PAN', key: 'supplier_pan' },
+                         { label: 'Supplier Address', key: 'supplier_address' },
+                         { label: 'Buyer Name', key: 'buyer_name' },
+                         { label: 'Buyer GST', key: 'buyer_gst' },
+                         { label: 'Bank Name', key: 'bank_name' },
+                         { label: 'Account No', key: 'account_no' },
+                         { label: 'IFSC Code', key: 'ifsc_code' },
+                         { label: 'Total Amount in Words', key: 'total_in_words' },
+                         { label: 'Taxable Value', key: 'sub_total' },
+                         { label: 'Round Off', key: 'round_off' },
+                         { label: 'Total Invoice Amount', key: 'grand_total' },
+                         { label: 'CGST', key: 'cgst' },
+                         { label: 'SGST', key: 'sgst' },
+                         { label: 'Sum of GST Amount', key: 'tax_total' },
+                       ].map(({ label, key }) => (
+                         <InputField 
+                          key={key}
+                          label={label} 
+                          value={docFields[key] === null || docFields[key] === undefined ? '' : String(docFields[key])} 
+                          onChange={(val: string) => setDocFields({ ...docFields, [key]: val })} 
+                          Icon={label.toLowerCase().includes('date') ? Calendar : Edit2} 
+                         />
+                       ))}
                     </div>
                   </div>
 
@@ -587,21 +681,35 @@ export default function DetailView() {
                     <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
                       <table className="w-full text-left border-collapse">
                         <thead className="bg-slate-50/80 border-b border-slate-200">
-                          <tr>
-                            <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[25%]">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                            <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">Ledger <span className="text-red-500 ml-0.5">*</span></th>
-                            <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[18%]">Tax <span className="text-red-500 ml-0.5">*</span></th>
-                            <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Quantity</th>
-                            <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%] text-center">Unit Rate</th>
-                            <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Discount</th>
-                            {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
-                          </tr>
-                        </thead>
+                           <tr>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[30%]">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">Ledger <span className="text-red-500 ml-0.5">*</span></th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%]">HSN/SAC</th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Quantity</th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%] text-center">Unit Rate</th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Discount</th>
+                             {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
+                           </tr>
+                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {lineItems.map((item, index) => (
                             <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                               <td className="p-3 align-top">
-                                <input disabled={readOnly} className={`w-full border p-2 rounded-[6px] text-[13px] outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[38px]'}`} value={item.description} onChange={(e) => { const newLines = [...lineItems]; newLines[index].description = e.target.value; setLineItems(newLines); }} />
+                                <input 
+                                  disabled={readOnly} 
+                                  className={`w-full border p-2 rounded-[6px] text-[13px] outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[38px]'}`} 
+                                  value={item.description} 
+                                  onChange={(e) => { 
+                                    const val = e.target.value;
+                                    const newLines = [...lineItems]; 
+                                    newLines[index].description = val; 
+                                    // If Goods, sync ledger
+                                    if (docFields.doc_type?.toLowerCase().includes('goods')) {
+                                      newLines[index].ledger = val;
+                                    }
+                                    setLineItems(newLines); 
+                                  }} 
+                                />
                               </td>
                               <td className="p-3 align-top">
                                 <CustomTableSelect
@@ -614,14 +722,14 @@ export default function DetailView() {
                                   onCreateClick={() => { setActiveLedgerIndex(index); setShowLedgerSlideout(true); }}
                                 />
                               </td>
-                              <td className="p-3 align-top">
-                                <CustomTableSelect
-                                  value={item.tax}
-                                  onChange={(val: string) => { const newLines = [...lineItems]; newLines[index].tax = val; setLineItems(newLines); }}
-                                  options={taxOptions}
-                                  disabled={readOnly}
-                                />
-                              </td>
+                               <td className="p-3 align-top">
+                                 <input 
+                                   disabled={readOnly} 
+                                   className={`w-full border p-2 rounded-[6px] text-[13px] outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[38px]'}`} 
+                                   value={item.hsn_sac} 
+                                   onChange={(e) => { const newLines = [...lineItems]; newLines[index].hsn_sac = e.target.value; setLineItems(newLines); }} 
+                                 />
+                               </td>
                               <td className="p-3 align-top">
                                 <input disabled={readOnly} type="number" className={`w-full border p-2 rounded-[6px] text-[13px] text-right font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`} value={item.qty} onChange={(e) => { const newLines = [...lineItems]; newLines[index].qty = Number(e.target.value); setLineItems(newLines); }} />
                               </td>
@@ -658,33 +766,9 @@ export default function DetailView() {
                     {/* Totals Box at bottom of Line Items */}
                     <div className="px-6 pb-6 pt-4 flex justify-end">
                       <div className="bg-white border rounded-[12px] p-5 w-[420px] flex flex-col gap-3 ml-auto border-transparent">
-                        <div className="flex justify-between items-center text-[#64748B] text-[13px] font-semibold">
-                          <span>Sub Total</span>
-                          <span className="text-[14px] font-bold font-mono text-[#1A2640]">{fmt(subTotal)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-[#64748B] text-[13px] font-medium">
-                          <span>CGST 9%</span>
-                          <span className="font-mono">{fmt(cgst)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-[#64748B] text-[13px] font-medium">
-                          <span>SGST 9%</span>
-                          <span className="font-mono">{fmt(sgst)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-[#64748B] text-[13px] font-medium">
-                          <span>TDS</span>
-                          <div className="flex items-center gap-2">
-                            {!readOnly && (
-                              <div className="border border-[#D0D9E8] rounded-[6px] px-2 py-1 flex items-center gap-2 bg-[#F8FAFC] cursor-pointer">
-                                <span className="text-[12px] text-[#1A2640] font-semibold">Select TDS</span>
-                                <ChevronDown size={14} />
-                              </div>
-                            )}
-                            <span className="font-mono text-[#1A2640] font-bold">{fmt(0)}</span>
-                          </div>
-                        </div>
-                        <div className="flex justify-between items-center pt-5 mt-2 border-t border-slate-100 border-dashed">
+                        <div className="flex justify-between items-center pt-2 mt-2">
                           <span className="text-[16px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-                          <span className="text-[28px] font-black text-slate-900 tracking-tighter">{fmt(total)}</span>
+                          <span className="text-[32px] font-black text-slate-900 tracking-tighter font-mono">{fmt(total)}</span>
                         </div>
                       </div>
                     </div>
@@ -732,8 +816,8 @@ export default function DetailView() {
                     });
                     await mapVendorToInvoice(id, vendor.id);
                     setIsVendorMapped(true);
+                    setDocFields(prev => ({ ...prev, vendor_name: newVendor.name }));
                     setShowVendorSlideout(false);
-                    setVendorDetails(prev => ({ ...prev, vendorName: vendor.name }));
                   } catch (err) {
                     alert('Failed to create vendor: ' + err);
                   } finally {
