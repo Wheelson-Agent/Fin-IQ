@@ -15,7 +15,7 @@ import { Progress } from '../components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
 import { useDateFilter } from '../context/DateContext';
 import { getInvoices, uploadInvoice, runPipeline, deleteInvoice, updateInvoiceRemarks } from '../lib/api';
-import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
+import { ProcessingPipeline, PipelineStage } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
 
 // --- Types ---
@@ -92,24 +92,117 @@ export default function APWorkspace() {
   const [batchName, setBatchName] = useState('');
   const [pendingUploads, setPendingUploads] = useState<FileList | File[] | null>(null);
 
+  // Lifted Pipeline State
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[] | null>(null);
+  const [pipelineParticles, setPipelineParticles] = useState<Record<string, boolean>>({});
+
   // Fetch real data on mount
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (background = false) => {
+    if (!background) setLoading(true);
     try {
       const invoices = await getInvoices();
       if (invoices && Array.isArray(invoices)) {
         // Map backend Invoice type to frontend APRecord type
         const mapped: APRecord[] = invoices.map((inv: any) => {
           // Robust status mapping
-          let status: RecordStatus = 'received';
+          // Priority-based status mapping based on validation results
           const bStatus = (inv.processing_status || '').toLowerCase();
+          let status: RecordStatus = 'received';
+
+          const docType = (inv.doc_type || '').toLowerCase();
+          const isGoods = docType.includes('goods');
+
+          // Parse validation data EXCLUSIVELY from OCR raw payload (as requested)
+          let valData: any = {};
+          const parseJSON = (data: any) => {
+            if (!data) return {};
+            try {
+              return typeof data === 'string' ? JSON.parse(data) : data;
+            } catch (e) {
+              return {};
+            }
+          };
+
+          const raw = parseJSON(inv.ocr_raw_payload);
+
+          // Normalize keys to match labels and database keys
+          Object.keys(raw).forEach(key => {
+            const normalized = key.toLowerCase().replace(/ /g, '_');
+            valData[key] = raw[key];
+            valData[normalized] = raw[key];
+          });
+
+          // Also merge n8n validation data (Final validation results)
+          const n8nData = parseJSON(inv.n8n_val_json_data);
+          Object.keys(n8nData).forEach(key => {
+            const normalized = key.toLowerCase().replace(/ /g, '_');
+            valData[key] = n8nData[key];
+            valData[normalized] = n8nData[key];
+          });
+
+          const getVal = (key: string, oldKey?: string) => {
+            const val = valData[key] ?? valData[key.toLowerCase().replace(/ /g, '_')] ?? 
+                      (oldKey ? (inv[oldKey] ?? inv[key]) : inv[key]);
+            return val === true || String(val).toLowerCase() === 'true';
+          };
+
+          const vVerif = getVal('Vendor Verified', 'vendor_verification');
+          const lMatch = getVal('Stock Items Matched', 'line_item_match_status');
+          const bVerif = getVal('Company Verified', 'buyer_verification');
+          const gValid = getVal('GST Validated', 'gst_validation_status');
+          const dValid = getVal('Data Validated', 'invoice_ocr_data_valdiation');
+          const isDup = getVal('Document Duplicate Check', 'duplicate_check');
           
-          if (bStatus === 'processing') status = 'processing';
-          else if (bStatus === 'pending approval') status = 'received';
-          else if (bStatus === 'ready' || bStatus === 'verified') status = 'ready';
-          else if (bStatus === 'failed' || bStatus === 'ocr_failed') status = 'handoff';
-          else if (bStatus === 'auto-posted' || bStatus === 'posted') status = 'posted';
-          else if (bStatus === 'awaiting input') status = 'input';
+          const isUnknownFile = !inv.file_name || inv.file_name.toLowerCase() === 'unknown' || inv.file_name === 'N/A';
+          const isUnknownInv = !(inv.invoice_number || inv.invoice_no) || 
+                               (inv.invoice_number?.toLowerCase() === 'unknown' || inv.invoice_no?.toLowerCase() === 'unknown') || 
+                               (inv.invoice_number === 'N/A' || inv.invoice_no === 'N/A');
+
+          if (bStatus === 'processing') {
+            status = 'processing';
+          } else if (bStatus === 'posted' || bStatus === 'auto-posted' || (inv.erp_sync_status || '').toLowerCase() === 'processed') {
+            status = 'posted';
+          } else {
+            // Check for failures that go to handoff (Highest Priority)
+            // If ALL n8n checks pass, we SKIP the handoff failure logic entirely
+            const n8nAllPassed = bVerif && gValid && dValid && isDup && vVerif && (!isGoods || lMatch) && !isUnknownFile && !isUnknownInv;
+
+            if (bStatus.includes('ready to post') || n8nAllPassed) {
+              status = 'ready';
+            }
+            else if (!bVerif || !gValid || !dValid || !isDup || isUnknownFile || isUnknownInv) {
+              status = 'handoff';
+            }
+            else if (!vVerif || (isGoods && !lMatch)) {
+              status = 'input';
+            } 
+            else if (bStatus === 'ready' || bStatus === 'verified' || bStatus === 'pending approval') {
+              status = 'ready';
+            }
+            else if (bStatus === 'awaiting input') {
+              status = 'input';
+            }
+            else if (bStatus === 'failed' || bStatus === 'ocr_failed') {
+              status = 'handoff';
+            }
+          }
+
+          // Construct Failure Reasons (remarks) dynamically with DetailView matching labels
+          const reasons: string[] = [];
+          if ((inv.pre_ocr_status || '').toLowerCase() === 'failed' || bStatus === 'failed' || bStatus === 'ocr_failed') {
+            reasons.push('Doc Failed');
+          }
+          if (isUnknownFile || isUnknownInv) {
+            reasons.push('Unknown');
+          }
+          if (!bVerif) reasons.push('Company Verified');
+          if (!gValid) reasons.push('GST Validated');
+          if (!dValid) reasons.push('Data Validated');
+          if (isDup) reasons.push('Document Duplicate Check');
+          if (!vVerif) reasons.push('Vendor Verified');
+          if (isGoods && !lMatch) reasons.push('Stock Items Matched');
+
+          const dynamicRemarks = reasons.length > 0 ? reasons.join(', ') : 'Verified';
 
           return {
             id: inv.id,
@@ -122,9 +215,9 @@ export default function APWorkspace() {
             status: status,
             docType: inv.doc_type || 'PDF Invoice',
             items: Number(inv.items_count || 0),
-            remarks: inv.failure_reason || 'Verified',
+            remarks: dynamicRemarks,
             technicalStage: inv.n8n_validation_status === 'True' ? 'Verified' : (inv.n8n_validation_status || 'Processing'),
-            reason: inv.failure_reason || undefined,
+            reason: dynamicRemarks !== 'Verified' ? dynamicRemarks : (inv.failure_reason || undefined),
             irn: inv.irn,
             ewayBill: inv.eway_bill_no,
             createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : new Date().toISOString()
@@ -135,7 +228,7 @@ export default function APWorkspace() {
     } catch (err) {
       console.error("Failed to load invoices", err);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
@@ -177,6 +270,8 @@ export default function APWorkspace() {
     setPipelineState({ fileNames, filePaths, fileDataArrays });
     setShowBatchDialog(false);
     setPendingUploads(null);
+    setPipelineStages(null); // Reset for new batch
+    setPipelineParticles({});
     setShowPipeline(true);
     setActiveTab('processing');
   };
@@ -415,7 +510,7 @@ export default function APWorkspace() {
 
 
 
-  const tabClass = "relative z-10 -mb-[1px] rounded-t-[6px] border px-6 py-2.5 text-[13px] font-medium transition-all data-[state=active]:border-slate-400 data-[state=active]:border-b-white data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-none data-[state=inactive]:border-slate-200 data-[state=inactive]:border-b-transparent data-[state=inactive]:bg-transparent data-[state=inactive]:text-slate-500 data-[state=inactive]:underline data-[state=inactive]:underline-offset-4 hover:data-[state=inactive]:text-slate-800 hover:data-[state=inactive]:bg-slate-50";
+  const tabClass = "relative z-10 px-6 py-4 text-[14px] font-bold transition-all rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 data-[state=inactive]:text-slate-500 hover:text-slate-800 transition-colors";
 
   return (
     <div 
@@ -529,15 +624,15 @@ export default function APWorkspace() {
       <Card className="flex-1 min-h-[500px] flex flex-col overflow-hidden border-slate-200 shadow-sm">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col w-full h-full">
           <div className="px-6 pt-[18px] bg-slate-50/50">
-            <TabsList className="bg-transparent border-b border-slate-400 w-full justify-start rounded-none h-auto p-0 space-x-2">
+            <TabsList className="bg-transparent border-b border-slate-200 w-full justify-start rounded-none h-auto p-0 space-x-2">
                <TabsTrigger value="received" className={tabClass}>Received ({counts.received})</TabsTrigger>
               <TabsTrigger value="ready" className={tabClass}>Ready to Post ({counts.ready})</TabsTrigger>
               <TabsTrigger value="input" className={tabClass}>Awaiting Input ({counts.input})</TabsTrigger>
               <TabsTrigger value="handoff" className={tabClass}>Handoff ({counts.handoff})</TabsTrigger>
               <TabsTrigger value="posted" className={tabClass}>Posted ({counts.posted})</TabsTrigger>
-              {showPipeline && (
-                <TabsTrigger value="processing" className={`${tabClass} border-blue-200 text-blue-600 bg-blue-50/30 data-[state=active]:border-blue-400 data-[state=active]:text-blue-700`}>
-                  Processing ({pipelineState.fileNames.length})
+              {(showPipeline || pipelineStages) && (
+                <TabsTrigger value="processing" className={`${tabClass} data-[state=active]:border-blue-600 data-[state=active]:text-blue-700`}>
+                  Processing {pipelineState.fileNames.length > 0 ? `(${pipelineState.fileNames.length})` : ''}
                 </TabsTrigger>
               )}
             </TabsList>
@@ -545,23 +640,27 @@ export default function APWorkspace() {
 
           <div className="flex-1 overflow-auto bg-white p-0">
             {/* --- PROCESSING TAB --- */}
-            {showPipeline && (
+            {(showPipeline || pipelineStages) && (
               <TabsContent value="processing" className="m-0 h-full border-none p-0 outline-none">
                 <ProcessingPipeline
                   isBatch={pipelineState.fileNames.length > 1}
                   fileNames={pipelineState.fileNames}
                   filePaths={pipelineState.filePaths}
-                   fileDataArrays={pipelineState.fileDataArrays}
-                   batchName={batchName}
-                   uploaderName="User"
-                   onComplete={() => {
+                  fileDataArrays={pipelineState.fileDataArrays}
+                  batchName={batchName}
+                  uploaderName="User"
+                  stages={pipelineStages || undefined}
+                  onStagesChange={setPipelineStages}
+                  particles={pipelineParticles}
+                  onParticlesChange={setPipelineParticles}
+                  onComplete={() => {
                     console.log('[APWorkspace] Pipeline complete!');
-                    fetchData();
+                    fetchData(true); // Background refresh
                   }}
                   onDismiss={() => {
-                    setShowPipeline(false);
+                    // Do NOT clear state here, just switch tab
                     setActiveTab('received');
-                    fetchData();
+                    fetchData(true);
                   }}
                 />
               </TabsContent>
@@ -995,10 +1094,10 @@ export default function APWorkspace() {
                       <TableCell>
                         <div 
                           className="flex items-center gap-1.5 text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 w-full"
-                          title={record.reason || 'OCR Confidence low'}
+                          title={record.reason || 'Failure'}
                         >
                           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span className="text-[11px] font-medium leading-tight truncate">{record.reason || 'OCR Confidence low'}</span>
+                          <span className="text-[11px] font-medium leading-tight truncate">{record.reason || 'Failure'}</span>
                         </div>
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
