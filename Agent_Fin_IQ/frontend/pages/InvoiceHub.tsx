@@ -37,7 +37,7 @@ export default function InvoiceHub() {
   const [uploadedFiles, setUploadedFiles] = useState<string[] | null>(null);
   const [pendingFileList, setPendingFileList] = useState<FileList | null>(null);
   const [pendingFilePaths, setPendingFilePaths] = useState<string[]>([]);
-  const [pendingFileData, setPendingFileData] = useState<number[][]>([]);
+  const [pendingFileData, setPendingFileData] = useState<Uint8Array[]>([]);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [batchName, setBatchName] = useState('');
   const [pipelineDone, setPipelineDone] = useState(false);
@@ -104,13 +104,15 @@ export default function InvoiceHub() {
     const files = Array.from(pendingFileList);
     const names = files.map(f => f.name);
 
-    // Read file contents as ArrayBuffer — this is the reliable approach
-    // because File.path is empty in modern Electron with contextIsolation
+    // Provide the absolute path just in case we have it
+    const paths = files.map(f => (f as any).path || '');
+
+    // Read file contents as Uint8Array (much more memory efficient than number array)
     const dataPromises = files.map(f => {
-      return new Promise<number[]>((resolve, reject) => {
+      return new Promise<Uint8Array>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
-          resolve(Array.from(new Uint8Array(reader.result as ArrayBuffer)));
+          resolve(new Uint8Array(reader.result as ArrayBuffer));
         };
         reader.onerror = () => reject(new Error(`Failed to read ${f.name}`));
         reader.readAsArrayBuffer(f);
@@ -119,8 +121,8 @@ export default function InvoiceHub() {
 
     try {
       const fileDataArrays = await Promise.all(dataPromises);
-      setPendingFilePaths(names); // We use names as keys now, not paths
-      setPendingFileData(fileDataArrays);
+      setPendingFilePaths(paths);
+      setPendingFileData(fileDataArrays); 
       setUploadedFiles(names);
       setPipelineDone(false);
       setShowBatchModal(false);
@@ -131,7 +133,7 @@ export default function InvoiceHub() {
         pipelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
     } catch (err) {
-      console.error('[Upload] Failed to read files:', err);
+      console.error('[Upload] Failed to confirm upload:', err);
     }
   };
 
