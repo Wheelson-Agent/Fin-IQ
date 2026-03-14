@@ -37,6 +37,7 @@
 import { ipcMain } from 'electron';
 import * as queries from './database/queries';
 import { login, validateToken } from './auth/auth';
+import dotenv from 'dotenv';
 import { hasPermission } from './auth/roles';
 import * as n8n from './sync/n8n';
 import * as ocr from './ocr/bridge';
@@ -51,12 +52,16 @@ import { finalizeFileStorage } from './utils/filesystem';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ─── Environment Configuration ────────────────────────────
+const envPath = path.resolve(__dirname, '../../config/.env');
+dotenv.config({ path: envPath });
+
 /**
  * Register all IPC handlers.
  * Called once during backend initialization (main.ts).
  */
 export function registerIpcHandlers() {
-
+    console.log(`[IPC] Initializing handlers. Webhook URL: ${process.env.N8N_WEB_HOOK_URL}`);
     // ─── AUTH ──────────────────────────────────────────────
 
     /**
@@ -130,6 +135,13 @@ export function registerIpcHandlers() {
     });
 
 
+
+    /**
+     * Update invoice OCR data and main fields.
+     */
+    ipcMain.handle('invoices:update-ocr', async (_event, { id, data }) => {
+        return await queries.updateInvoiceWithOCR(id, data);
+    });
 
     /**
      * Handle file upload — creates invoice record and triggers pipeline.
@@ -249,6 +261,32 @@ export function registerIpcHandlers() {
         return updated;
     });
 
+    /**
+     * Update invoice remarks.
+     */
+    ipcMain.handle('invoices:update-remarks', async (_event, { id, remarks }) => {
+        return await queries.updateInvoiceRemarks(id, remarks);
+    });
+
+    /**
+     * Delete an invoice.
+     */
+    ipcMain.handle('invoices:delete', async (_event, { id }) => {
+        const invoice = await queries.getInvoiceById(id);
+        await queries.deleteInvoice(id);
+        
+        // Log audit event
+        await queries.createAuditLog({
+            invoice_id: id,
+            invoice_no: invoice?.invoice_number,
+            vendor_name: invoice?.vendor_name,
+            event_type: 'Deleted',
+            description: `Invoice "${invoice?.invoice_number}" was deleted.`,
+        });
+
+        return { success: true };
+    });
+
     // ─── VENDORS ───────────────────────────────────────────
 
     /**
@@ -283,6 +321,22 @@ export function registerIpcHandlers() {
      */
     ipcMain.handle('audit:get-logs', async () => {
         return await queries.getAuditLogs();
+    });
+
+    // ─── ITEMS ─────────────────────────────────────────────
+
+    ipcMain.handle('items:get-all', async (_event, { companyId } = {}) => {
+        return await queries.getAllItems(companyId);
+    });
+
+    ipcMain.handle('items:save', async (_event, { item }) => {
+        return await queries.saveItem(item);
+    });
+
+    // ─── TALLY SYNC ────────────────────────────────────────
+
+    ipcMain.handle('tally:get-sync-logs', async (_event, { entityId } = {}) => {
+        return await queries.getTallySyncLogs(entityId);
     });
 
     // ─── PROCESSING ────────────────────────────────────────
@@ -352,15 +406,25 @@ export function registerIpcHandlers() {
 
             try {
                 console.log(`[IPC] Sending OCR entities payload to Webhook: ${webhookUrl}`);
-                await fetch(webhookUrl, {
+                const response = await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
-                // Log webhook success to debug_ocr.log
-                const logData = `\n--- WEBHOOK SENT ${new Date().toISOString()} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nStatus: Success\n--------------------------\n`;
-                fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
+                // IMPORTANT: n8n must be configured to "Respond to Webhook" with the final JSON structure mapped for DB insertion
+                const n8nData = await response.json();
+
+                // Log webhook success to debug_ocr.log and the new n8n_debug.log
+                const timestamp = new Date().toISOString();
+                const logData = `\n--- WEBHOOK SENT ${timestamp} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nStatus: Success\nResponse: ${JSON.stringify(n8nData, null, 2)}\n--------------------------\n`;
+                fs.appendFileSync(path.resolve(__dirname, '../debug_ocr.log'), logData);
+
+                const n8nDebugData = `\n--- N8N RESPONSE RECEIVED ${timestamp} ---\nInvoice ID: ${invoiceId}\nResponse: ${JSON.stringify(n8nData, null, 2)}\n------------------------------------------\n`;
+                fs.appendFileSync(path.resolve(__dirname, '../n8n_debug.log'), n8nDebugData);
+
+                // Update the database with parsed N8N results using the code-level mapper
+                await queries.ingestN8nData(invoiceId, n8nData);
 
             } catch (webhookErr: any) {
                 console.error('[IPC] Webhook delivery failed, but OCR was successful:', webhookErr.message);
@@ -368,14 +432,13 @@ export function registerIpcHandlers() {
                 // Log webhook failure to debug_ocr.log
                 const logData = `\n--- WEBHOOK FAILED ${new Date().toISOString()} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nError: ${webhookErr.message}\n--------------------------\n`;
                 fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
-            }
 
-            // Update the database with OCR results
-            // Extracted from entities based on your Python script logic (dummy mapping for now)
-            await queries.updateInvoiceWithOCR(invoiceId, {
-                status: 'Pending Approval',
-                ocr_raw_data: ocrResult.documentai_document,
-            });
+                // Fallback: If webhook fails, just mark as Pending
+                await queries.updateInvoiceWithOCR(invoiceId, {
+                    status: 'Pending Approval',
+                    ocr_raw_data: ocrResult.documentai_document,
+                });
+            }
 
             return { success: true, decision: result.decision };
         } catch (err: any) {
@@ -424,6 +487,24 @@ export function registerIpcHandlers() {
     // ─── SERVICE ENTRY SHEETS ───────────────────────────────────
     ipcMain.handle('ses:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllServiceEntrySheets(companyId);
+    });
+    
+    // ─── MASTERS ────────────────────────────────────────────────
+    ipcMain.handle('masters:get-ledgers', async (_event, { companyId } = {}) => {
+        return await queries.getLedgerMasters(companyId);
+    });
+
+    ipcMain.handle('masters:get-tds-sections', async () => {
+        return await queries.getTdsSections();
+    });
+
+    // ─── COMPANIES ──────────────────────────────────────────────
+    ipcMain.handle('companies:get-active', async () => {
+        return await queries.getActiveCompany();
+    });
+
+    ipcMain.handle('companies:get-all', async () => {
+        return await queries.getAllCompanies();
     });
 
     // ─── DASHBOARD ──────────────────────────────────────────────

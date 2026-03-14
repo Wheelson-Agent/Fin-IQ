@@ -67,6 +67,7 @@ export interface Invoice {
     items?: InvoiceItem[];
     vendor_gst?: string;
     validation_time?: string;
+    ledger_id?: string | null; // Formal link to ledger_master
 }
 
 
@@ -92,6 +93,7 @@ export interface InvoiceItem {
     unit?: string | null;
     part_no?: string | null;
     possible_gl_names?: string | null;
+    item_id?: string | null; // Formal link to item_master
 
     created_at: string;
 }
@@ -253,7 +255,43 @@ export interface Company {
     trade_name: string | null;
     gstin: string | null;
     state: string | null;
+    tally_port?: number;
+    tally_version?: string;
     is_active: boolean;
+}
+
+/**
+ * Represents a stock item or service.
+ * Maps to: item_master table.
+ */
+export interface ItemMaster {
+    id: string;
+    company_id: string;
+    item_name: string;
+    item_code: string | null;
+    hsn_sac: string | null;
+    uom: string;
+    base_price: number | null;
+    tax_rate: number | null;
+    default_ledger_id: string | null;
+    is_active: boolean;
+    created_at: string;
+}
+
+/**
+ * Log of Tally XML exchange.
+ * Maps to: tally_sync_logs table.
+ */
+export interface TallySyncLog {
+    id: number;
+    company_id: string;
+    entity_type: 'invoice' | 'ledger' | 'item';
+    entity_id: string;
+    request_xml: string | null;
+    response_xml: string | null;
+    status: 'Success' | 'Error';
+    error_message: string | null;
+    created_at: string;
 }
 
 // ─── ERP MODULES ──────────────────────────────────────────

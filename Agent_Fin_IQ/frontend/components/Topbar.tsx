@@ -28,6 +28,8 @@ interface TopbarProps {
     selectedCompanyId?: string; // ID or 'ALL'
     onCompanyChange?: (id: string) => void;
     companies?: any[];
+    dateFilter?: string;
+    setDateFilter?: (filter: string) => void;
 }
 
 /**
@@ -152,13 +154,15 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
     );
 }
 
-export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme, onRefresh, selectedCompany, selectedCompanyId, onCompanyChange, companies = [] }: TopbarProps) {
+export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme, onRefresh, selectedCompany, selectedCompanyId, onCompanyChange, companies = [], dateFilter, setDateFilter }: TopbarProps) {
     const isMono = theme === 'mono';
     const [themeOpen, setThemeOpen] = useState(false);
     const [companyOpen, setCompanyOpen] = useState(false);
+    const [dateOpen, setDateOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const dropRef = useRef<HTMLDivElement>(null);
     const companyDropRef = useRef<HTMLDivElement>(null);
+    const dateDropRef = useRef<HTMLDivElement>(null);
     const active = themes.find(t => t.id === theme)!;
 
     const currentCompany = selectedCompany || 'All Companies';
@@ -184,6 +188,9 @@ export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme
             if (companyDropRef.current && !companyDropRef.current.contains(e.target as Node)) {
                 setCompanyOpen(false);
             }
+            if (dateDropRef.current && !dateDropRef.current.contains(e.target as Node)) {
+                setDateOpen(false);
+            }
         }
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
@@ -199,6 +206,59 @@ export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme
                     <span className={isMono ? 'text-[#e4e4e7]' : 'text-[#D0D9E8]'}>›</span>
                     <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>{pageTitle}</span>
                 </div>
+
+                {/* ── Date Filter Dropdown ── */}
+                {dateFilter && setDateFilter && (
+                    <div ref={dateDropRef} className="relative mr-1">
+                        <button
+                            onClick={() => setDateOpen(v => !v)}
+                            className={`flex items-center gap-[6px] h-[30px] px-[12px] rounded-[7px] border text-[11px] font-semibold transition-all duration-200 select-none ${isMono
+                                ? 'border-[#e4e4e7] bg-[#f4f4f5] text-[#09090b] hover:border-[#d4d4d8]'
+                                : 'border-[#D0D9E8] bg-white text-[#1A2640] hover:border-[#b8c8e0]'
+                                } ${dateOpen ? (isMono ? 'border-[#09090b] shadow-[0_0_0_2px_rgba(0,0,0,0.06)]' : 'border-[#1E6FD9] shadow-[0_0_0_2px_rgba(30,111,217,0.1)]') : ''}`}
+                        >
+                            <span>{dateFilter}</span>
+                            <motion.div animate={{ rotate: dateOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                                <ChevronDown size={11} className={isMono ? 'text-[#71717a]' : 'text-[#8899AA]'} />
+                            </motion.div>
+                        </button>
+
+                        <AnimatePresence>
+                            {dateOpen && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                                    transition={{ duration: 0.15, ease: 'easeOut' }}
+                                    className={`absolute left-0 top-[calc(100%+6px)] w-[160px] rounded-[10px] shadow-[0_8px_32px_rgba(0,0,0,0.12)] border overflow-hidden z-50 ${isMono ? 'bg-white border-[#e4e4e7]' : 'bg-white border-[#D0D9E8]'}`}
+                                >
+                                    <div className={`px-[10px] pt-[8px] pb-[4px] text-[9px] font-black uppercase tracking-[1.2px] ${isMono ? 'text-[#a1a1aa]' : 'text-[#8899AA]'}`}>
+                                        Date Range
+                                    </div>
+                                    {['All', 'Today', 'This Week', 'This Month', 'Custom...'].map(opt => {
+                                        const isActive = opt === dateFilter;
+                                        return (
+                                            <button
+                                                key={opt}
+                                                onClick={() => { setDateFilter(opt); setDateOpen(false); }}
+                                                className={`w-full flex items-center gap-[8px] px-[10px] py-[8px] transition-colors text-left text-[12px] font-medium ${isActive
+                                                    ? (isMono ? 'bg-[#f4f4f5] text-[#09090b] font-bold' : 'bg-[#EBF3FF] text-[#1E6FD9] font-bold')
+                                                    : (isMono ? 'text-[#3f3f46] hover:bg-[#f4f4f5]' : 'text-[#334155] hover:bg-[#F8FAFC]')
+                                                    }`}
+                                            >
+                                                <span className="flex-1 truncate">{opt}</span>
+                                                {isActive && (
+                                                    <div className={`w-[5px] h-[5px] rounded-full shrink-0 ${isMono ? 'bg-[#09090b]' : 'bg-[#1E6FD9]'}`} />
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                    <div className="h-[6px]" />
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                )}
 
                 {/* ── Company Filter Dropdown ── */}
                 <div ref={companyDropRef} className="relative">
