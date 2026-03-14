@@ -14,7 +14,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFo
 import { Progress } from '../components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
 import { useDateFilter } from '../context/DateContext';
-import { getInvoices, uploadInvoice, runPipeline, deleteInvoice } from '../lib/api';
+import { getInvoices, uploadInvoice, runPipeline, deleteInvoice, updateInvoiceRemarks } from '../lib/api';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
 
@@ -33,6 +33,7 @@ interface APRecord {
   items: number;
   remarks: string;
   technicalStage: string;
+  fileName: string;
   erpRef?: string;
   reason?: string;
   requiredField?: string;
@@ -112,14 +113,15 @@ export default function APWorkspace() {
 
           return {
             id: inv.id,
-            invoiceNo: inv.invoice_no || inv.invoice_number || inv.file_name || 'Unknown',
+            invoiceNo: inv.invoice_number || inv.invoice_no || 'Unknown',
+            fileName: inv.file_name || 'N/A',
             date: inv.date ? new Date(inv.date).toISOString() : (inv.created_at ? new Date(inv.created_at).toISOString() : 'Unknown'),
             supplier: inv.vendor_name || 'Unknown',
             amount: Number(inv.total || inv.grand_total || 0),
             taxPct: (inv.gst && inv.amount) ? (Number(inv.gst) / Number(inv.amount)) * 100 : 0,
             status: status,
             docType: inv.doc_type || 'PDF Invoice',
-            items: inv.items ? inv.items.length : 0,
+            items: Number(inv.items_count || 0),
             remarks: inv.failure_reason || 'Verified',
             technicalStage: inv.n8n_validation_status === 'True' ? 'Verified' : (inv.n8n_validation_status || 'Processing'),
             reason: inv.failure_reason || undefined,
@@ -325,7 +327,7 @@ export default function APWorkspace() {
 
   const getVisibleTabRecords = (targetTab: string) => {
     let statusMatch: RecordStatus[] = [];
-    if (targetTab === 'received') statusMatch = ['received', 'processing'];
+    if (targetTab === 'received') return filteredRecords; // Show all for received
     else if (targetTab === 'ready') statusMatch = ['ready'];
     else if (targetTab === 'input') statusMatch = ['input'];
     else if (targetTab === 'handoff') statusMatch = ['handoff'];
@@ -531,7 +533,7 @@ export default function APWorkspace() {
                <TabsTrigger value="received" className={tabClass}>Received ({counts.received})</TabsTrigger>
               <TabsTrigger value="ready" className={tabClass}>Ready to Post ({counts.ready})</TabsTrigger>
               <TabsTrigger value="input" className={tabClass}>Awaiting Input ({counts.input})</TabsTrigger>
-              <TabsTrigger value="handoff" className={tabClass}>Human Handoff ({counts.handoff})</TabsTrigger>
+              <TabsTrigger value="handoff" className={tabClass}>Handoff ({counts.handoff})</TabsTrigger>
               <TabsTrigger value="posted" className={tabClass}>Posted ({counts.posted})</TabsTrigger>
               {showPipeline && (
                 <TabsTrigger value="processing" className={`${tabClass} border-blue-200 text-blue-600 bg-blue-50/30 data-[state=active]:border-blue-400 data-[state=active]:text-blue-700`}>
@@ -617,14 +619,12 @@ export default function APWorkspace() {
                         onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('received'))}
                       />
                     </TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">File Details</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Doc Type</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Supplier</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Items</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Value (₹)</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Technical Stage</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Received</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Action</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[24%]">File Details</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Doc Type</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[22%]">Supplier</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[14%] text-right">Items</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[14%] text-right">Value (₹)</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[14%] text-right pr-6">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -647,32 +647,34 @@ export default function APWorkspace() {
                           <div className="p-2 bg-blue-50 text-blue-600 rounded-md shrink-0"><FileText className="w-4 h-4"/></div>
                           <div>
                             <div className="font-semibold text-slate-900 leading-tight">{record.invoiceNo}</div>
-                            <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                              {record.id}
-                              {record.status === 'processing' && (
-                                <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-600 border-blue-200 animate-pulse h-4 py-0 px-1.5 shadow-none">
-                                  Processing...
-                                </Badge>
-                              )}
+                            <div className="text-[10px] text-slate-400 font-medium truncate max-w-[180px]" title={record.fileName}>
+                              {record.fileName}
                             </div>
+                            {record.status === 'processing' && (
+                              <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-600 border-blue-200 animate-pulse h-4 py-0 px-1.5 shadow-none mt-1">
+                                Processing...
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell><Badge variant="outline" className="text-slate-600 bg-slate-50">{record.docType}</Badge></TableCell>
                       <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                      <TableCell><span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-medium">{record.items} items</span></TableCell>
+                      <TableCell className="text-right"><span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium whitespace-nowrap">{record.items} items</span></TableCell>
                       <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(record.amount)}</TableCell>
-                      <TableCell><Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none">{record.technicalStage}</Badge></TableCell>
-                      <TableCell className="text-sm text-slate-600 whitespace-nowrap">{formatDetailedDate(record.date)}</TableCell>
-                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
-                          onClick={(e) => handleDelete(e, record.id)}
+                      <TableCell className="text-right pr-6">
+                        <Badge 
+                          variant="outline" 
+                          className={`
+                            ${record.status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
+                              record.status === 'input' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                              record.status === 'handoff' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                              record.status === 'posted' ? 'bg-slate-100 text-slate-600 border-slate-200' :
+                              'bg-blue-50 text-blue-700 border-blue-200'}
+                          `}
                         >
-                          <Trash2 size={16} />
-                        </Button>
+                          {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+                        </Badge>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -737,11 +739,11 @@ export default function APWorkspace() {
                         onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('ready'))}
                       />
                     </TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[200px]">Invoice Details</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[250px]">Supplier</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[150px] text-right">Value (₹)</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Remarks</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Actions</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Invoice Details</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Approval Snapshot</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[21%] pr-6">Remarks</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -765,12 +767,33 @@ export default function APWorkspace() {
                       </TableCell>
                       <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
                       <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
-                      <TableCell className="text-xs text-slate-500 max-w-[200px] truncate">{record.remarks}</TableCell>
-                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="ghost" title="Delete" className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={(e) => handleDelete(e, record.id)}><Trash2 className="w-4 h-4" /></Button>
-                          <Button size="sm" className="h-8 bg-primary hover:bg-blue-700 text-white">Post to ERP</Button>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-1.5 text-[11px] font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded w-fit mx-auto border border-emerald-100">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Approved</span>
                         </div>
+                      </TableCell>
+                      <TableCell className="pr-6">
+                        <input
+                          type="text"
+                          defaultValue={record.remarks}
+                          className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                          onBlur={async (e) => {
+                            if (e.target.value !== record.remarks) {
+                              try {
+                                await updateInvoiceRemarks(record.id, e.target.value);
+                                setRecords(prev => prev.map(r => r.id === record.id ? { ...r, remarks: e.target.value } : r));
+                              } catch (err) {
+                                console.error('Failed to update remarks:', err);
+                              }
+                            }
+                          }}
+                          onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === 'Enter') {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -828,11 +851,11 @@ export default function APWorkspace() {
                         onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('input'))}
                       />
                     </TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[200px]">Invoice Details</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[200px]">Supplier</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[150px] text-right">Value (₹)</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[300px]">Required Input</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Action</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Invoice Details</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[24%]">Supplier</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Value (₹)</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Required Input</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[20%] pr-6">Remarks</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -870,11 +893,27 @@ export default function APWorkspace() {
                           />
                         </div>
                       </TableCell>
-                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-end gap-2">
-                           <Button size="sm" variant="ghost" title="Delete" className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={(e) => handleDelete(e, record.id)}><Trash2 className="w-4 h-4" /></Button>
-                           <Button size="sm" className="h-8 bg-amber-600 hover:bg-amber-700 text-white">Resolve Input</Button>
-                        </div>
+                      <TableCell className="pr-6">
+                        <input
+                          type="text"
+                          defaultValue={record.remarks}
+                          className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                          onBlur={async (e) => {
+                            if (e.target.value !== record.remarks) {
+                              try {
+                                await updateInvoiceRemarks(record.id, e.target.value);
+                                setRecords(prev => prev.map(r => r.id === record.id ? { ...r, remarks: e.target.value } : r));
+                              } catch (err) {
+                                console.error('Failed to update remarks:', err);
+                              }
+                            }
+                          }}
+                          onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === 'Enter') {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -883,7 +922,7 @@ export default function APWorkspace() {
               <PaginationControls tab="input" />
             </TabsContent>
 
-            {/* --- HUMAN HANDOFF TAB --- */}
+            {/* --- HANDOFF TAB --- */}
             <TabsContent value="handoff" className="m-0 h-full border-none p-0 outline-none">
               <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
                 <div className="relative w-full max-w-sm">
@@ -932,12 +971,11 @@ export default function APWorkspace() {
                         onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('handoff'))}
                       />
                     </TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[180px]">Invoice Details</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[200px]">Supplier</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[150px] text-right">Value (₹)</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 w-[250px]">Failure Reason</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Remarks</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Action</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[20%] px-6">Invoice Details</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[15%]">Supplier</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[10%] text-right">Value (₹)</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[27.5%]">Failure Reason</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[27.5%] pr-6">Remarks</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -955,26 +993,35 @@ export default function APWorkspace() {
                       <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
                       <TableCell className="text-right font-bold text-slate-900">{formatCurrency(record.amount)}</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1.5 text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 w-fit max-w-[230px]">
+                        <div 
+                          className="flex items-center gap-1.5 text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 w-full"
+                          title={record.reason || 'OCR Confidence low'}
+                        >
                           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span className="text-[11px] font-medium leading-tight">{record.reason || 'OCR Confidence low'}</span>
+                          <span className="text-[11px] font-medium leading-tight truncate">{record.reason || 'OCR Confidence low'}</span>
                         </div>
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Input 
-                          className="h-8 text-xs bg-white" 
-                          placeholder="Add note..." 
-                          value={record.remarks}
-                          onChange={(e) => updateRemark(record.id, e.target.value)}
+                        <input
+                          type="text"
+                          defaultValue={record.remarks}
+                          className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                          onBlur={async (e) => {
+                            if (e.target.value !== record.remarks) {
+                              try {
+                                await updateInvoiceRemarks(record.id, e.target.value);
+                                setRecords(prev => prev.map(r => r.id === record.id ? { ...r, remarks: e.target.value } : r));
+                              } catch (err) {
+                                console.error('Failed to update remarks:', err);
+                              }
+                            }
+                          }}
+                          onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === 'Enter') {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
                         />
-                      </TableCell>
-                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="ghost" title="Delete" className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={(e) => handleDelete(e, record.id)}><Trash2 className="w-4 h-4" /></Button>
-                          <Button variant="outline" size="sm" className="h-8 bg-white" onClick={() => navigate(`/invoices/${record.id}`)}>
-                            <Eye className="w-4 h-4 mr-1.5" /> Inspect
-                          </Button>
-                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1032,12 +1079,9 @@ export default function APWorkspace() {
                         onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('posted'))}
                       />
                     </TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Invoice Details</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Supplier</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Value (₹)</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">ERP Status</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10">Posted At</TableHead>
-                    <TableHead className="font-semibold text-slate-700 h-10 text-right">Action</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[45%] px-6">FC Document</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[45%]">ERP Document</TableHead>
+                    <TableHead className="font-semibold text-slate-700 h-10 w-[10%] pr-6">Remarks</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1048,22 +1092,54 @@ export default function APWorkspace() {
                       <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
                         <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                       </TableCell>
-                      <TableCell>
-                        <div className="font-semibold text-slate-900">{record.invoiceNo}</div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">ID: {record.id}</div>
-                      </TableCell>
-                      <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                      <TableCell className="text-right font-bold text-slate-900">{formatCurrency(record.amount)}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          <span className="text-sm font-medium text-emerald-700">Ref: {record.erpRef || 'TLY-9002'}</span>
+                      <TableCell className="py-2.5">
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-900">{record.invoiceNo}</span>
+                            <span className="text-[10px] text-slate-400">ID: {record.id.slice(0, 8)}...</span>
+                          </div>
+                          <div className="text-xs text-slate-600 flex items-center gap-2">
+                            <span className="font-medium">{record.supplier}</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="font-bold text-slate-900">{formatCurrency(record.amount)}</span>
+                          </div>
                         </div>
-                        <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 mt-1 uppercase px-1.5 py-0 pt-[1px] shadow-none">Synced</Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-slate-500 whitespace-nowrap">{formatDetailedDate(record.date)}</TableCell>
-                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <Button size="sm" variant="ghost" title="Delete" className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50" onClick={(e) => handleDelete(e, record.id)}><Trash2 className="w-4 h-4" /></Button>
+                      <TableCell>
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 text-emerald-700">
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              <span className="text-xs font-semibold">Ref: {record.erpRef || 'TLY-9002'}</span>
+                            </div>
+                            <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 uppercase px-1 py-0 shadow-none h-4">Synced</Badge>
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Posted: {formatDetailedDate(record.date)}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="pr-6" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          defaultValue={record.remarks}
+                          className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                          onBlur={async (e) => {
+                            if (e.target.value !== record.remarks) {
+                              try {
+                                await updateInvoiceRemarks(record.id, e.target.value);
+                                setRecords(prev => prev.map(r => r.id === record.id ? { ...r, remarks: e.target.value } : r));
+                              } catch (err) {
+                                console.error('Failed to update remarks:', err);
+                              }
+                            }
+                          }}
+                          onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === 'Enter') {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

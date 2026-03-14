@@ -38,7 +38,8 @@ export async function getAllInvoices(companyId?: string) {
                processing_status as status,
                sub_total as amount,
                tax_total as gst,
-               grand_total as total
+               grand_total as total,
+               (SELECT COUNT(*) FROM ap_invoice_lines WHERE ap_invoice_id = ap_invoices.id)::int as items_count
         FROM ap_invoices
     `;
     const params: any[] = [];
@@ -214,6 +215,19 @@ export async function updateInvoiceFailureReason(id: string, failure_reason: str
     const result = await query(
         `UPDATE ap_invoices SET processing_status = 'Failed', failure_reason = $2, pre_ocr_status = COALESCE($3, pre_ocr_status), updated_at = NOW() WHERE id = $1 RETURNING *`,
         [id, failure_reason, pre_ocr_status || null]
+    );
+    return result.rows[0];
+}
+
+/**
+ * Update the failure_reason (Remarks) of an invoice.
+ * @param id - Invoice UUID
+ * @param remarks - New remarks string
+ */
+export async function updateInvoiceRemarks(id: string, remarks: string) {
+    const result = await query(
+        `UPDATE ap_invoices SET failure_reason = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        [id, remarks]
     );
     return result.rows[0];
 }
