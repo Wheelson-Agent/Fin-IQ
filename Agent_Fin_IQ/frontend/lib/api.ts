@@ -17,7 +17,7 @@
 import type {
     Invoice, Vendor, AuditEvent, ProcessingJob, User, StatusCount, InvoiceItem,
     LedgerMaster, TdsSection, Company, PurchaseOrder, GoodsReceipt, ServiceEntrySheet,
-    DashboardMetrics
+    DashboardMetrics, ItemMaster, TallySyncLog
 } from './types';
 
 /**
@@ -98,6 +98,28 @@ export async function uploadInvoice(filePath: string, fileName: string, batchId?
  */
 export async function updateInvoiceStatus(id: string, status: string, userName?: string): Promise<Invoice> {
     return invoke<Invoice>('invoices:update-status', { id, status, userName });
+}
+
+/**
+ * Update invoice OCR data and main fields.
+ */
+export async function updateInvoiceOCR(id: string, data: any): Promise<Invoice> {
+    return invoke<Invoice>('invoices:update-ocr', { id, data });
+}
+
+/**
+ * Delete an invoice permanently.
+ * @param id - Invoice UUID
+ */
+export async function deleteInvoice(id: string): Promise<{ success: boolean }> {
+    return invoke<{ success: boolean }>('invoices:delete', { id });
+}
+
+/**
+ * Update the remarks (failure_reason) of an invoice.
+ */
+export async function updateInvoiceRemarks(id: string, remarks: string): Promise<Invoice> {
+    return invoke<Invoice>('invoices:update-remarks', { id, remarks });
 }
 
 /**
@@ -183,6 +205,23 @@ export async function getCompanies(): Promise<Company[]> {
     return invoke<Company[]>('companies:get-all');
 }
 
+// ─── ITEMS ─────────────────────────────────────────────
+
+/**
+ * Fetch all stock items/services.
+ * @param companyId - Optional filter
+ */
+export async function getItems(companyId?: string): Promise<ItemMaster[]> {
+    return invoke<ItemMaster[]>('items:get-all', { companyId });
+}
+
+/**
+ * Save an item to the master list.
+ */
+export async function saveItem(item: Partial<ItemMaster>): Promise<ItemMaster> {
+    return invoke<ItemMaster>('items:save', { item });
+}
+
 /**
  * Fetch all audit trail logs.
  * @returns Array of audit events
@@ -252,4 +291,13 @@ export async function getServiceEntrySheets(companyId?: string): Promise<Service
  */
 export async function getDashboardMetrics(companyId?: string): Promise<DashboardMetrics> {
     return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
+}
+
+// ─── TALLY SYNC ──────────────────────────────────────────────
+
+/**
+ * Fetch sync logs for an entity or company.
+ */
+export async function getTallySyncLogs(entityId?: string): Promise<TallySyncLog[]> {
+    return invoke<TallySyncLog[]>('tally:get-sync-logs', { entityId });
 }
