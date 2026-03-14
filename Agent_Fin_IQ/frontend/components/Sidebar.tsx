@@ -3,7 +3,7 @@ import { NavLink } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, FileText, CreditCard, Eye, ClipboardList, CheckSquare, XCircle,
-  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose
+  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -13,14 +13,15 @@ interface SidebarProps {
 
 const navItemsMain = [
   { id: 'dashboard', label: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { id: 'invoices', label: 'Doc Hub', path: '/invoices', icon: FileText },
-  { id: 'payables', label: 'Accounts Payable', path: '/payables', icon: CreditCard },
+  { id: 'ap-workspace', label: 'AP Workspace', path: '/ap-workspace', icon: CreditCard },
   { id: 'audit', label: 'Audit Trail', path: '/audit', icon: ClipboardList },
   { id: 'agent', label: 'Ask agent_w', path: '/agent', icon: Sparkles, isAI: true, badge: 'AI', badgeColor: 'bg-[#6366F1]' },
 ];
 
 const navItemsManage = [
   { id: 'vendors', label: 'Vendors', path: '/vendors', icon: Users },
+  { id: 'items', label: 'Item Master', path: '/items', icon: Package },
+  { id: 'tally-logs', label: 'Tally Sync Monitor', path: '/tally-logs', icon: Terminal },
   { id: 'reports', label: 'Reports', path: '/reports', icon: BarChart3 },
 ];
 

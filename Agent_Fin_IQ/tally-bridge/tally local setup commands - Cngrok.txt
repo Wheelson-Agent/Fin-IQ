@@ -1,0 +1,6 @@
+cd C:\ngrok-v3-stable-windows-amd64
+.\ngrok.exe config add-authtoken 3AqEYY46egbxviy88SQ5Aa4vIFE_5Lx94DfNd97BvoHtiCjVG
+.\ngrok.exe http 7070
+
+cd "D:\Financial assistant -UI\tally-bridge"
+npm start
