@@ -1,0 +1,852 @@
+{
+  "name": "PO-Tally_sync-Fin-IQ-agent",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        480,
+        656
+      ],
+      "id": "d480cce6-9b49-4fd9-b528-a59892ef5f41",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "21ba2ac1-6d0e-410e-9ab1-611aa6c71e92",
+              "name": "tally_url",
+              "value": "https://aphetically-nonaccompanying-hye.ngrok-free.dev",
+              "type": "string"
+            },
+            {
+              "id": "d469b06d-12b2-4225-80ef-36e12447d8ba",
+              "name": "default_status",
+              "value": "Open",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        704,
+        656
+      ],
+      "id": "1146916e-8355-48d3-84af-1dadf63f7625",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.tally_url.trim() }}/tally/purchase-orders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "1"
+            },
+            {
+              "name": "x-api-key",
+              "value": "WXuQeIpMOjxTkCsP1azLo9l0NB7GZqvUtSV6d42Jm3YhHwrE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        928,
+        656
+      ],
+      "id": "c11b597c-e2d2-4893-85f0-d2da86a4d9f9",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_runs (\n  entity_name,\n  run_status,\n  started_at,\n  fetched_count,\n  created_at,\n  updated_at\n)\nVALUES (\n  $1,\n  $2,\n  now(),\n  $3,\n  now(),\n  now()\n)\nRETURNING id AS sync_run_id, entity_name, run_status, started_at, fetched_count;",
+        "options": {
+          "queryReplacement": "={{ 'purchase_orders' }},{{ 'running' }},{{ $json.count || 0 }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1152,
+        896
+      ],
+      "id": "eaa2f229-51cf-4a90-bef0-a44c558d112a",
+      "name": "Postgres Create Sync Run",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1376,
+        432
+      ],
+      "id": "af97b8f1-e11b-43f5-92dd-f4bc8a58601a",
+      "name": "Merge HTTP + Sync Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const records = $json.records || [];\nconst syncRunId = $json.sync_run_id || null;\n\nif (records.length === 0) {\n  return [\n    {\n      json: {\n        __empty_batch: true,\n        count: 0,\n        records: [],\n        sync_run_id: syncRunId\n      }\n    }\n  ];\n}\n\nreturn records.map(record => ({\n  json: {\n    ...record,\n    sync_run_id: syncRunId\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        432
+      ],
+      "id": "2ce55808-6c5b-4e2b-a9da-8f7a81e241af",
+      "name": "Parse XML to PO JSON"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7519e5ba-2c75-452c-b45a-633f560e8fce",
+              "leftValue": "={{ $json.__empty_batch === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1824,
+        432
+      ],
+      "id": "0fcaf5f9-1c3b-45c5-a361-151adbceb217",
+      "name": "IF Empty PO Batch?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const syncRunId =\n  $json.sync_run_id ??\n  $(\"Postgres Create Sync Run\").first().json.sync_run_id ??\n  null;\n\nreturn [\n  {\n    json: {\n      sync_run_id: syncRunId,\n      run_status: \"success\",\n      fetched_count: 0,\n      staged_count: 0,\n      promoted_count: 0,\n      skipped_count: 0,\n      error_count: 0\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        288
+      ],
+      "id": "c441e49e-a11a-4ea1-aafd-9c26702ad0da",
+      "name": "Build Empty Batch Summary"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO raw_tally_purchase_orders (\n  sync_run_id,\n  erp_sync_id,\n  po_number,\n  po_date,\n  total_amount,\n  status,\n  source_hash,\n  raw_payload,\n  fetched_at,\n  updated_at\n)\nVALUES (\n  $1,\n  $2,\n  $3,\n  $4,\n  $5,\n  $6,\n  $7,\n  $8::jsonb,\n  now(),\n  now()\n)\nON CONFLICT (erp_sync_id)\nDO UPDATE SET\n  sync_run_id = EXCLUDED.sync_run_id,\n  po_number = EXCLUDED.po_number,\n  po_date = EXCLUDED.po_date,\n  total_amount = EXCLUDED.total_amount,\n  status = EXCLUDED.status,\n  source_hash = EXCLUDED.source_hash,\n  raw_payload = EXCLUDED.raw_payload,\n  fetched_at = now(),\n  updated_at = now()\nRETURNING id, erp_sync_id, po_number;",
+        "options": {
+          "queryReplacement": "={{ $json.sync_run_id }},{{ $json.erp_sync_id }},{{ $json.po_number }},{{ $json.po_date }},{{ $json.total_amount }},{{ $json.status }},{{ $json.source_hash }},{{JSON.stringify($json.raw_payload)}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2272,
+        720
+      ],
+      "id": "dee4ecbd-73f9-44da-bf74-801913c7ec14",
+      "name": "Postgres Raw Stag",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO purchase_orders (\n  po_number,\n  po_date,\n  total_amount,\n  status,\n  erp_sync_id,\n  source_hash,\n  last_synced_at,\n  updated_at\n)\nSELECT\n  r.po_number,\n  r.po_date,\n  r.total_amount,\n  r.status,\n  r.erp_sync_id,\n  r.source_hash,\n  now(),\n  now()\nFROM raw_tally_purchase_orders r\nWHERE r.erp_sync_id = $1\nON CONFLICT (erp_sync_id)\nDO UPDATE SET\n  po_number = EXCLUDED.po_number,\n  po_date = EXCLUDED.po_date,\n  total_amount = EXCLUDED.total_amount,\n  status = EXCLUDED.status,\n  source_hash = EXCLUDED.source_hash,\n  last_synced_at = now(),\n  updated_at = now()\nWHERE purchase_orders.source_hash IS DISTINCT FROM EXCLUDED.source_hash\nRETURNING id, po_number, erp_sync_id, source_hash;",
+        "options": {
+          "queryReplacement": "={{ $json.erp_sync_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2496,
+        720
+      ],
+      "id": "5bfdfb36-0107-44a1-a896-fc791f190bc0",
+      "name": "Postgres Promote Final",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ff276e02-e032-4ca2-af5a-cd79303995e1",
+              "leftValue": "={{ $json.error !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2720,
+        720
+      ],
+      "id": "7e907dbc-c158-4dc6-a4db-3c5775f33ff4",
+      "name": "IF Promote Failed"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cc001122-aaaa-bbbb-cccc-000000000001",
+              "leftValue": "={{ $json.error !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2720,
+        480
+      ],
+      "id": "cb03d51d-cdc2-4a75-9c93-33a15c32f03c",
+      "name": "IF Promote PO Lines Failed"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2944,
+        720
+      ],
+      "id": "4e28ebb3-09d5-4c2d-bbd5-345c12ff7d1f",
+      "name": "Merge Fail Path"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sync_runs\nSET\n  run_status = $2,\n  completed_at = now(),\n  error_count = $3,\n  error_message = $4,\n  updated_at = now()\nWHERE id = $1\nRETURNING id, entity_name, run_status, completed_at, error_count, error_message;",
+        "options": {
+          "queryReplacement": "={{ $json.sync_run_id || $json.id }},{{ 'failed' }},{{ 1 }},{{ $json.error?.description || $json.error?.message || 'workflow_failed' }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3168,
+        768
+      ],
+      "id": "b848876f-c18a-40a8-93ca-2adc2eb3103d",
+      "name": "Postgres Fail Sync Run",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2944,
+        480
+      ],
+      "id": "b038ab25-cd8d-474a-9dae-9c412b24666f",
+      "name": "Merge Both Success Paths"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3168,
+        528
+      ],
+      "id": "e3f262de-9f85-40e2-93a1-3d112cd701d2",
+      "name": "Merge Final Success + Sync Run"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst syncRunItem = allItems.find(i => i.json.sync_run_id !== undefined);\nconst syncRunId = syncRunItem?.json?.sync_run_id ?? null;\n\nconst fetchedCount = Number($(\"HTTP Request\").first().json.count || 0);\nconst stagedCount = $(\"Postgres Raw Stag\").all().length;\n\nconst promotedItems = $(\"Postgres Promote Final\").all();\nconst promotedCount = promotedItems.filter(item => {\n  const j = item.json || {};\n  return !!(j.id || j.erp_sync_id || j.po_number);\n}).length;\n\nconst skippedCount = Math.max(fetchedCount - promotedCount, 0);\n\nreturn [\n  {\n    json: {\n      sync_run_id: syncRunId,\n      run_status: \"success\",\n      fetched_count: fetchedCount,\n      staged_count: stagedCount,\n      promoted_count: promotedCount,\n      skipped_count: skippedCount,\n      error_count: 0\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        528
+      ],
+      "id": "fd824f34-bc8b-4bbf-a2eb-56aed76e3304",
+      "name": "Build Sync Summary"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sync_runs\nSET\n  run_status = $2,\n  completed_at = now(),\n  fetched_count = $3,\n  staged_count = $4,\n  promoted_count = $5,\n  skipped_count = $6,\n  error_count = $7,\n  updated_at = now()\nWHERE id = $1\nRETURNING id, entity_name, run_status, completed_at, fetched_count, staged_count, promoted_count, skipped_count, error_count;",
+        "options": {
+          "queryReplacement": "={{ $json.sync_run_id }},{{ $json.run_status }},{{ $json.fetched_count }},{{ $json.staged_count }},{{ $json.promoted_count }},{{ $json.skipped_count }},{{ $json.error_count }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3616,
+        432
+      ],
+      "id": "c4e7a070-c057-4a6d-b98e-f595f88d8c45",
+      "name": "Postgres Complete Sync Run",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH deactivated AS (\n  UPDATE purchase_orders p\n  SET\n    is_active = false,\n    deleted_at = now(),\n    status = 'Inactive',\n    updated_at = now()\n  WHERE p.is_active = true\n    AND NOT EXISTS (\n      SELECT 1\n      FROM raw_tally_purchase_orders r\n      WHERE r.erp_sync_id = p.erp_sync_id\n        AND r.sync_run_id = $1\n        AND r.is_active = true\n    )\n  RETURNING p.id AS po_id\n)\nSELECT $1::text AS id, COUNT(*) AS deactivated_count FROM deactivated;",
+        "options": {
+          "queryReplacement": "={{ $json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3840,
+        432
+      ],
+      "id": "bad4a45e-51cb-4286-a248-c7f189e6ce60",
+      "name": "Postgres Reconcile Missing POs",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH reactivated AS (\n  UPDATE purchase_orders p\n  SET\n    is_active = true,\n    deleted_at = null,\n    updated_at = now()\n  FROM raw_tally_purchase_orders r\n  WHERE r.erp_sync_id = p.erp_sync_id\n    AND r.sync_run_id = $1\n    AND r.is_active = true\n    AND (p.is_active = false OR p.deleted_at IS NOT NULL)\n  RETURNING p.id AS po_id\n)\nSELECT $1::text AS id, COUNT(*) AS reactivated_count FROM reactivated;",
+        "options": {
+          "queryReplacement": "={{ $json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4064,
+        432
+      ],
+      "id": "6db0349f-d426-4e5e-a0e5-2e5ac3f586d9",
+      "name": "Postgres Reactivate Reappeared POs",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function getText(val) {\n  if (val === null || val === undefined) return null;\n  if (typeof val === \"object\") {\n    if (\"#text\" in val) return val[\"#text\"] === \"\" ? null : String(val[\"#text\"]).trim();\n    return null;\n  }\n  const s = String(val).trim();\n  return s === \"\" ? null : s;\n}\n\nfunction parseNumberFromMixed(val) {\n  const txt = getText(val);\n  if (!txt) return null;\n  const cleaned = txt.replace(/,/g, \"\").match(/-?\\d+(\\.\\d+)?/);\n  return cleaned ? Number(cleaned[0]) : null;\n}\n\nconst out = [];\n\nfor (const item of $input.all()) {\n  const row = item.json;\n  const raw = row.raw_payload || {};\n  const parentErpSyncId = row.erp_sync_id;\n  const syncRunId = row.sync_run_id;\n\n  let lines = raw[\"ALLINVENTORYENTRIES.LIST\"];\n\n  if (!lines) continue;\n\n  if (!Array.isArray(lines)) {\n    lines = [lines];\n  }\n\n  lines.forEach((line, idx) => {\n    const lineNumber = idx + 1;\n    const lineErpSyncId = `${parentErpSyncId}:${lineNumber}`;\n\n    const itemDescription = getText(line[\"STOCKITEMNAME\"]);\n    const billedQty = parseNumberFromMixed(line[\"BILLEDQTY\"]);\n    const actualQty = parseNumberFromMixed(line[\"ACTUALQTY\"]);\n    const quantity = billedQty ?? actualQty ?? null;\n\n    const unitPrice = parseNumberFromMixed(line[\"RATE\"]);\n    const amountRaw = parseNumberFromMixed(line[\"AMOUNT\"]);\n    const totalAmount = amountRaw === null ? null : Math.abs(amountRaw);\n\n    const sourceHash = [\n      lineErpSyncId,\n      itemDescription ?? \"\",\n      quantity ?? \"\",\n      unitPrice ?? \"\",\n      totalAmount ?? \"\"\n    ].join(\"|\");\n\n    out.push({\n      json: {\n        sync_run_id: syncRunId,\n        erp_sync_id: lineErpSyncId,\n        parent_erp_sync_id: String(parentErpSyncId),\n        line_number: lineNumber,\n        item_description: itemDescription,\n        quantity,\n        unit_price: unitPrice,\n        total_amount: totalAmount,\n        source_hash: sourceHash,\n        raw_payload: line\n      }\n    });\n  });\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        480
+      ],
+      "id": "f88ec484-ff15-41de-a686-6aa1b97637c0",
+      "name": "Parse PO Lines"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO raw_tally_purchase_order_lines (\n  sync_run_id,\n  erp_sync_id,\n  parent_erp_sync_id,\n  line_number,\n  item_description,\n  quantity,\n  unit_price,\n  total_amount,\n  source_hash,\n  raw_payload,\n  fetched_at,\n  updated_at,\n  is_active,\n  deleted_at\n)\nVALUES (\n  $1,\n  $2,\n  $3,\n  $4,\n  $5,\n  NULLIF($6::text, 'null')::numeric,\n  NULLIF($7::text, 'null')::numeric,\n  NULLIF($8::text, 'null')::numeric,\n  $9,\n  $10::jsonb,\n  now(),\n  now(),\n  true,\n  null\n)\nON CONFLICT (erp_sync_id)\nDO UPDATE SET\n  sync_run_id = EXCLUDED.sync_run_id,\n  parent_erp_sync_id = EXCLUDED.parent_erp_sync_id,\n  line_number = EXCLUDED.line_number,\n  item_description = EXCLUDED.item_description,\n  quantity = EXCLUDED.quantity,\n  unit_price = EXCLUDED.unit_price,\n  total_amount = EXCLUDED.total_amount,\n  source_hash = EXCLUDED.source_hash,\n  raw_payload = EXCLUDED.raw_payload,\n  fetched_at = now(),\n  updated_at = now(),\n  is_active = true,\n  deleted_at = null\nRETURNING id, erp_sync_id, parent_erp_sync_id, line_number;",
+        "options": {
+          "queryReplacement": "={{ $json.sync_run_id }},{{ $json.erp_sync_id }},{{ $json.parent_erp_sync_id }},{{ $json.line_number }},{{ $json.item_description }},{{ $json.quantity }},{{ $json.unit_price }},{{ $json.total_amount }},{{ $json.source_hash }},{{ JSON.stringify($json.raw_payload) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2272,
+        480
+      ],
+      "id": "f866dae3-fd52-477b-ae75-52ca056cda5a",
+      "name": "Postgres Raw Stage PO Lines",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO purchase_order_lines (\n  po_id,\n  line_number,\n  item_description,\n  quantity,\n  unit_price,\n  total_amount,\n  erp_sync_id,\n  source_hash,\n  last_synced_at,\n  is_active,\n  deleted_at\n)\nSELECT\n  p.id AS po_id,\n  r.line_number,\n  r.item_description,\n  r.quantity,\n  r.unit_price,\n  r.total_amount,\n  r.erp_sync_id,\n  r.source_hash,\n  now(),\n  true,\n  null\nFROM raw_tally_purchase_order_lines r\nJOIN purchase_orders p\n  ON p.erp_sync_id = r.parent_erp_sync_id\nWHERE r.erp_sync_id = $1\nON CONFLICT (erp_sync_id)\nDO UPDATE SET\n  po_id = EXCLUDED.po_id,\n  line_number = EXCLUDED.line_number,\n  item_description = EXCLUDED.item_description,\n  quantity = EXCLUDED.quantity,\n  unit_price = EXCLUDED.unit_price,\n  total_amount = EXCLUDED.total_amount,\n  source_hash = EXCLUDED.source_hash,\n  last_synced_at = now(),\n  is_active = true,\n  deleted_at = null\nWHERE purchase_order_lines.source_hash IS DISTINCT FROM EXCLUDED.source_hash\nRETURNING id, po_id, erp_sync_id, line_number, item_description;",
+        "options": {
+          "queryReplacement": "={{ $json.erp_sync_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2496,
+        480
+      ],
+      "id": "cc880938-e4c9-4b54-8f72-15adc537a136",
+      "name": "Postgres Promote PO Lines",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH deactivated AS (\n  UPDATE purchase_order_lines p\n  SET\n    is_active = false,\n    deleted_at = now()\n  WHERE p.is_active = true\n    AND NOT EXISTS (\n      SELECT 1\n      FROM raw_tally_purchase_order_lines r\n      WHERE r.erp_sync_id = p.erp_sync_id\n        AND r.sync_run_id = $1\n        AND r.is_active = true\n    )\n  RETURNING p.id AS line_id\n)\nSELECT $1::text AS id, COUNT(*) AS deactivated_count FROM deactivated;",
+        "options": {
+          "queryReplacement": "={{ $json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4288,
+        432
+      ],
+      "id": "4e4616f0-930b-4ab8-a385-b6de4d170823",
+      "name": "Postgres Reconcile Missing PO Lines",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH reactivated AS (\n  UPDATE purchase_order_lines p\n  SET\n    is_active = true,\n    deleted_at = null\n  FROM raw_tally_purchase_order_lines r\n  WHERE r.erp_sync_id = p.erp_sync_id\n    AND r.sync_run_id = $1\n    AND r.is_active = true\n    AND (p.is_active = false OR p.deleted_at IS NOT NULL)\n  RETURNING p.id AS line_id\n)\nSELECT $1::text AS id, COUNT(*) AS reactivated_count FROM reactivated;",
+        "options": {
+          "queryReplacement": "={{ $json.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4512,
+        432
+      ],
+      "id": "532673b1-de8a-4f6e-818f-567417d73e8d",
+      "name": "Postgres Reactivate Reappeared PO Lines",
+      "credentials": {
+        "postgres": {
+          "id": "GYvpXC9qjk2dxxXA",
+          "name": "Agent_tally"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge HTTP + Sync Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Postgres Create Sync Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Create Sync Run": {
+      "main": [
+        [
+          {
+            "node": "Merge HTTP + Sync Run",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Merge Fail Path",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Merge Final Success + Sync Run",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge HTTP + Sync Run": {
+      "main": [
+        [
+          {
+            "node": "Parse XML to PO JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse XML to PO JSON": {
+      "main": [
+        [
+          {
+            "node": "IF Empty PO Batch?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Empty PO Batch?": {
+      "main": [
+        [
+          {
+            "node": "Build Empty Batch Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres Raw Stag",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Parse PO Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Empty Batch Summary": {
+      "main": [
+        [
+          {
+            "node": "Postgres Complete Sync Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Raw Stag": {
+      "main": [
+        [
+          {
+            "node": "Postgres Promote Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Promote Final": {
+      "main": [
+        [
+          {
+            "node": "IF Promote Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Promote Failed": {
+      "main": [
+        [
+          {
+            "node": "Merge Fail Path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Both Success Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PO Lines": {
+      "main": [
+        [
+          {
+            "node": "Postgres Raw Stage PO Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Raw Stage PO Lines": {
+      "main": [
+        [
+          {
+            "node": "Postgres Promote PO Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Promote PO Lines": {
+      "main": [
+        [
+          {
+            "node": "IF Promote PO Lines Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Promote PO Lines Failed": {
+      "main": [
+        [
+          {
+            "node": "Merge Fail Path",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Both Success Paths",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Fail Path": {
+      "main": [
+        [
+          {
+            "node": "Postgres Fail Sync Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Both Success Paths": {
+      "main": [
+        [
+          {
+            "node": "Merge Final Success + Sync Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Final Success + Sync Run": {
+      "main": [
+        [
+          {
+            "node": "Build Sync Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Sync Summary": {
+      "main": [
+        [
+          {
+            "node": "Postgres Complete Sync Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Complete Sync Run": {
+      "main": [
+        [
+          {
+            "node": "Postgres Reconcile Missing POs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Reconcile Missing POs": {
+      "main": [
+        [
+          {
+            "node": "Postgres Reactivate Reappeared POs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Reactivate Reappeared POs": {
+      "main": [
+        [
+          {
+            "node": "Postgres Reconcile Missing PO Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Reconcile Missing PO Lines": {
+      "main": [
+        [
+          {
+            "node": "Postgres Reactivate Reappeared PO Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "5545e23c-2446-4327-a27b-03854ff0fa89",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "efab2e9dc1db8cc420ffe9bbd11ae5ba3202dae3fbfe8966fafb758e0336e98a"
+  },
+  "id": "6kBvrJ4hPgYi5tOp",
+  "tags": []
+}
