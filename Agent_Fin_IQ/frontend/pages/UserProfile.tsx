@@ -331,7 +331,7 @@ export default function UserProfile() {
                                             <Briefcase size={18} className="text-[#059669]" />
                                         </div>
                                         <div>
-                                            <div className="text-[14px] font-bold text-[#1A2640]">agent_w Configuration</div>
+                                            <div className="text-[14px] font-bold text-[#1A2640]">agent_w Control Hub</div>
                                             <div className="text-[11px] text-[#8899AA]">Tally integration settings</div>
                                         </div>
                                     </div>

@@ -20,7 +20,7 @@ export interface ProcessingPipelineProps {
     fileNames: string[];
     batchName: string;
     filePaths: string[];
-    fileDataArrays?: number[][];  // Raw file data as byte arrays
+    fileDataArrays?: Uint8Array[];  // Raw file data as byte arrays
     onComplete: () => void;
     onDismiss?: () => void;
     uploaderName?: string;

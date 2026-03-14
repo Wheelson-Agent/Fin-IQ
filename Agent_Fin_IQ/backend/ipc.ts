@@ -57,6 +57,23 @@ const __dirname = path.dirname(__filename);
  */
 export function registerIpcHandlers() {
 
+    // ─── SYSTEM UI ─────────────────────────────────────────
+
+    /**
+     * Open a system directory selection dialog.
+     * Output: Selected folder path string or null.
+     */
+    ipcMain.handle('dialog:open-directory', async () => {
+        const { dialog } = require('electron');
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            properties: ['openDirectory']
+        });
+        if (canceled || filePaths.length === 0) {
+            return null;
+        }
+        return filePaths[0];
+    });
+
     // ─── AUTH ──────────────────────────────────────────────
 
     /**

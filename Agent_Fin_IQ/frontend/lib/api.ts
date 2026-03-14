@@ -85,7 +85,7 @@ export async function getInvoiceById(id: string): Promise<Invoice | null> {
  * @param fileData - Optional raw file data as byte array (used when filePath is unavailable)
  * @returns Created invoice record
  */
-export async function uploadInvoice(filePath: string, fileName: string, batchId?: string, fileData?: number[], userName?: string): Promise<Invoice> {
+export async function uploadInvoice(filePath: string, fileName: string, batchId?: string, fileData?: Uint8Array, userName?: string): Promise<Invoice> {
     return invoke<Invoice>('invoices:upload', { filePath, fileName, batchId, fileData, userName });
 }
 

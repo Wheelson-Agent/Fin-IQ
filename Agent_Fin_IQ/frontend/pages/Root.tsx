@@ -28,7 +28,7 @@ function AppShell() {
     if (path.startsWith('/audit')) return 'Audit Trail';
     if (path.startsWith('/vendors')) return 'Vendors';
     if (path.startsWith('/reports')) return 'Reports';
-    if (path.startsWith('/config')) return 'Configuration';
+    if (path.startsWith('/config')) return 'Control Hub';
     if (path.startsWith('/user')) return 'User & Company';
     if (path.startsWith('/agent')) return 'Ask agent_w';
     return 'Dashboard';
