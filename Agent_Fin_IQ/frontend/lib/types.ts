@@ -58,6 +58,7 @@ export interface Invoice {
     ack_no?: string | null;
     ack_date?: string | null;
     eway_bill_no?: string | null;
+    invoice_number?: string | null;
     cgst?: number;
     sgst?: number;
     round_off?: number;
@@ -108,7 +109,9 @@ export type InvoiceStatus =
     | 'Auto-Posted'
     | 'Approved'
     | 'Failed'
-    | 'Manual Review';
+    | 'Manual Review'
+    | 'Ready to Post'
+    | 'Awaiting Input';
 
 // ─── VENDOR ───────────────────────────────────────────────
 
@@ -144,6 +147,8 @@ export interface Vendor {
     bank_name?: string | null;
     bank_account_no?: string | null;
     bank_ifsc?: string | null;
+    vendor_code?: string | null;
+    tax_id?: string | null;
 
     // Dynamically calculated (not stored in DB)
     invoice_count: number;
