@@ -9,7 +9,7 @@ import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline } from '../lib/api';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
 const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
@@ -26,7 +26,7 @@ const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
 
 
 const fmt = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
 export default function DetailView() {
   const { id } = useParams();
@@ -45,7 +45,11 @@ export default function DetailView() {
   const [showLedgerSlideout, setShowLedgerSlideout] = useState(false);
   const [activeLedgerIndex, setActiveLedgerIndex] = useState<number | null>(null);
 
-  const [newVendor, setNewVendor] = useState({ name: '', underGroup: 'Sundry Creditors', gstin: '', state: 'Karnataka' });
+  const [newVendor, setNewVendor] = useState({ 
+    name: '', underGroup: 'Sundry Creditors', gstin: '', state: 'Karnataka',
+    vendor_code: '', tax_id: '', pan: '', city: '', pincode: '', phone: '', email: '',
+    bank_name: '', bank_account_no: '', bank_ifsc: ''
+  });
   const [newLedger, setNewLedger] = useState({ name: '', underGroup: 'Indirect Expenses', gstApplicable: 'Yes', hsn: '' });
   const [billingAddress, setBillingAddress] = useState('Karnataka, India');
 
@@ -217,7 +221,10 @@ export default function DetailView() {
                   // Try to find matching item by description or index
                   const ocrItem = raw.line_items[itemsRecord.indexOf(item)];
                   if (ocrItem && ocrItem.mapped_ledger) {
-                    ledger = ocrItem.mapped_ledger;
+                    const found = ledgersRecord.find(l => l.name.toLowerCase() === ocrItem.mapped_ledger.toLowerCase());
+                    if (found) {
+                      ledger = found.id;
+                    }
                   }
                 }
               }
@@ -301,11 +308,35 @@ export default function DetailView() {
     );
   }
 
-  const isPending = invoice.status === 'Pending Approval';
-  const isFailed = invoice.status === 'Failed';
-  const isManualReview = invoice.status === 'Manual Review';
   const isAutoPosted = invoice.status === 'Auto-Posted';
   const readOnly = isAutoPosted;
+
+  // Determine if this record belongs to the "Handoff" tab criteria
+  const isHandoff = (() => {
+    const vVerif = docFields.vendor_verification === true || String(docFields.vendor_verification).toLowerCase() === 'true';
+    const lMatch = docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true';
+    const bVerif = docFields.buyer_verification === true || String(docFields.buyer_verification).toLowerCase() === 'true';
+    const gValid = docFields.gst_validation_status === true || String(docFields.gst_validation_status).toLowerCase() === 'true';
+    const dValid = docFields.invoice_ocr_data_valdiation === true || String(docFields.invoice_ocr_data_valdiation).toLowerCase() === 'true';
+    const isDup = docFields.duplicate_check === true || String(docFields.duplicate_check).toLowerCase() === 'true';
+    
+    const isUnknownFile = !invoice.file_name || invoice.file_name.toLowerCase() === 'unknown' || invoice.file_name === 'N/A';
+    const isUnknownInv = !(invoice.invoice_number || invoice.invoice_no) || 
+                         (invoice.invoice_number?.toLowerCase() === 'unknown' || invoice.invoice_no?.toLowerCase() === 'unknown') || 
+                         (invoice.invoice_number === 'N/A' || invoice.invoice_no === 'N/A');
+    const bStatus = (invoice.status || '').toLowerCase();
+
+    if (bStatus === 'posted' || bStatus === 'auto-posted') return false;
+    
+    // Prioritize: If all validations passed, it's NOT a handoff record
+    const n8nAllPassed = bVerif && gValid && dValid && isDup && vVerif && (!lMatch || lMatch); // Simplified for now as we trust individual checks
+    if (invoice.status === 'Ready to Post' || (bVerif && gValid && dValid && isDup && vVerif)) return false;
+
+    return !bVerif || !gValid || !dValid || !isDup || isUnknownFile || isUnknownInv || bStatus === 'failed' || bStatus === 'ocr_failed';
+  })();
+
+  const isManualReview = invoice.status === 'Manual Review';
+  const isFailed = invoice.status === 'Failed';
 
   const handleAddLineItem = () => {
     if (readOnly) return;
@@ -354,8 +385,13 @@ export default function DetailView() {
         </div>
 
         <div className="flex items-center gap-4">
-          <Badge className="bg-[#fffbeb] text-[#d97706] hover:bg-[#fef3c7] border-[#fde68a] px-3 py-1 font-black text-[10px] uppercase tracking-wider shadow-none">
-            Pending Approval
+          <Badge className={`px-3 py-1 font-black text-[10px] uppercase tracking-wider shadow-none ${
+            invoice.status === 'Ready to Post' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+            invoice.status === 'Auto-Posted' ? 'bg-slate-100 text-slate-500 border-slate-200' :
+            invoice.status === 'Awaiting Input' ? 'bg-amber-50 text-amber-600 border-amber-100' :
+            'bg-[#fffbeb] text-[#d97706] border-[#fde68a]'
+          }`}>
+            {invoice.status}
           </Badge>
         </div>
       </div>
@@ -496,31 +532,47 @@ export default function DetailView() {
                     if (!id) return;
                     setSaving(true);
                     try {
-                      await saveInvoiceItems(id, lineItems.map(item => ({
-                        description: item.description,
-                        ledger: item.ledger,
-                        hsn_sac: item.hsn_sac,
-                        tax: item.tax,
-                        quantity: item.qty,
-                        rate: item.rate,
-                        discount: item.discount,
-                        item: item.item_id || null
-                      })));
-                      // Persist dynamic document fields
-                      await updateInvoiceOCR(id, docFields);
-                      await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
-                      alert('Document Approved and posted.');
-                      navigate('/ap-workspace');
+                      if (isHandoff) {
+                        // Re-validate action
+                        await runPipeline(id, invoice.file_path || '', invoice.file_name || '');
+                        alert('Re-validation started.');
+                        window.location.reload();
+                      } else {
+                        // Approve & Post action
+                        await saveInvoiceItems(id, lineItems.map(item => ({
+                          description: item.description,
+                          ledger: item.ledger,
+                          hsn_sac: item.hsn_sac,
+                          tax: item.tax,
+                          quantity: item.qty,
+                          rate: item.rate,
+                          discount: item.discount,
+                          item: item.item_id || null
+                        })));
+                        
+                        const processedFields = { ...docFields };
+                        if (processedFields.invoice_date && typeof processedFields.invoice_date === 'string' && processedFields.invoice_date.length === 8) {
+                          const d = processedFields.invoice_date;
+                          processedFields.invoice_date = `${d.substring(4, 8)}-${d.substring(2, 4)}-${d.substring(0, 2)}`;
+                        }
+
+                        await updateInvoiceOCR(id, processedFields);
+                        await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
+                        alert('Document Approved and posted to Tally.');
+                        navigate('/ap-workspace');
+                      }
                     } catch (err) {
-                      alert('Failed to save and approve: ' + err);
+                      alert('Action failed: ' + err);
                     } finally {
                       setSaving(false);
                     }
                   }}
-                  className="h-10 px-6 bg-[#3b82f6] hover:bg-[#2563eb] text-white font-black rounded-xl shadow-[0_4px_12px_rgba(59,130,246,0.3)] border-none transition-all active:scale-95 flex items-center gap-2"
+                  className={`h-10 px-6 font-black rounded-xl shadow-lg border-none transition-all active:scale-95 flex items-center gap-2 ${
+                    isHandoff ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#3b82f6] hover:bg-[#2563eb]'
+                  } text-white`}
                 >
-                  {saving ? <RefreshCw size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                  Approve & Post
+                  {saving ? <RefreshCw size={16} className="animate-spin" /> : (isHandoff ? <RefreshCcw size={16} /> : <CheckCircle size={16} />)}
+                  {isHandoff ? 'Re-validate' : 'Approve & Post to Tally'}
                 </Button>
               )}
             </div>
@@ -549,9 +601,9 @@ export default function DetailView() {
                       </div>
                       <div className="flex-1">
                         <p className="text-[14px] font-bold text-[#b91c1c] leading-tight flex items-center gap-2">
-                          Vendor Not Found. 
+                          Tally Vendor Not Found. 
                           <button onClick={() => setShowVendorSlideout(true)} className="text-[#ef4444] underline decoration-2 underline-offset-4 hover:text-[#dc2626] transition-colors">
-                            Create Master record
+                            Create Master record in Tally
                           </button> 
                           to proceed.
                         </p>
@@ -589,21 +641,15 @@ export default function DetailView() {
                             { label: 'GST Validated', key: 'gst_validation_status' },
                             { label: 'Data Validated', key: 'invoice_ocr_data_valdiation' },
                             { label: 'Vendor Verified', key: 'vendor_verification' },
-                            { label: 'Duplicate Check Passed', key: 'duplicate_check', inverse: true },
+                            { label: 'Document Duplicate Check', key: 'duplicate_check' },
                             { label: 'Stock Items Matched', key: 'line_item_match_status' },
-                          ].filter(f => {
-                            if (f.key === 'line_item_match_status') {
-                              return !docFields.doc_type?.toLowerCase().includes('service');
-                            }
-                            return true;
-                          }).map(({ label, key, inverse }) => {
+                          ].map(({ label, key }) => {
                             const value = docFields[key];
                             
                             // Robust boolean check: handles true, "True", "true"
-                            const isValTrue = value === true || 
+                            const isSuccess = value === true || 
                                              (typeof value === 'string' && value.toLowerCase() === 'true');
                             
-                            const isSuccess = inverse ? !isValTrue : isValTrue;
                             return (
                               <tr key={key} className="hover:bg-slate-50/50 transition-colors">
                                 <td className="py-2.5 px-5 text-[13px] font-bold text-slate-700">{label}</td>
@@ -634,41 +680,45 @@ export default function DetailView() {
                        <div className="h-[2px] flex-1 bg-slate-50" />
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-x-12 gap-y-8">
-                       {[
-                         { label: 'IRN', key: 'irn' },
-                         { label: 'Ack No', key: 'ack_no' },
-                         { label: 'Ack Date', key: 'ack_date' },
-                         { label: 'E-Way Bill No', key: 'eway_bill_no' },
-                         { label: 'filename', key: 'file_name' },
-                         { label: 'Invoice No', key: 'invoice_no' },
-                         { label: 'Invoice Date', key: 'date' },
-                         { label: 'Seller Name', key: 'vendor_name' },
-                         { label: 'Supplier GST', key: 'vendor_gst' },
-                         { label: 'Supplier PAN', key: 'supplier_pan' },
-                         { label: 'Supplier Address', key: 'supplier_address' },
-                         { label: 'Buyer Name', key: 'buyer_name' },
-                         { label: 'Buyer GST', key: 'buyer_gst' },
-                         { label: 'Bank Name', key: 'bank_name' },
-                         { label: 'Account No', key: 'account_no' },
-                         { label: 'IFSC Code', key: 'ifsc_code' },
-                         { label: 'Total Amount in Words', key: 'total_in_words' },
-                         { label: 'Taxable Value', key: 'sub_total' },
-                         { label: 'Round Off', key: 'round_off' },
-                         { label: 'Total Invoice Amount', key: 'grand_total' },
-                         { label: 'CGST', key: 'cgst' },
-                         { label: 'SGST', key: 'sgst' },
-                         { label: 'Sum of GST Amount', key: 'tax_total' },
-                       ].map(({ label, key }) => (
-                         <InputField 
-                          key={key}
-                          label={label} 
-                          value={docFields[key] === null || docFields[key] === undefined ? '' : String(docFields[key])} 
-                          onChange={(val: string) => setDocFields({ ...docFields, [key]: val })} 
-                          Icon={label.toLowerCase().includes('date') ? Calendar : Edit2} 
-                         />
-                       ))}
-                    </div>
+                     <div className="grid grid-cols-2 gap-x-12 gap-y-8">
+                        {[
+                          { label: 'IRN', key: 'irn' },
+                          { label: 'Ack No', key: 'ack_no' },
+                          { label: 'Ack Date', key: 'ack_date' },
+                          { label: 'E-Way Bill No', key: 'eway_bill_no' },
+                          { label: 'filename', key: 'file_name', errorKey: 'buyer_verification' },
+                          { label: 'Invoice No', key: 'invoice_no' },
+                          { label: 'Invoice Date', key: 'date' },
+                          { label: 'Seller Name', key: 'vendor_name' },
+                          { label: 'Supplier GST', key: 'vendor_gst', errorKey: 'gst_validation_status' },
+                          { label: 'Supplier PAN', key: 'supplier_pan' },
+                          { label: 'Supplier Address', key: 'supplier_address' },
+                          { label: 'Buyer Name', key: 'buyer_name' },
+                          { label: 'Buyer GST', key: 'buyer_gst', errorKey: 'gst_validation_status' },
+                          { label: 'Bank Name', key: 'bank_name' },
+                          { label: 'Account No', key: 'account_no' },
+                          { label: 'IFSC Code', key: 'ifsc_code' },
+                          { label: 'Total Amount in Words', key: 'total_in_words' },
+                          { label: 'Taxable Value', key: 'sub_total', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'Round Off', key: 'round_off', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'Total Invoice Amount', key: 'grand_total', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'CGST', key: 'cgst', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'SGST', key: 'sgst', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'Sum of GST Amount', key: 'tax_total', errorKey: 'invoice_ocr_data_valdiation' },
+                        ].map(({ label, key, errorKey }) => {
+                          const isErr = errorKey && (docFields[errorKey] === false || String(docFields[errorKey]).toLowerCase() === 'false');
+                          return (
+                            <InputField 
+                             key={key}
+                             label={label} 
+                             value={docFields[key] === null || docFields[key] === undefined ? '' : String(docFields[key])} 
+                             onChange={(val: string) => setDocFields({ ...docFields, [key]: val })} 
+                             Icon={label.toLowerCase().includes('date') ? Calendar : Edit2}
+                             isError={isErr}
+                            />
+                          );
+                        })}
+                     </div>
                   </div>
 
                   {/* Line Items Section */}
@@ -683,7 +733,7 @@ export default function DetailView() {
                         <thead className="bg-slate-50/80 border-b border-slate-200">
                            <tr>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[30%]">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">Ledger <span className="text-red-500 ml-0.5">*</span></th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">{docFields.doc_type?.toLowerCase().includes('goods') ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%]">HSN/SAC</th>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Quantity</th>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%] text-center">Unit Rate</th>
@@ -703,20 +753,22 @@ export default function DetailView() {
                                     const val = e.target.value;
                                     const newLines = [...lineItems]; 
                                     newLines[index].description = val; 
-                                    // If Goods, sync ledger
-                                    if (docFields.doc_type?.toLowerCase().includes('goods')) {
+                                    const isMatch = docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true';
+                                    // If Goods and isMatch, sync ledger
+                                    if (docFields.doc_type?.toLowerCase().includes('goods') && isMatch) {
                                       newLines[index].ledger = val;
                                     }
                                     setLineItems(newLines); 
                                   }} 
+                                  style={{ color: docFields.doc_type?.toLowerCase().includes('goods') ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
                                 />
                               </td>
                               <td className="p-3 align-top">
                                 <CustomTableSelect
-                                  value={item.ledger}
+                                  value={(docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true')) ? item.description : item.ledger}
                                   onChange={(val: string) => { const newLines = [...lineItems]; newLines[index].ledger = val; setLineItems(newLines); }}
                                   options={ledgerOptions}
-                                  disabled={readOnly}
+                                  disabled={readOnly || (docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))}
                                   highlight
                                   showCreate={!readOnly}
                                   onCreateClick={() => { setActiveLedgerIndex(index); setShowLedgerSlideout(true); }}
@@ -763,15 +815,7 @@ export default function DetailView() {
                       </div>
                     )}
 
-                    {/* Totals Box at bottom of Line Items */}
-                    <div className="px-6 pb-6 pt-4 flex justify-end">
-                      <div className="bg-white border rounded-[12px] p-5 w-[420px] flex flex-col gap-3 ml-auto border-transparent">
-                        <div className="flex justify-between items-center pt-2 mt-2">
-                          <span className="text-[16px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-                          <span className="text-[32px] font-black text-slate-900 tracking-tighter font-mono">{fmt(total)}</span>
-                        </div>
-                      </div>
-                    </div>
+                    {/* Redundant total box removed as per the latest requirements */}
                   </div>
                 </div>
               </div>
@@ -794,9 +838,34 @@ export default function DetailView() {
             </div>
             <div className="p-10 flex-1 overflow-y-auto space-y-10">
               <InputField label="Vendor Name" value={newVendor.name} required onChange={(val: string) => setNewVendor({ ...newVendor, name: val })} />
-              <InputField label="Under Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} />
-              <InputField label="State" value={newVendor.state} required onChange={(val: string) => setNewVendor({ ...newVendor, state: val })} Icon={ChevronDown} selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']} />
-              <InputField label="GSTIN / UIN" value={newVendor.gstin} required onChange={(val: string) => setNewVendor({ ...newVendor, gstin: val })} />
+              <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                <InputField label="Vendor Code" value={newVendor.vendor_code} onChange={(val: string) => setNewVendor({ ...newVendor, vendor_code: val })} />
+                <InputField label="Under Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                <InputField label="GSTIN" value={newVendor.gstin} required onChange={(val: string) => setNewVendor({ ...newVendor, gstin: val })} />
+                <InputField label="Tax ID" value={newVendor.tax_id} onChange={(val: string) => setNewVendor({ ...newVendor, tax_id: val })} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                <InputField label="PAN" value={newVendor.pan} onChange={(val: string) => setNewVendor({ ...newVendor, pan: val })} />
+                <InputField label="State" value={newVendor.state} required onChange={(val: string) => setNewVendor({ ...newVendor, state: val })} Icon={ChevronDown} selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                <InputField label="City" value={newVendor.city} onChange={(val: string) => setNewVendor({ ...newVendor, city: val })} />
+                <InputField label="Pincode" value={newVendor.pincode} onChange={(val: string) => setNewVendor({ ...newVendor, pincode: val })} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                <InputField label="Phone" value={newVendor.phone} onChange={(val: string) => setNewVendor({ ...newVendor, phone: val })} />
+                <InputField label="Email" value={newVendor.email} onChange={(val: string) => setNewVendor({ ...newVendor, email: val })} />
+              </div>
+              <div className="space-y-6 pt-4 border-t border-slate-100">
+                <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest">Bank Details</h4>
+                <InputField label="Bank Name" value={newVendor.bank_name} onChange={(val: string) => setNewVendor({ ...newVendor, bank_name: val })} />
+                <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                  <InputField label="Account No" value={newVendor.bank_account_no} onChange={(val: string) => setNewVendor({ ...newVendor, bank_account_no: val })} />
+                  <InputField label="IFSC Code" value={newVendor.bank_ifsc} onChange={(val: string) => setNewVendor({ ...newVendor, bank_ifsc: val })} />
+                </div>
+              </div>
             </div>
             <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
               <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl">Cancel</Button>
@@ -812,7 +881,17 @@ export default function DetailView() {
                       state: newVendor.state,
                       gstin: newVendor.gstin,
                       address: billingAddress,
-                      tds_nature: 'Any'
+                      tds_nature: 'Any',
+                      vendor_code: newVendor.vendor_code,
+                      tax_id: newVendor.tax_id,
+                      pan: newVendor.pan,
+                      city: newVendor.city,
+                      pincode: newVendor.pincode,
+                      phone: newVendor.phone,
+                      email: newVendor.email,
+                      bank_name: newVendor.bank_name,
+                      bank_account_no: newVendor.bank_account_no,
+                      bank_ifsc: newVendor.bank_ifsc
                     });
                     await mapVendorToInvoice(id, vendor.id);
                     setIsVendorMapped(true);
@@ -875,7 +954,7 @@ export default function DetailView() {
 
 // --- Helper Components ---
 
-function InputField({ label, value, required, onChange, Icon, selectOptions }: any) {
+function InputField({ label, value, required, onChange, Icon, selectOptions, isError, style }: any) {
   return (
     <div className="flex flex-col gap-2 group">
       <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
@@ -900,7 +979,8 @@ function InputField({ label, value, required, onChange, Icon, selectOptions }: a
           </select>
         ) : (
           <input
-            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black text-slate-700 transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none ${Icon ? 'pl-11' : 'px-5'}`}
+            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none ${Icon ? 'pl-11' : 'px-5'} ${isError ? 'text-red-500 border-red-100 bg-red-50/30' : 'text-slate-700'}`}
+            style={style}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={`Type ${label.toLowerCase()}...`}
