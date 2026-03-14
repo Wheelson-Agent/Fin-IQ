@@ -61,7 +61,7 @@ dotenv.config({ path: envPath });
  * Called once during backend initialization (main.ts).
  */
 export function registerIpcHandlers() {
-<<<<<<< HEAD
+
 
     // ─── SYSTEM UI ─────────────────────────────────────────
 
@@ -80,9 +80,8 @@ export function registerIpcHandlers() {
         return filePaths[0];
     });
 
-=======
+
     console.log(`[IPC] Initializing handlers. Webhook URL: ${process.env.N8N_WEB_HOOK_URL}`);
->>>>>>> origin/main
     // ─── AUTH ──────────────────────────────────────────────
 
     /**
