@@ -61,6 +61,26 @@ dotenv.config({ path: envPath });
  * Called once during backend initialization (main.ts).
  */
 export function registerIpcHandlers() {
+
+
+    // ─── SYSTEM UI ─────────────────────────────────────────
+
+    /**
+     * Open a system directory selection dialog.
+     * Output: Selected folder path string or null.
+     */
+    ipcMain.handle('dialog:open-directory', async () => {
+        const { dialog } = require('electron');
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            properties: ['openDirectory']
+        });
+        if (canceled || filePaths.length === 0) {
+            return null;
+        }
+        return filePaths[0];
+    });
+
+
     console.log(`[IPC] Initializing handlers. Webhook URL: ${process.env.N8N_WEB_HOOK_URL}`);
     // ─── AUTH ──────────────────────────────────────────────
 
