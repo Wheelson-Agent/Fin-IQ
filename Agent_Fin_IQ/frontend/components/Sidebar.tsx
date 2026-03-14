@@ -26,7 +26,7 @@ const navItemsManage = [
 ];
 
 const navItemsSettings = [
-  { id: 'config', label: 'Configuration', path: '/config', icon: Settings },
+  { id: 'config', label: 'Control Hub', path: '/config', icon: Settings },
   { id: 'user', label: 'User & Company', path: '/user', icon: Users },
 ];
 

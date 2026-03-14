@@ -26,6 +26,7 @@ export interface ProcessingPipelineProps {
     onStagesChange?: (stages: PipelineStage[]) => void;
     particles?: Record<string, boolean>;
     onParticlesChange?: (particles: Record<string, boolean>) => void;
+    fileDataArrays?: Uint8Array[];  // Raw file data as byte arrays
     onComplete: () => void;
     onDismiss?: () => void;
     uploaderName?: string;
