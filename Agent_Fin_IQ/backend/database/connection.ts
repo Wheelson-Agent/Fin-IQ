@@ -28,8 +28,8 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from config/env
-const envPath = path.resolve(__dirname, '../../config/env');
+// Load environment variables from config/.env
+const envPath = path.resolve(__dirname, '../../config/.env');
 dotenv.config({ path: envPath });
 
 /**

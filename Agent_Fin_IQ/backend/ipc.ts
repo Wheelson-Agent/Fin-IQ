@@ -40,6 +40,7 @@ import { login, validateToken } from './auth/auth';
 import dotenv from 'dotenv';
 import { hasPermission } from './auth/roles';
 import * as n8n from './sync/n8n';
+import * as tallyPosting from './sync/tally_posting';
 import * as ocr from './ocr/bridge';
 import { createBatchStructure } from './utils/filesystem';
 import { runFullPipeline } from './pre-ocr/engine';
@@ -256,25 +257,19 @@ export function registerIpcHandlers() {
             after_data: { status },
         });
 
-        // If approved, send to Tally Prime
+        // If approved, send to Tally via the dedicated service
         if (status === 'Auto-Posted' || status === 'Approved') {
             try {
-                const n8nResult = await n8n.sendToTallyPrime({
-                    invoice_no: updated.invoice_number,
-                    vendor_name: updated.vendor_name,
-                    amount: updated.sub_total,
-                    gst: updated.tax_total,
-                    total: updated.grand_total,
-                    gl_account: updated.gl_account,
-                    date: updated.invoice_date,
-                    due_date: updated.due_date,
-                });
+                const result = await tallyPosting.sendInvoiceToTally(updated.id, updated.ocr_raw_payload);
 
                 // Extract tally_id from response (n8n usually returns it in response.response.masterid or tally_id)
-                const tallyIdStr = n8nResult.response?.tally_id || n8nResult.response?.masterid || n8nResult.response?.master_id || null;
-                await queries.markPostedToTally(id, n8nResult.response, tallyIdStr);
+                const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
+                
+                // Update erp_sync_status based on webhook result
+                await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
             } catch (err: any) {
                 console.error('[IPC] Tally posting failed:', err.message);
+                await queries.updateInvoiceWithOCR(id, { erp_sync_status: 'failed' } as any);
             }
         }
 

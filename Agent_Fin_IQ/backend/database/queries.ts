@@ -238,17 +238,19 @@ export async function updateInvoiceRemarks(id: string, remarks: string) {
  * @param id - Invoice UUID
  * @param responseJson - Detailed response from Tally Prime
  * @param tallyId - Reference ID returned by Tally
+ * @param erpSyncStatus - 'processed' or 'failed'
  */
-export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string) {
+export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed') {
     await query(
         `UPDATE ap_invoices SET 
           is_posted_to_tally = true, 
           processing_status = 'Auto-Posted', 
+          erp_sync_status = $4,
           posted_to_tally_json = COALESCE($2::jsonb, posted_to_tally_json),
           tally_id = COALESCE($3, tally_id),
           updated_at = NOW() 
         WHERE id = $1`,
-        [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null]
+        [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus]
     );
 }
 
@@ -405,20 +407,44 @@ export async function saveVendor(data: {
     state?: string;
     address?: string;
     tds_nature?: string;
+    vendor_code?: string;
+    tax_id?: string;
+    pan?: string;
+    city?: string;
+    pincode?: string;
+    phone?: string;
+    email?: string;
+    bank_name?: string;
+    bank_account_no?: string;
+    bank_ifsc?: string;
 }) {
     if (data.id) {
         const result = await query(
             `UPDATE vendors SET 
-        name = $2, gstin = $3, under_group = $4, state = $5, address = $6, tds_nature = $7
+        name = $2, gstin = $3, under_group = $4, state = $5, address = $6, tds_nature = $7,
+        vendor_code = $8, tax_id = $9, pan = $10, city = $11, pincode = $12, phone = $13,
+        email = $14, bank_name = $15, bank_account_no = $16, bank_ifsc = $17
         WHERE id = $1 RETURNING *`,
-            [data.id, data.name, data.gstin, data.under_group, data.state, data.address, data.tds_nature]
+            [
+                data.id, data.name, data.gstin, data.under_group, data.state, data.address, data.tds_nature,
+                data.vendor_code, data.tax_id, data.pan, data.city, data.pincode, data.phone,
+                data.email, data.bank_name, data.bank_account_no, data.bank_ifsc
+            ]
         );
         return result.rows[0];
     } else {
         const result = await query(
-            `INSERT INTO vendors (name, gstin, under_group, state, address, tds_nature)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-            [data.name, data.gstin, data.under_group, data.state, data.address, data.tds_nature]
+            `INSERT INTO vendors (
+                name, gstin, under_group, state, address, tds_nature,
+                vendor_code, tax_id, pan, city, pincode, phone, email,
+                bank_name, bank_account_no, bank_ifsc
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+            [
+                data.name, data.gstin, data.under_group, data.state, data.address, data.tds_nature,
+                data.vendor_code, data.tax_id, data.pan, data.city, data.pincode, data.phone, data.email,
+                data.bank_name, data.bank_account_no, data.bank_ifsc
+            ]
         );
         return result.rows[0];
     }
@@ -461,12 +487,13 @@ export async function saveInvoiceItems(invoiceId: string, items: any[]) {
     for (const item of items) {
         const res = await query(
             `INSERT INTO ap_invoice_lines 
-        (ap_invoice_id, item_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        (ap_invoice_id, item_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount, hsn_sac)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
             [
                 invoiceId, item.item || null, item.description, item.ledger || null, item.tax,
                 item.quantity || 1, item.rate || 0, item.discount || 0,
-                item.amount || (Number(item.quantity || 1) * Number(item.rate || 0))
+                item.amount || (Number(item.quantity || 1) * Number(item.rate || 0)),
+                item.hsn_sac || null
             ]
         );
         results.push(res.rows[0]);
@@ -517,9 +544,46 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             }
         }
 
-        // Determine Final Status
-        let finalStatus = 'Ready';
-        if (invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
+        // Determine Final Status based on validation checks
+        // Robustly extract validation flags from either a JSON string or top-level fields
+        let n8nVal = typeof invData.n8n_val_json_data === 'string' ? JSON.parse(invData.n8n_val_json_data) : (invData.n8n_val_json_data || {});
+        
+        // If n8nVal is empty but top-level fields exist, collect them
+        const valKeys = [
+            'buyer_verification', 'gst_validation_status', 'invoice_ocr_data_valdiation', 
+            'vendor_verification', 'duplicate_check', 'line_item_match_status',
+            'Company Verified', 'GST Validated', 'Data Validated', 'Vendor Verified', 'Document Duplicate Check', 'Stock Items Matched'
+        ];
+        
+        valKeys.forEach(k => {
+            if (invData[k] !== undefined && n8nVal[k] === undefined) {
+                n8nVal[k] = invData[k];
+            }
+        });
+
+        // Sync back to invData so it gets saved to the n8n_val_json_data column
+        invData.n8n_val_json_data = JSON.stringify(n8nVal);
+
+        const getVal = (key: string) => {
+            const val = n8nVal[key] ?? n8nVal[key.toLowerCase().replace(/ /g, '_')];
+            return val === true || String(val).toLowerCase() === 'true';
+        };
+        
+        const checks = [
+            getVal('buyer_verification'),
+            getVal('gst_validation_status'),
+            getVal('invoice_ocr_data_valdiation'),
+            getVal('vendor_verification'),
+            getVal('duplicate_check'),
+            getVal('line_item_match_status')
+        ];
+
+        const allPassed = checks.every(c => c === true);
+        
+        let finalStatus = 'Pending Approval';
+        if (allPassed) {
+            finalStatus = 'Ready to Post';
+        } else if (invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
             finalStatus = 'Awaiting Input';
         }
 
