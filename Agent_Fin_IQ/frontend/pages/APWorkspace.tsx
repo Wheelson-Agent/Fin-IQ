@@ -141,8 +141,9 @@ export default function APWorkspace() {
           });
 
           const getVal = (key: string, oldKey?: string) => {
-            const val = valData[key] ?? valData[key.toLowerCase().replace(/ /g, '_')] ?? 
-                      (oldKey ? (inv[oldKey] ?? inv[key]) : inv[key]);
+            const val = valData[key] ?? 
+                      valData[key.toLowerCase().replace(/ /g, '_')] ?? 
+                      (oldKey ? (valData[oldKey] ?? inv[oldKey] ?? inv[key]) : inv[key]);
             return val === true || String(val).toLowerCase() === 'true';
           };
 

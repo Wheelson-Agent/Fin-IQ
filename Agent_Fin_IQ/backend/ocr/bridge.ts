@@ -212,23 +212,39 @@ export async function testOCR(): Promise<boolean> {
             return false;
         }
 
-        // 2. Check credentials file
-        const credsPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH;
-        if (!credsPath) {
-            console.warn('[OCR] Connectivity test: GOOGLE_SERVICE_ACCOUNT_PATH missing in .env');
-            return false;
-        }
+        // 3. Perform live authentication check
+        const scriptPath = path.resolve(__dirname, 'ocr_script.py');
+        const args = [
+            scriptPath,
+            '--env', envPath,
+            '--test'
+        ];
 
-        const absoluteCredsPath = path.isAbsolute(credsPath)
-            ? credsPath
-            : path.resolve(__dirname, '../../', credsPath);
+        return await new Promise<boolean>((resolve) => {
+            const proc = spawn(pythonPath, args, { timeout: 10000 });
+            let stdout = '';
+            proc.stdout.on('data', (d) => { stdout += d.toString(); });
+            
+            proc.on('close', (code) => {
+                if (code !== 0) {
+                    console.warn('[OCR] Live auth test failed with code:', code, stdout);
+                    resolve(false);
+                    return;
+                }
+                try {
+                    const res = JSON.parse(stdout);
+                    resolve(res.success === true);
+                } catch (e) {
+                    console.warn('[OCR] Failed to parse live auth result:', e);
+                    resolve(false);
+                }
+            });
 
-        const exists = fs.existsSync(absoluteCredsPath);
-        if (!exists) {
-            console.warn(`[OCR] Connectivity test: Credentials file not found at ${absoluteCredsPath}`);
-        }
-
-        return exists;
+            proc.on('error', (err) => {
+                console.error('[OCR] Failed to spawn live auth test:', err.message);
+                resolve(false);
+            });
+        });
     } catch (error: any) {
         console.error('[OCR] Connectivity test error:', error.message);
         return false;

@@ -138,7 +138,11 @@ export async function updateInvoiceWithOCR(id: string, data: {
         `UPDATE ap_invoices SET
        invoice_number = COALESCE($2, invoice_number),
        vendor_name = COALESCE($3, vendor_name),
-       invoice_date = COALESCE($4::date, invoice_date),
+       invoice_date = CASE 
+           WHEN $4 ~ '^\d{8}$' THEN to_date($4, 'DDMMYYYY')
+           WHEN $4 ~ '^\d{4}-\d{2}-\d{2}$' THEN $4::date
+           ELSE invoice_date 
+       END,
        due_date = COALESCE($5::date, due_date),
        sub_total = COALESCE($6, sub_total),
        tax_total = COALESCE($7, tax_total),
@@ -578,6 +582,16 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             getVal('line_item_match_status')
         ];
 
+        console.log(`[DB] ingestN8nData Checks for ${invoiceId}:`, {
+            buyer: checks[0],
+            gst: checks[1],
+            ocr: checks[2],
+            vendor: checks[3],
+            duplicate: checks[4],
+            lineItems: checks[5],
+            vendorId: vendorId
+        });
+
         const allPassed = checks.every(c => c === true);
         
         let finalStatus = 'Pending Approval';
@@ -586,6 +600,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         } else if (invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
             finalStatus = 'Awaiting Input';
         }
+
+        console.log(`[DB] ingestN8nData Final Status for ${invoiceId}: ${finalStatus} (allPassed: ${allPassed})`);
 
         // --- DYNAMIC DATABASE SCHEMAS --- 
         const allowedApInvoicesCols = [

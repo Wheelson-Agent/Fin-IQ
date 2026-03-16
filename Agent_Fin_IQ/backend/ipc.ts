@@ -380,6 +380,7 @@ export function registerIpcHandlers() {
 
             const fileBuffer = fs.readFileSync(filePath);
             const result = await runFullPipeline(fileBuffer, fileName);
+            console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
             // If the decision is to fail, return an error back to the frontend
             if (result.decision.route === 'FAILED') {
@@ -394,6 +395,7 @@ export function registerIpcHandlers() {
 
             const mimeType = ocr.getMimeType(filePath);
             const ocrResult = await ocr.runOCR(filePath, mimeType);
+            console.log(`[IPC] ocr.runOCR result for ${fileName}: success=${ocrResult.success}, error=${ocrResult.error || 'none'}`);
 
             if (!ocrResult.success) {
                 const errorMessage = ocrResult.error || 'OCR Processing failed';
@@ -429,17 +431,19 @@ export function registerIpcHandlers() {
 
                 // IMPORTANT: n8n must be configured to "Respond to Webhook" with the final JSON structure mapped for DB insertion
                 const n8nData = await response.json();
+                console.log(`[IPC] Received n8nData for ${invoiceId}`);
 
                 // Log webhook success to debug_ocr.log and the new n8n_debug.log
                 const timestamp = new Date().toISOString();
                 const logData = `\n--- WEBHOOK SENT ${timestamp} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nStatus: Success\nResponse: ${JSON.stringify(n8nData, null, 2)}\n--------------------------\n`;
-                fs.appendFileSync(path.resolve(__dirname, '../debug_ocr.log'), logData);
+                fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
 
                 const n8nDebugData = `\n--- N8N RESPONSE RECEIVED ${timestamp} ---\nInvoice ID: ${invoiceId}\nResponse: ${JSON.stringify(n8nData, null, 2)}\n------------------------------------------\n`;
-                fs.appendFileSync(path.resolve(__dirname, '../n8n_debug.log'), n8nDebugData);
+                fs.appendFileSync(path.resolve(__dirname, '../../n8n_debug.log'), n8nDebugData);
 
                 // Update the database with parsed N8N results using the code-level mapper
                 await queries.ingestN8nData(invoiceId, n8nData);
+                console.log(`[IPC] ingestN8nData completed for ${invoiceId}`);
 
             } catch (webhookErr: any) {
                 console.error('[IPC] Webhook delivery failed, but OCR was successful:', webhookErr.message);
