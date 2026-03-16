@@ -33,12 +33,18 @@ import { query, pool } from './connection';
 export async function getAllInvoices(companyId?: string) {
     let sql = `
         SELECT *, 
-               invoice_number as invoice_no, 
+               COALESCE(invoice_number, 'Unknown Invoice') as invoice_no, 
                invoice_date as date, 
+               created_at as uploaded_date,
                processing_status as status,
                sub_total as amount,
                tax_total as gst,
                grand_total as total,
+               CASE 
+                 WHEN LOWER(doc_type) LIKE '%goods%' THEN 'Invoice (Goods)'
+                 WHEN LOWER(doc_type) LIKE '%service%' THEN 'Invoice (Service)'
+                 ELSE 'Invoice (Service)'
+               END as doc_type_label,
                (SELECT COUNT(*) FROM ap_invoice_lines WHERE ap_invoice_id = ap_invoices.id)::int as items_count
         FROM ap_invoices
     `;
@@ -64,12 +70,18 @@ export async function getAllInvoices(companyId?: string) {
 export async function getInvoiceById(id: string) {
     const result = await query(`
         SELECT *, 
-               invoice_number as invoice_no, 
+               COALESCE(invoice_number, 'Unknown Invoice') as invoice_no, 
                invoice_date as date, 
+               created_at as uploaded_date,
                processing_status as status,
                sub_total as amount,
                tax_total as gst,
-               grand_total as total
+               grand_total as total,
+               CASE 
+                 WHEN LOWER(doc_type) LIKE '%goods%' THEN 'Invoice (Goods)'
+                 WHEN LOWER(doc_type) LIKE '%service%' THEN 'Invoice (Service)'
+                 ELSE 'Invoice (Service)'
+               END as doc_type_label
         FROM ap_invoices 
         WHERE id = $1
     `, [id]);
@@ -141,6 +153,8 @@ export async function updateInvoiceWithOCR(id: string, data: {
        invoice_date = CASE 
            WHEN $4 ~ '^\d{8}$' THEN to_date($4, 'DDMMYYYY')
            WHEN $4 ~ '^\d{4}-\d{2}-\d{2}$' THEN $4::date
+           WHEN $4 ~ '^\d{2}-\d{2}-\d{4}$' THEN to_date($4, 'DD-MM-YYYY')
+           WHEN $4 ~ '^\d{2}/\d{2}/\d{4}$' THEN to_date($4, 'DD/MM/YYYY')
            ELSE invoice_date 
        END,
        due_date = COALESCE($5::date, due_date),

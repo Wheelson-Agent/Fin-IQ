@@ -102,40 +102,36 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
         ensureBlinkStyle();
     }, []);
 
-    // Poll every 15 seconds via real IPC
+    // Listen for pushed updates and perform initial check
     useEffect(() => {
-        async function checkServices() {
-            // n8n: calls Electron → HTTP HEAD to webhook URL
+        async function initialCheck() {
             try {
                 const api = (window as any).api;
                 if (api?.invoke) {
-                    const ok = await api.invoke('status:check-n8n');
-                    setN8nStatus(ok ? 'connected' : 'disconnected');
-                } else {
-                    // No Electron IPC available (plain browser) → disconnected
-                    setN8nStatus('disconnected');
+                    // Initial n8n status
+                    const n8nFull = await api.invoke('status:get-n8n-full');
+                    setN8nStatus(n8nFull === 'live' ? 'connected' : (n8nFull === 'offline' ? 'disconnected' : 'connecting'));
+                    
+                    // Initial OCR check (still manual for now as it's less frequent)
+                    const ocrOk = await api.invoke('status:check-ocr');
+                    setOcrStatus(ocrOk ? 'connected' : 'disconnected');
                 }
-            } catch {
-                setN8nStatus('disconnected');
-            }
-
-            // OCR: calls Electron → python --version + creds file check
-            try {
-                const api = (window as any).api;
-                if (api?.invoke) {
-                    const ok = await api.invoke('status:check-ocr');
-                    setOcrStatus(ok ? 'connected' : 'disconnected');
-                } else {
-                    setOcrStatus('disconnected');
-                }
-            } catch {
-                setOcrStatus('disconnected');
+            } catch (err) {
+                console.warn('[Topbar] Initial status check failed', err);
             }
         }
 
-        checkServices();
-        const interval = setInterval(checkServices, 15000);
-        return () => clearInterval(interval);
+        initialCheck();
+
+        const api = (window as any).api;
+        if (api?.on) {
+            // Listen for background pushes
+            api.on('n8n:status-update', (data: any) => {
+                if (data.service === 'n8n') {
+                    setN8nStatus(data.status === 'live' ? 'connected' : (data.status === 'offline' ? 'disconnected' : 'connecting'));
+                }
+            });
+        }
     }, []);
 
     const combined = getCombinedStatus(n8nStatus, ocrStatus);
