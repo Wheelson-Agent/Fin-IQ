@@ -326,11 +326,11 @@ export default function DetailView() {
                          (invoice.invoice_number === 'N/A' || invoice.invoice_no === 'N/A');
     const bStatus = (invoice.status || '').toLowerCase();
 
-    if (bStatus === 'posted' || bStatus === 'auto-posted') return false;
+    if (bStatus === 'posted' || bStatus === 'auto-posted' || bStatus === 'ready to post') return false;
     
     // Prioritize: If all validations passed, it's NOT a handoff record
-    const n8nAllPassed = bVerif && gValid && dValid && isDup && vVerif && (!lMatch || lMatch); // Simplified for now as we trust individual checks
-    if (invoice.status === 'Ready to Post' || (bVerif && gValid && dValid && isDup && vVerif)) return false;
+    const n8nAllPassed = bVerif && gValid && dValid && isDup && vVerif && (!lMatch || lMatch); 
+    if (invoice.status === 'Ready to Post' || n8nAllPassed) return false;
 
     return !bVerif || !gValid || !dValid || !isDup || isUnknownFile || isUnknownInv || bStatus === 'failed' || bStatus === 'ocr_failed';
   })();
@@ -550,11 +550,18 @@ export default function DetailView() {
                           item: item.item_id || null
                         })));
                         
-                        const processedFields = { ...docFields };
-                        if (processedFields.invoice_date && typeof processedFields.invoice_date === 'string' && processedFields.invoice_date.length === 8) {
-                          const d = processedFields.invoice_date;
-                          processedFields.invoice_date = `${d.substring(4, 8)}-${d.substring(2, 4)}-${d.substring(0, 2)}`;
-                        }
+                        const processedFields: any = { ...docFields };
+                        
+                        // Fix 1: Date Format
+                        // User wants DDMMYYYY (e.g. 03012025) for Tally.
+                        // We send the raw 8-digit string; backend uses to_date(?, 'DDMMYYYY').
+                        processedFields.date = docFields.date;
+
+                        // Fix 2: Field Mapping (Map docFields keys to DB column expectations)
+                        processedFields.amount = processedFields.sub_total;
+                        processedFields.gst = processedFields.tax_total;
+                        processedFields.total = processedFields.grand_total;
+                        processedFields.invoice_no = processedFields.invoice_no; // Already named correctly but for clarity
 
                         await updateInvoiceOCR(id, processedFields);
                         await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');

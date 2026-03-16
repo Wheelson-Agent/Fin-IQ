@@ -34,12 +34,26 @@ const ALLOWED_CHANNELS = [
     'invoices:map-vendor',
     'invoices:status-counts',
     'invoices:finalize-batch-file',
+    'invoices:update-ocr',
+    'invoices:update-remarks',
+    'invoices:delete',
     // Vendors
     'vendors:get-all',
     'vendors:get-by-id',
     'vendors:save',
+    // Tally & Masters
+    'tally:get-sync-logs',
+    'po:get-all',
+    'po:get-by-id',
+    'grn:get-all',
+    'ses:get-all',
+    'masters:get-ledgers',
+    'masters:get-tds-sections',
+    // Companies & Dashboard
+    'companies:get-active',
+    'companies:get-all',
+    'dashboard:get-metrics',
     // Audit
-
     'audit:get-logs',
     // Processing
     'processing:get-jobs',

@@ -293,11 +293,4 @@ export async function getDashboardMetrics(companyId?: string): Promise<Dashboard
     return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
 }
 
-// ─── TALLY SYNC ──────────────────────────────────────────────
 
-/**
- * Fetch sync logs for an entity or company.
- */
-export async function getTallySyncLogs(entityId?: string): Promise<TallySyncLog[]> {
-    return invoke<TallySyncLog[]>('tally:get-sync-logs', { entityId });
-}
