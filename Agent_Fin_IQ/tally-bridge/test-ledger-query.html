@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tally /query — Ledger Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 32px; }
+    h1 { font-size: 1.4rem; color: #7dd3fc; margin-bottom: 4px; }
+    p.sub { font-size: 0.85rem; color: #64748b; margin-bottom: 24px; }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+    label { display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 6px; letter-spacing: .05em; text-transform: uppercase; }
+    input, textarea {
+      width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      color: #e2e8f0; font-size: 0.85rem; padding: 10px 14px; outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, textarea:focus { border-color: #38bdf8; }
+    textarea { height: 260px; resize: vertical; font-family: 'Cascadia Code', 'Courier New', monospace; }
+
+    .row { margin-bottom: 16px; }
+
+    button {
+      margin-top: 8px;
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      border: none; border-radius: 8px; color: #fff; cursor: pointer;
+      font-size: 0.9rem; font-weight: 600; padding: 12px 28px;
+      transition: opacity .2s, transform .1s;
+    }
+    button:hover { opacity: 0.9; transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #status { margin-top: 12px; font-size: 0.8rem; }
+    .ok  { color: #4ade80; }
+    .err { color: #f87171; }
+
+    #output {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 16px; height: 400px; overflow-y: auto;
+      font-family: 'Cascadia Code', 'Courier New', monospace;
+      font-size: 0.75rem; white-space: pre-wrap; word-break: break-all;
+      color: #a5f3fc;
+    }
+
+    .badge {
+      display: inline-block; background: #1e293b; border: 1px solid #334155;
+      border-radius: 6px; font-size: 0.7rem; color: #64748b; padding: 2px 8px; margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🔍 Tally Bridge — Ledger Query Test</h1>
+<p class="sub">Sends your TDL XML to <code>POST /tally/query</code> and shows the raw parsed response.</p>
+
+<div class="grid">
+
+  <!-- ── LEFT: Config + XML ── -->
+  <div>
+    <div class="row">
+      <label>Bridge URL</label>
+      <input id="bridgeUrl" type="text" value="http://localhost:7070" placeholder="http://localhost:7070 or ngrok URL" />
+    </div>
+
+    <div class="row">
+      <label>API Key <span class="badge">x-api-key</span></label>
+      <input id="apiKey" type="text" value="WXuQeIpMOjxTkCsP1azLo9l0NB7GZqvUtSV6d42Jm3YhHwrE" />
+    </div>
+
+    <div class="row">
+      <label>Ledger TDL XML</label>
+      <textarea id="xmlPayload"><ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>EXPORT</TALLYREQUEST>
+    <TYPE>COLLECTION</TYPE>
+    <ID>Ledger Collection</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Ledger Collection" ISINITIALIZE="Yes">
+            <TYPE>Ledger</TYPE>
+            <FETCH>
+              NAME,
+              MASTERID,
+              GUID,
+              PARENT,
+              GSTREGISTRATIONTYPE,
+              PARTYGSTIN,
+              INCOMETAXNUMBER,
+              LEDGERPHONE,
+              EMAIL,
+              ADDRESS,
+              COUNTRYNAME,
+              STATENAME,
+              PINCODE,
+              ISBILLWISEON
+            </FETCH>
+          </COLLECTION>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE></textarea>
+    </div>
+
+    <button id="sendBtn" onclick="sendQuery()">▶ Send to /tally/query</button>
+    <div id="status"></div>
+  </div>
+
+  <!-- ── RIGHT: Response ── -->
+  <div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+      <label style="margin-bottom:0">Response JSON <span id="countBadge" class="badge" style="display:none"></span></label>
+      <button id="copyBtn" onclick="copyOutput()" style="margin-top:0; padding:6px 16px; font-size:0.75rem; background:linear-gradient(135deg,#1e293b,#334155); border:1px solid #475569;">Copy</button>
+      <span id="copiedMsg" style="font-size:0.75rem; color:#4ade80; opacity:0; transition:opacity .3s;">Copied ✓</span>
+    </div>
+    <div id="output">// Response will appear here...</div>
+  </div>
+
+</div>
+
+<script>
+async function sendQuery() {
+  const btn = document.getElementById('sendBtn');
+  const status = document.getElementById('status');
+  const output = document.getElementById('output');
+  const countBadge = document.getElementById('countBadge');
+
+  const bridgeUrl = document.getElementById('bridgeUrl').value.trim().replace(/\/$/, '');
+  const apiKey    = document.getElementById('apiKey').value.trim();
+  const xml       = document.getElementById('xmlPayload').value.trim();
+
+  if (!xml) { status.innerHTML = '<span class="err">⚠ XML payload is empty.</span>'; return; }
+
+  btn.disabled = true;
+  status.innerHTML = '<span style="color:#fbbf24">⏳ Sending…</span>';
+  output.textContent = '// Waiting for response…';
+  countBadge.style.display = 'none';
+
+  const url = `${bridgeUrl}/tally/query`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'ngrok-skip-browser-warning': '1'
+      },
+      body: JSON.stringify({ xml })
+    });
+
+    const text = await res.text();
+    let pretty = text;
+    try {
+      const parsed = JSON.parse(text);
+      pretty = JSON.stringify(parsed, null, 2);
+
+      // Try to count ledger entries
+      const data = parsed?.data;
+      const envelope = data?.ENVELOPE;
+      const body = envelope?.BODY;
+      const collection = body?.DATA?.COLLECTION;
+      if (collection) {
+        const keys = Object.keys(collection);
+        const firstKey = keys[0];
+        if (firstKey) {
+          const entries = collection[firstKey];
+          const count = Array.isArray(entries) ? entries.length : (entries ? 1 : 0);
+          countBadge.textContent = `${count} ledger(s) found`;
+          countBadge.style.display = 'inline-block';
+          countBadge.style.color = count > 0 ? '#4ade80' : '#f87171';
+        }
+      }
+    } catch (_) {}
+
+    if (res.ok) {
+      status.innerHTML = `<span class="ok">✅ HTTP ${res.status} OK</span> — <span style="color:#64748b">${url}</span>`;
+    } else {
+      status.innerHTML = `<span class="err">❌ HTTP ${res.status}</span> — <span style="color:#64748b">${url}</span>`;
+    }
+    output.textContent = pretty;
+
+  } catch (err) {
+    status.innerHTML = `<span class="err">❌ Network error: ${err.message}</span>`;
+    output.textContent = `// Could not reach bridge.\n// Is it running at ${bridgeUrl}?\n\n${err.stack || err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function copyOutput() {
+  const text = document.getElementById('output').textContent;
+  if (!text || text.startsWith('//')) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const msg = document.getElementById('copiedMsg');
+    msg.style.opacity = '1';
+    setTimeout(() => { msg.style.opacity = '0'; }, 1800);
+  });
+}
+
+// Allow Ctrl+Enter to submit
+document.getElementById('xmlPayload').addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') sendQuery();
+});
+</script>
+</body>
+</html>
