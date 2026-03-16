@@ -41,9 +41,11 @@ import dotenv from 'dotenv';
 import { hasPermission } from './auth/roles';
 import * as n8n from './sync/n8n';
 import * as tallyPosting from './sync/tally_posting';
+import * as n8nWatcher from './sync/n8nStatusWatcher';
 import * as ocr from './ocr/bridge';
 import { createBatchStructure } from './utils/filesystem';
 import { runFullPipeline } from './pre-ocr/engine';
+import { batchLogger } from './services/batchLogger';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -179,22 +181,23 @@ export function registerIpcHandlers() {
             currentBatch = `UNASSIGNED_${dateStr}_${timeStr}`;
         }
         const folders = createBatchStructure(currentBatch);
+        batchLogger.addLog(currentBatch, fileName, 'Upload', 'Started', `Initiating file secure for ${fileName}`);
 
         // Step 2: Physically move/copy file to the batch 'source' folder
         const targetPath = path.join(folders.source, fileName);
 
         try {
             if (fileData) {
-                // If we got raw bytes from the frontend, write them directly
                 fs.writeFileSync(targetPath, Buffer.from(fileData));
             } else if (filePath && fs.existsSync(filePath)) {
-                // Otherwise try to copy from path
                 fs.copyFileSync(filePath, targetPath);
             } else {
-                console.error('[IPC] No fileData or valid filePath provided for upload');
+                throw new Error('No file data or valid path');
             }
+            batchLogger.addLog(currentBatch, fileName, 'Upload', 'Completed', `File successfully moved to ${fileName} batch folder`);
         } catch (err) {
             console.error('[IPC] File save failed:', err);
+            batchLogger.addLog(currentBatch, fileName, 'Upload', 'Failed', `File transfer failed: ${err instanceof Error ? err.message : 'Unknown'}`);
         }
 
         // Step 3: Create invoice record in DB with the NEW path
@@ -370,9 +373,11 @@ export function registerIpcHandlers() {
      * Input: { invoiceId: string, filePath: string, fileName: string }
      * Output: { success: boolean, decision?: DecisionOutput, error?: string }
      */
-    ipcMain.handle('processing:run-pipeline', async (_event, { invoiceId, filePath, fileName }) => {
+    ipcMain.handle('processing:run-pipeline', async (_event, { invoiceId, filePath, fileName, batchId }) => {
+        const batchName = batchId || 'UNASSIGNED';
         try {
-            console.log(`[IPC] Running pipeline target path: ${filePath}`);
+            batchLogger.incrementWorkers();
+            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
             if (!fs.existsSync(filePath)) {
                 await queries.updateInvoiceFailureReason(invoiceId, 'File not found on disk', 'FAILED');
                 return { success: false, error: 'File not found on disk' };
@@ -385,10 +390,14 @@ export function registerIpcHandlers() {
             // If the decision is to fail, return an error back to the frontend
             if (result.decision.route === 'FAILED') {
                 const errorMessage = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Pre-OCR failed: ${errorMessage}`);
                 // Mark database invoice as failed with reason
                 await queries.updateInvoiceFailureReason(invoiceId, errorMessage, 'FAILED');
                 return { success: false, error: errorMessage };
             }
+
+            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
+            batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine`);
 
             // At this point, pre-ocr is successful. In a complete implementation, this is where Python OCR would be called.
             console.log(`[IPC] Pre-OCR passed for ${fileName}, running OCR...`);
@@ -399,9 +408,13 @@ export function registerIpcHandlers() {
 
             if (!ocrResult.success) {
                 const errorMessage = ocrResult.error || 'OCR Processing failed';
+                batchLogger.addLog(batchName, fileName, 'OCR', 'Failed', `OCR engine returned error: ${errorMessage}`);
                 await queries.updateInvoiceFailureReason(invoiceId, errorMessage, 'OCR_FAILED');
                 return { success: false, error: errorMessage };
             }
+
+            batchLogger.addLog(batchName, fileName, 'OCR', 'Completed', 'OCR text extraction successful');
+            batchLogger.addLog(batchName, fileName, 'AI-Analysis', 'Started', 'Mapping entities and validating against business rules');
 
             // Webhook payload as requested
             const webhookUrl = process.env.N8N_VALIDATION_URL || 'http://localhost:5678/webhook/validation';
@@ -443,8 +456,8 @@ export function registerIpcHandlers() {
 
                 // Update the database with parsed N8N results using the code-level mapper
                 await queries.ingestN8nData(invoiceId, n8nData);
-                console.log(`[IPC] ingestN8nData completed for ${invoiceId}`);
-
+                batchLogger.addLog(batchName, fileName, 'AI-Analysis', 'Completed', 'AI mapping and logic validation finished');
+                batchLogger.addLog(batchName, fileName, 'Finalizing', 'Started', 'Securing records in local ledger...');
             } catch (webhookErr: any) {
                 console.error('[IPC] Webhook delivery failed, but OCR was successful:', webhookErr.message);
 
@@ -459,11 +472,15 @@ export function registerIpcHandlers() {
                 });
             }
 
+            batchLogger.addLog(batchName, fileName, 'Finalizing', 'Completed', 'Document fully processed and available.');
             return { success: true, decision: result.decision };
         } catch (err: any) {
             console.error('[IPC] Pipeline execution error:', err);
+            batchLogger.addLog(batchName, fileName, 'System', 'Failed', `Critical failure: ${err.message}`);
             await queries.updateInvoiceFailureReason(invoiceId, err.message, 'FAILED');
             return { success: false, error: err.message };
+        } finally {
+            batchLogger.decrementWorkers();
         }
     });
 
@@ -482,11 +499,36 @@ export function registerIpcHandlers() {
      * Connection Status Checks
      */
     ipcMain.handle('status:check-n8n', async () => {
-        return await n8n.testConnection();
+        const response = n8nWatcher.getStatus();
+        return response.status === 'live';
+    });
+
+    ipcMain.handle('status:get-n8n-full', async () => {
+        return n8nWatcher.getStatus();
     });
 
     ipcMain.handle('status:check-ocr', async () => {
         return await ocr.testOCR();
+    });
+
+    /**
+     * Processing Logs & Worker Status
+     */
+    ipcMain.handle('processing:get-batch-logs', async (_event, { batchName }) => {
+        return batchLogger.getLogs(batchName);
+    });
+
+    ipcMain.handle('processing:get-worker-status', async () => {
+        return { activeWorkers: batchLogger.getWorkerCount() };
+    });
+
+    ipcMain.handle('processing:get-all-logs-debug', async () => {
+        return batchLogger.getAllLogsDebug();
+    });
+    
+    ipcMain.handle('processing:clear-batch-logs', async (_event, { batchName }) => {
+        batchLogger.clearBatch(batchName);
+        return { success: true };
     });
 
     // ─── PURCHASE ORDERS ────────────────────────────────────────
