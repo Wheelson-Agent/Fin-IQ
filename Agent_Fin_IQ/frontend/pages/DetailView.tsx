@@ -9,7 +9,8 @@ import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally } from '../lib/api';
+import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
 const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
@@ -56,7 +57,7 @@ export default function DetailView() {
   const [docFields, setDocFields] = useState<Record<string, any>>({});
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
-
+  const [isSyncingVendor, setIsSyncingVendor] = useState(false);
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [taxOptions, setTaxOptions] = useState<string[]>([]);
@@ -875,44 +876,100 @@ export default function DetailView() {
               </div>
             </div>
             <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-              <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl">Cancel</Button>
+              <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
               <Button
-                disabled={saving}
+                disabled={isSyncingVendor}
                 onClick={async () => {
-                  if (!id) return;
-                  setSaving(true);
+                  if (!id || !invoice) return;
+                  const name = (newVendor.name || '').trim();
+                  const underGroup = (newVendor.underGroup || '').trim();
+                  const state = (newVendor.state || '').trim();
+                  const gstin = (newVendor.gstin || '').trim();
+                  if (!name) {
+                    toast.error('Vendor name is required');
+                    return;
+                  }
+                  if (!underGroup) {
+                    toast.error('Under Group is required');
+                    return;
+                  }
+                  if (!gstin) {
+                    toast.error('GSTIN is required');
+                    return;
+                  }
+                  if (!state) {
+                    toast.error('State is required');
+                    return;
+                  }
+                  const payload = {
+                    process: { vendor_creation: true },
+                    invoice: {
+                      payload: {
+                        vendorNameAsPerTally: name,
+                        vendorName: name,
+                        group: underGroup || 'Sundry Creditors',
+                        maintainBillByBill: true,
+                        mailingName: name,
+                        address: {
+                          line1: billingAddress || '',
+                          line2: '',
+                          line3: '',
+                          state: state || '',
+                          country: 'India',
+                          pincode: (newVendor.pincode || '').trim() || '',
+                        },
+                        contact: {
+                          mobile: (newVendor.phone || '').trim() || '',
+                          phone: (newVendor.phone || '').trim() || '',
+                          email: (newVendor.email || '').trim() || '',
+                        },
+                        tax: {
+                          pan: (newVendor.pan || '').trim() || '',
+                          gstRegistrationType: gstin ? 'Regular' : '',
+                          gstin: gstin || '',
+                        },
+                        meta: {
+                          invoice_id: invoice.id || '',
+                          invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
+                          file_name: (invoice.file_name || '').trim() || '',
+                          invoice_vendor_name: (invoice.vendor_name || '').trim() || '',
+                          invoice_vendor_gst: (invoice.vendor_gst || '').trim() || '',
+                        },
+                      },
+                    },
+                  };
+                  console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
+                  setIsSyncingVendor(true);
+                  toast.info('Vendor creation started');
                   try {
-                    const vendor = await saveVendor({
-                      name: newVendor.name,
-                      under_group: newVendor.underGroup,
-                      state: newVendor.state,
-                      gstin: newVendor.gstin,
-                      address: billingAddress,
-                      tds_nature: 'Any',
-                      vendor_code: newVendor.vendor_code,
-                      tax_id: newVendor.tax_id,
-                      pan: newVendor.pan,
-                      city: newVendor.city,
-                      pincode: newVendor.pincode,
-                      phone: newVendor.phone,
-                      email: newVendor.email,
-                      bank_name: newVendor.bank_name,
-                      bank_account_no: newVendor.bank_account_no,
-                      bank_ifsc: newVendor.bank_ifsc
-                    });
-                    await mapVendorToInvoice(id, vendor.id);
-                    setIsVendorMapped(true);
-                    setDocFields(prev => ({ ...prev, vendor_name: newVendor.name }));
-                    setShowVendorSlideout(false);
+                    const result = await syncVendorWithTally(payload);
+                    console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
+                    if (result.success) {
+                      toast.success(result.message || 'Vendor created successfully in Tally');
+                      setIsVendorMapped(true);
+                      setDocFields(prev => ({ ...prev, vendor_name: name }));
+                      setShowVendorSlideout(false);
+                    } else {
+                      toast.error(result.message || 'Vendor sync with Tally failed');
+                    }
                   } catch (err) {
-                    alert('Failed to create vendor: ' + err);
+                    const msg = err instanceof Error ? err.message : 'Vendor sync failed';
+                    console.error('[DetailView] syncVendorWithTally error:', err);
+                    toast.error(msg);
                   } finally {
-                    setSaving(false);
+                    setIsSyncingVendor(false);
                   }
                 }}
                 className="h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95"
               >
-                {saving ? 'Processing...' : 'Sync with Tally'}
+                {isSyncingVendor ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin mr-2" />
+                    Syncing with Tally...
+                  </>
+                ) : (
+                  'Sync with Tally'
+                )}
               </Button>
             </div>
           </div>
