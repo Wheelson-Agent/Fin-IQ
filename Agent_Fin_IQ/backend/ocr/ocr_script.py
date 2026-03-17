@@ -44,9 +44,10 @@ if sys.stderr.encoding != 'utf-8':
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Google Document AI OCR')
-parser.add_argument('--file', required=True, help='Path to the file to process')
-parser.add_argument('--mime', required=True, help='MIME type of the file')
+parser.add_argument('--file', help='Path to the file to process')
+parser.add_argument('--mime', help='MIME type of the file')
 parser.add_argument('--env', required=True, help='Path to .env file with credentials')
+parser.add_argument('--test', action='store_true', help='Perform live authentication test only')
 args = parser.parse_args()
 
 
@@ -152,7 +153,22 @@ def main():
         client_options=client_options
     )
     
+    # Live authentication test
+    if args.test:
+        try:
+            name = client.processor_path(project_id, location, processor_id)
+            client.get_processor(name=name)
+            print(json.dumps({"success": True, "message": "Authentication successful"}))
+            sys.exit(0)
+        except Exception as e:
+            print(json.dumps({"success": False, "error": str(e)}))
+            sys.exit(1)
+
     # Read the input file
+    if not args.file:
+        print(json.dumps({"success": False, "error": "No file provided"}))
+        sys.exit(1)
+
     file_name = os.path.basename(args.file)
     with open(args.file, "rb") as f:
         content = f.read()
