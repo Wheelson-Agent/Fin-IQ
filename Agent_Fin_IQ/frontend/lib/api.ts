@@ -153,6 +153,22 @@ export async function mapVendorToInvoice(invoiceId: string, vendorId: string): P
 }
 
 /**
+ * Sync vendor to Tally via n8n vendor-creation webhook.
+ * Payload must match n8n workflow contract (process + invoice.payload).
+ * @returns Normalized { success, message?, data? }
+ */
+export async function syncVendorWithTally(payload: Record<string, any>): Promise<{
+    success: boolean;
+    message?: string;
+    data?: any;
+}> {
+    console.log('[api] syncVendorWithTally called, payload process:', payload?.process);
+    const result = await invoke<{ success: boolean; message?: string; data?: any }>('vendors:sync-tally', { payload });
+    console.log('[api] syncVendorWithTally result:', result?.success, result?.message?.slice(0, 60));
+    return result;
+}
+
+/**
  * Fetch all vendors with dynamically calculated totals.
  * @param companyId - Optional company ID to filter by
  * @returns Array of vendors
