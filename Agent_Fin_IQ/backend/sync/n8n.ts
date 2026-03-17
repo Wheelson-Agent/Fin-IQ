@@ -194,6 +194,62 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
 }
 
 /**
+ * Send ledger creation payload to the n8n ledger-creation webhook.
+ * Success only when response.success === true.
+ *
+ * @param payload - Full payload per n8n workflow contract
+ * @returns Normalized { success, message, data }
+ */
+export async function sendLedgerCreationToN8n(payload: Record<string, any>): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+}> {
+    const url = process.env.N8N_MASTER_WEBHOOK_URL || 'https://wheelsonai.app.n8n.cloud/webhook/tally-master-creation';
+    console.log('[N8N] Ledger creation: outgoing webhook URL:', url);
+
+    try {
+        const body = JSON.stringify(payload);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            signal: AbortSignal.timeout(30000), // 30s timeout
+        });
+
+        const rawText = await response.text();
+        let data: any = {};
+        try {
+            data = rawText ? JSON.parse(rawText) : {};
+        } catch {
+            console.warn('[N8N] Ledger creation: response not JSON:', rawText?.slice(0, 200));
+        }
+
+        console.log('[N8N] Ledger creation: response status:', response.status, 'body:', JSON.stringify(data).slice(0, 300));
+
+        if (!response.ok) {
+            const errMsg = (data && (data.message || data.error)) || `HTTP ${response.status}`;
+            console.error('[N8N] Ledger creation webhook returned', response.status, errMsg);
+            return { success: false, message: errMsg, data };
+        }
+
+        const success = data && (data.success === true || data.status === 'success');
+        const message = (data && (data.message || data.error)) || (success ? 'Ledger created successfully in Tally' : 'Ledger creation failed');
+        
+        if (success) {
+            console.log('[N8N] ✅ Ledger creation webhook success');
+        } else {
+            console.warn('[N8N] Ledger creation webhook returned success=false');
+        }
+        
+        return { success, message, data };
+    } catch (error: any) {
+        console.error('[N8N] ❌ Ledger creation webhook failed:', error.message);
+        return { success: false, message: error.message || 'Network error' };
+    }
+}
+
+/**
  * Test n8n connectivity by sending a HEAD request to the validation webhook.
  * Used by the frontend status indicator.
  */

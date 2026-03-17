@@ -524,6 +524,50 @@ export function registerIpcHandlers() {
         return await queries.getLedgerMasters(companyId);
     });
 
+    ipcMain.handle('masters:create-ledger', async (_event, { name, parent_group, account_type, company_id, meta } = {}) => {
+        try {
+            console.log('[IPC] masters:create-ledger: Routing via n8n first');
+            
+            // 1. Send to n8n Webhook
+            const n8nResult = await n8n.sendLedgerCreationToN8n({
+                process: { ledger_creation: true },
+                ledger: {
+                    name,
+                    parent_group,
+                    gst_applicable: meta?.gst_applicable || 'Yes',
+                    company_id: company_id ?? null,
+                    meta: meta || {}
+                }
+            });
+
+            if (!n8nResult.success) {
+                console.error('[IPC] n8n ledger creation failed:', n8nResult.message);
+                return { 
+                    success: false, 
+                    ledger: null, 
+                    message: n8nResult.message || 'Failed to create ledger in Tally' 
+                };
+            }
+
+            // 2. If n8n success, persist to local DB
+            const ledger = await queries.createLedgerMaster({
+                name,
+                parent_group,
+                account_type,
+                company_id: company_id ?? null,
+            });
+
+            return { 
+                success: true, 
+                ledger, 
+                message: n8nResult.message || 'Ledger created successfully in Tally' 
+            };
+        } catch (err: any) {
+            console.error('[IPC] masters:create-ledger error:', err.message);
+            return { success: false, ledger: null, message: err?.message || 'Failed to create ledger' };
+        }
+    });
+
     ipcMain.handle('masters:get-tds-sections', async () => {
         return await queries.getTdsSections();
     });

@@ -197,6 +197,22 @@ export async function getLedgerMasters(companyId?: string): Promise<LedgerMaster
     return invoke<LedgerMaster[]>('masters:get-ledgers', { companyId });
 }
 
+export interface CreateLedgerMasterResult {
+    success: boolean;
+    ledger: LedgerMaster | null;
+    message: string;
+}
+
+export async function createLedgerMaster(input: {
+    name: string;
+    parent_group: string;
+    account_type: string;
+    company_id?: string | null;
+    meta?: Record<string, any>;
+}): Promise<CreateLedgerMasterResult> {
+    return invoke<CreateLedgerMasterResult>('masters:create-ledger', input);
+}
+
 /**
  * Fetch all active TDS sections and rates.
  * @returns Array of TdsSection objects
