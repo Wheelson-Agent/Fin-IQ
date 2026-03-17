@@ -9,7 +9,7 @@ import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally, createLedgerMaster } from '../lib/api';
 import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
@@ -61,6 +61,8 @@ export default function DetailView() {
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [taxOptions, setTaxOptions] = useState<string[]>([]);
+  const [ledgerNameToId, setLedgerNameToId] = useState<Record<string, string>>({});
+  const [ledgerIdToName, setLedgerIdToName] = useState<Record<string, string>>({});
 
   useEffect(() => {
     async function loadData() {
@@ -198,6 +200,16 @@ export default function DetailView() {
             const taxes = ledgersRecord.filter(l => l.ledger_type === 'tax_gst' || l.ledger_type === 'tax').map(l => l.name);
             setLedgerOptions(expenses);
             setTaxOptions(taxes);
+
+            const nextNameToId: Record<string, string> = {};
+            const nextIdToName: Record<string, string> = {};
+            ledgersRecord.forEach((l: any) => {
+              if (!l?.id || !l?.name) return;
+              nextNameToId[String(l.name).toLowerCase()] = String(l.id);
+              nextIdToName[String(l.id)] = String(l.name);
+            });
+            setLedgerNameToId(nextNameToId);
+            setLedgerIdToName(nextIdToName);
           }
 
           if (itemsRecord && itemsRecord.length > 0) {
@@ -338,6 +350,17 @@ export default function DetailView() {
 
   const isManualReview = invoice.status === 'Manual Review';
   const isFailed = invoice.status === 'Failed';
+
+  const isUuid = (value: unknown) =>
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+  const resolveLedgerId = (value: unknown) => {
+    if (!value) return '';
+    if (isUuid(value)) return String(value);
+    const key = String(value).toLowerCase();
+    return ledgerNameToId[key] || String(value);
+  };
 
   const handleAddLineItem = () => {
     if (readOnly) return;
@@ -542,7 +565,7 @@ export default function DetailView() {
                         // Approve & Post action
                         await saveInvoiceItems(id, lineItems.map(item => ({
                           description: item.description,
-                          ledger: item.ledger,
+                          ledger: resolveLedgerId(item.ledger),
                           hsn_sac: item.hsn_sac,
                           tax: item.tax,
                           quantity: item.qty,
@@ -773,8 +796,16 @@ export default function DetailView() {
                               </td>
                               <td className="p-3 align-top">
                                 <CustomTableSelect
-                                  value={(docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true')) ? item.description : item.ledger}
-                                  onChange={(val: string) => { const newLines = [...lineItems]; newLines[index].ledger = val; setLineItems(newLines); }}
+                                  value={(docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))
+                                    ? item.description
+                                    : (ledgerIdToName[String(item.ledger || '')] || item.ledger)}
+                                  onChange={(val: string) => {
+                                    const key = String(val || '').toLowerCase();
+                                    const resolvedId = ledgerNameToId[key];
+                                    const newLines = [...lineItems];
+                                    newLines[index].ledger = resolvedId || val;
+                                    setLineItems(newLines);
+                                  }}
                                   options={ledgerOptions}
                                   disabled={readOnly || (docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))}
                                   highlight
@@ -994,19 +1025,81 @@ export default function DetailView() {
               <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} />
             </div>
             <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-              <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl">Cancel</Button>
+              <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor || saving}>Cancel</Button>
               <Button 
-                onClick={() => {
-                  if (activeLedgerIndex !== null && newLedger.name) {
-                    const newLines = [...lineItems];
-                    newLines[activeLedgerIndex].ledger = newLedger.name;
-                    setLineItems(newLines);
+                disabled={saving}
+                onClick={async () => {
+                  if (readOnly) return;
+                  if (activeLedgerIndex === null) return;
+                  const name = (newLedger.name || '').trim();
+                  const parentGroup = (newLedger.underGroup || '').trim();
+                  const gstApplicable = (newLedger.gstApplicable || 'Yes').trim();
+
+                  if (!name) {
+                    toast.error('Ledger name is required');
+                    return;
                   }
-                  setShowLedgerSlideout(false);
+                  if (!parentGroup) {
+                    toast.error('Under Group is required');
+                    return;
+                  }
+                  
+                  setSaving(true);
+                  toast.info('Ledger creation started');
+
+                  try {
+                    const result = await createLedgerMaster({
+                      name,
+                      parent_group: parentGroup,
+                      account_type: 'expense',
+                      company_id: (invoice as any)?.company_id ?? null,
+                      // @ts-ignore - passing extra meta for n8n
+                      meta: {
+                        gst_applicable: gstApplicable,
+                        hsn: newLedger.hsn || '',
+                        invoice_id: invoice.id || '',
+                        invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
+                        file_name: (invoice.file_name || '').trim() || ''
+                      }
+                    });
+
+                    if (!result.success || !result.ledger) {
+                      throw new Error(result.message || 'Failed to create ledger');
+                    }
+
+                    const createdId = String((result.ledger as any).id);
+                    const createdName = String((result.ledger as any).name || name);
+                    
+                    setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
+                    setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
+                    setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
+
+                    setLineItems(prev => {
+                      const next = [...prev];
+                      if (!next[activeLedgerIndex]) return next;
+                      next[activeLedgerIndex] = { ...next[activeLedgerIndex], ledger: createdId };
+                      return next;
+                    });
+
+                    toast.success(result.message || 'Ledger created and synced with Tally');
+                    setShowLedgerSlideout(false);
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : 'Failed to create ledger';
+                    toast.error(msg);
+                  } finally {
+                    setSaving(false);
+                  }
                 }} 
                 className="h-12 px-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
               >
-                Create Ledger
+                {saving ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin mr-2" />
+                    Syncing with Tally...
+                  </>
+                ) : (
+                  'Create Ledger'
+                )}
               </Button>
             </div>
           </div>
@@ -1066,39 +1159,79 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
   
   return (
     <div className="relative">
-      <div 
+      <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-expanded={open}
         onClick={() => !disabled && setOpen(!open)}
-        className={`w-full border-2 p-2 rounded-xl text-[13px] font-black outline-none flex items-center justify-between transition-all cursor-pointer ${
-          disabled 
-            ? 'border-transparent bg-transparent text-slate-800 cursor-default px-0' 
-            : `border-slate-100 bg-slate-50/50 hover:bg-white hover:border-slate-200 focus-within:border-blue-600 ${highlight && !value ? 'ring-4 ring-blue-600/5 border-blue-600 bg-white' : ''}`
-        }`}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(!open);
+          }
+          if (e.key === 'Escape') setOpen(false);
+        }}
+        className={[
+          'w-full h-[38px] px-3 rounded-xl border-2',
+          'flex items-center justify-between gap-2',
+          'text-[13px] font-bold',
+          'transition-all select-none',
+          disabled
+            ? 'cursor-not-allowed bg-slate-50 text-slate-400 border-slate-100'
+            : 'cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-300 hover:bg-slate-50/40',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/20 focus-visible:border-blue-500',
+          highlight && !value && !disabled ? 'ring-2 ring-blue-600/15 border-blue-500' : '',
+        ].join(' ')}
       >
-        <span className="truncate">{value || (disabled ? '—' : 'Select...')}</span>
-        {!disabled && <ChevronDown size={14} className="text-slate-300 shrink-0 stroke-[3px]" />}
+        <div className="min-w-0 flex-1 truncate" title={value ? String(value) : undefined}>
+          {value || (disabled ? '—' : 'Select ledger…')}
+        </div>
+        {!disabled && <ChevronDown size={16} className="text-slate-400 shrink-0 stroke-[2.5px]" />}
       </div>
       
       {open && (
-        <div className="absolute bottom-full left-0 w-full mb-2 bg-white border-2 border-slate-100 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] max-h-[250px] overflow-y-auto overflow-x-hidden p-2">
-          <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest px-3 py-2 border-b border-slate-50 mb-1">Select Option</div>
-          {options.map((opt: any) => (
-            <div 
-              key={opt.id || opt} 
-              className="px-3 py-2.5 text-[13px] font-black text-slate-600 hover:bg-blue-50 hover:text-blue-600 rounded-xl transition-all cursor-pointer flex items-center justify-between group"
-              onClick={() => { onChange(opt.name || opt); setOpen(false); }}
-            >
-              {opt.name || opt}
-              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="absolute bottom-full left-0 mb-2 z-[100] bg-white border border-slate-200/80 rounded-xl shadow-[0_14px_34px_rgba(0,0,0,0.14)] overflow-hidden">
+          <div className="min-w-[280px] max-w-[420px] w-max">
+            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-3 py-2 border-b border-slate-100 bg-slate-50">
+              Select ledger
             </div>
-          ))}
-          {showCreate && (
-            <div 
-              className="mt-2 px-3 py-3 text-[13px] font-black text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-blue-500/20"
-              onClick={() => { onCreateClick(); setOpen(false); }}
-            >
-              <Plus size={16} strokeWidth={3} /> New Ledger
+            <div className="max-h-[260px] overflow-y-auto p-2">
+              {options.map((opt: any) => {
+                const label = opt?.name || opt;
+                const isSelected = value && String(value).toLowerCase() === String(label).toLowerCase();
+
+                return (
+                  <div
+                    key={opt?.id || label}
+                    className={[
+                      'px-3 py-2.5 rounded-xl',
+                      'text-[13px] font-bold',
+                      'flex items-center justify-between gap-3',
+                      'cursor-pointer transition-colors',
+                      isSelected ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-600/10' : 'text-slate-700 hover:bg-slate-50',
+                    ].join(' ')}
+                    title={String(label)}
+                    onClick={() => { onChange(label); setOpen(false); }}
+                  >
+                    <div className="min-w-0 flex-1 truncate">{label}</div>
+                    <div className="shrink-0">
+                      {isSelected ? <div className="w-2 h-2 rounded-full bg-blue-600" /> : <div className="w-2 h-2 rounded-full bg-transparent" />}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {showCreate && (
+                <div
+                  className="mt-2 px-3 py-2.5 text-[13px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors cursor-pointer flex items-center gap-2 border border-blue-100"
+                  onClick={() => { onCreateClick(); setOpen(false); }}
+                >
+                  <Plus size={16} strokeWidth={3} className="text-blue-700" /> Create ledger
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
