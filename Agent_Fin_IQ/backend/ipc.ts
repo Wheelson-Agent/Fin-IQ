@@ -40,6 +40,7 @@ import { login, validateToken } from './auth/auth';
 import dotenv from 'dotenv';
 import { hasPermission } from './auth/roles';
 import * as n8n from './sync/n8n';
+import * as tallyPosting from './sync/tally_posting';
 import * as ocr from './ocr/bridge';
 import { createBatchStructure } from './utils/filesystem';
 import { runFullPipeline } from './pre-ocr/engine';
@@ -256,25 +257,19 @@ export function registerIpcHandlers() {
             after_data: { status },
         });
 
-        // If approved, send to Tally Prime
+        // If approved, send to Tally via the dedicated service
         if (status === 'Auto-Posted' || status === 'Approved') {
             try {
-                const n8nResult = await n8n.sendToTallyPrime({
-                    invoice_no: updated.invoice_number,
-                    vendor_name: updated.vendor_name,
-                    amount: updated.sub_total,
-                    gst: updated.tax_total,
-                    total: updated.grand_total,
-                    gl_account: updated.gl_account,
-                    date: updated.invoice_date,
-                    due_date: updated.due_date,
-                });
+                const result = await tallyPosting.sendInvoiceToTally(updated.id, updated.ocr_raw_payload);
 
                 // Extract tally_id from response (n8n usually returns it in response.response.masterid or tally_id)
-                const tallyIdStr = n8nResult.response?.tally_id || n8nResult.response?.masterid || n8nResult.response?.master_id || null;
-                await queries.markPostedToTally(id, n8nResult.response, tallyIdStr);
+                const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
+                
+                // Update erp_sync_status based on webhook result
+                await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
             } catch (err: any) {
                 console.error('[IPC] Tally posting failed:', err.message);
+                await queries.updateInvoiceWithOCR(id, { erp_sync_status: 'failed' } as any);
             }
         }
 
@@ -332,6 +327,17 @@ export function registerIpcHandlers() {
         return await queries.saveVendor(vendor);
     });
 
+    /**
+     * Sync vendor to Tally via n8n vendor-creation webhook.
+     * Payload must match n8n workflow contract. Returns { success, message?, data? }.
+     */
+    ipcMain.handle('vendors:sync-tally', async (_event, { payload }) => {
+        console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
+        const result = await n8n.sendVendorCreationToN8n(payload || {});
+        console.log('[IPC] vendors:sync-tally result:', result.success, result.message?.slice(0, 80));
+        return { success: result.success, message: result.message, data: result.data };
+    });
+
 
     // ─── AUDIT ─────────────────────────────────────────────
 
@@ -385,6 +391,7 @@ export function registerIpcHandlers() {
 
             const fileBuffer = fs.readFileSync(filePath);
             const result = await runFullPipeline(fileBuffer, fileName);
+            console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
             // If the decision is to fail, return an error back to the frontend
             if (result.decision.route === 'FAILED') {
@@ -399,6 +406,7 @@ export function registerIpcHandlers() {
 
             const mimeType = ocr.getMimeType(filePath);
             const ocrResult = await ocr.runOCR(filePath, mimeType);
+            console.log(`[IPC] ocr.runOCR result for ${fileName}: success=${ocrResult.success}, error=${ocrResult.error || 'none'}`);
 
             if (!ocrResult.success) {
                 const errorMessage = ocrResult.error || 'OCR Processing failed';
@@ -434,17 +442,19 @@ export function registerIpcHandlers() {
 
                 // IMPORTANT: n8n must be configured to "Respond to Webhook" with the final JSON structure mapped for DB insertion
                 const n8nData = await response.json();
+                console.log(`[IPC] Received n8nData for ${invoiceId}`);
 
                 // Log webhook success to debug_ocr.log and the new n8n_debug.log
                 const timestamp = new Date().toISOString();
                 const logData = `\n--- WEBHOOK SENT ${timestamp} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nStatus: Success\nResponse: ${JSON.stringify(n8nData, null, 2)}\n--------------------------\n`;
-                fs.appendFileSync(path.resolve(__dirname, '../debug_ocr.log'), logData);
+                fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
 
                 const n8nDebugData = `\n--- N8N RESPONSE RECEIVED ${timestamp} ---\nInvoice ID: ${invoiceId}\nResponse: ${JSON.stringify(n8nData, null, 2)}\n------------------------------------------\n`;
-                fs.appendFileSync(path.resolve(__dirname, '../n8n_debug.log'), n8nDebugData);
+                fs.appendFileSync(path.resolve(__dirname, '../../n8n_debug.log'), n8nDebugData);
 
                 // Update the database with parsed N8N results using the code-level mapper
                 await queries.ingestN8nData(invoiceId, n8nData);
+                console.log(`[IPC] ingestN8nData completed for ${invoiceId}`);
 
             } catch (webhookErr: any) {
                 console.error('[IPC] Webhook delivery failed, but OCR was successful:', webhookErr.message);
@@ -512,6 +522,50 @@ export function registerIpcHandlers() {
     // ─── MASTERS ────────────────────────────────────────────────
     ipcMain.handle('masters:get-ledgers', async (_event, { companyId } = {}) => {
         return await queries.getLedgerMasters(companyId);
+    });
+
+    ipcMain.handle('masters:create-ledger', async (_event, { name, parent_group, account_type, company_id, meta } = {}) => {
+        try {
+            console.log('[IPC] masters:create-ledger: Routing via n8n first');
+            
+            // 1. Send to n8n Webhook
+            const n8nResult = await n8n.sendLedgerCreationToN8n({
+                process: { ledger_creation: true },
+                ledger: {
+                    name,
+                    parent_group,
+                    gst_applicable: meta?.gst_applicable || 'Yes',
+                    company_id: company_id ?? null,
+                    meta: meta || {}
+                }
+            });
+
+            if (!n8nResult.success) {
+                console.error('[IPC] n8n ledger creation failed:', n8nResult.message);
+                return { 
+                    success: false, 
+                    ledger: null, 
+                    message: n8nResult.message || 'Failed to create ledger in Tally' 
+                };
+            }
+
+            // 2. If n8n success, persist to local DB
+            const ledger = await queries.createLedgerMaster({
+                name,
+                parent_group,
+                account_type,
+                company_id: company_id ?? null,
+            });
+
+            return { 
+                success: true, 
+                ledger, 
+                message: n8nResult.message || 'Ledger created successfully in Tally' 
+            };
+        } catch (err: any) {
+            console.error('[IPC] masters:create-ledger error:', err.message);
+            return { success: false, ledger: null, message: err?.message || 'Failed to create ledger' };
+        }
     });
 
     ipcMain.handle('masters:get-tds-sections', async () => {

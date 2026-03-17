@@ -27,9 +27,6 @@ import Config from './pages/Config';
 import Login from './pages/Login';
 import AgentPage from './pages/AgentPage';
 import Reports from './pages/Reports';
-import Vendors from './pages/Vendors';
-import ItemMaster from './pages/ItemMaster';
-import TallySyncLogs from './pages/TallySyncLogs';
 import UserProfile from './pages/UserProfile';
 import NotFound from './pages/NotFound';
 
@@ -57,9 +54,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/config" element={<Config />} />
                     <Route path="/agent" element={<AgentPage />} />
                     <Route path="/reports" element={<Reports />} />
-                    <Route path="/vendors" element={<Vendors />} />
-                    <Route path="/items" element={<ItemMaster />} />
-                    <Route path="/tally-logs" element={<TallySyncLogs />} />
                     <Route path="/profile" element={<UserProfile />} />
                 </Route>
 

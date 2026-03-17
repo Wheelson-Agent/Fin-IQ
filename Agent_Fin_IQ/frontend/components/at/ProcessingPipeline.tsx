@@ -21,6 +21,11 @@ export interface ProcessingPipelineProps {
     fileNames: string[];
     batchName: string;
     filePaths: string[];
+    fileDataArrays?: number[][];  // Raw file data as byte arrays
+    stages?: PipelineStage[] | null;
+    onStagesChange?: (stages: PipelineStage[]) => void;
+    particles?: Record<string, boolean>;
+    onParticlesChange?: (particles: Record<string, boolean>) => void;
     fileDataArrays?: Uint8Array[];  // Raw file data as byte arrays
     onComplete: () => void;
     onDismiss?: () => void;
@@ -208,7 +213,12 @@ function StageNode({ stage, index, showParticles }: { stage: PipelineStage; inde
 /* ─────────────────── Main Component ─────────────────────────── */
 const processedBatches = new Set<string>();
 
-export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, fileDataArrays, onComplete, onDismiss, uploaderName }: ProcessingPipelineProps) {
+export function ProcessingPipeline({ 
+    isBatch, fileNames, batchName, filePaths, fileDataArrays, 
+    onComplete, onDismiss, uploaderName,
+    stages: externalStages, onStagesChange,
+    particles: externalParticles, onParticlesChange
+}: ProcessingPipelineProps) {
     const STAGES_INIT: PipelineStage[] = [
         { id: 'uploading', label: 'Uploaded', sublabel: isBatch ? `Transferring ${fileNames.length} files...` : 'File secured', icon: <Upload size={28} />, status: 'active' },
         { id: 'analyzing', label: 'Pre-ocr document analysis', sublabel: 'Data extraction & validation', icon: <FileSearch size={28} />, status: 'idle' },
@@ -216,10 +226,35 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
         { id: 'done', label: 'Success', sublabel: 'Processing complete', icon: <Zap size={28} />, status: 'idle' },
     ];
 
-    const willFail = !isBatch && fileNames.some(f => f.toLowerCase().includes('fail'));
+    const [internalStages, setInternalStages] = useState<PipelineStage[]>(STAGES_INIT);
+    const [internalParticles, setInternalParticles] = useState<Record<string, boolean>>({});
+    
+    // Sync with external state
+    const stages = externalStages || internalStages;
+    const particles = externalParticles || internalParticles;
+    
+    const setStages = (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => {
+        if (typeof val === 'function') {
+            const next = val(stages);
+            if (onStagesChange) onStagesChange(next);
+            else setInternalStages(next);
+        } else {
+            if (onStagesChange) onStagesChange(val);
+            else setInternalStages(val);
+        }
+    };
+    
+    const setParticlesState = (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
+        if (typeof val === 'function') {
+            const next = val(particles);
+            if (onParticlesChange) onParticlesChange(next);
+            else setInternalParticles(next);
+        } else {
+            if (onParticlesChange) onParticlesChange(val);
+            else setInternalParticles(val);
+        }
+    };
 
-    const [stages, setStages] = useState<PipelineStage[]>(STAGES_INIT);
-    const [particles, setParticles] = useState<Record<string, boolean>>({});
     const [batchCount, setBatchCount] = useState(0);
     const [activeFileName, setActiveFileName] = useState<string>('');
     const timers = useRef<ReturnType<typeof setTimeout>[] | ReturnType<typeof setInterval>[]>([]);
@@ -229,8 +264,8 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
             prev.map(s => (s.id === id ? { ...s, status, errorMsg, ...overrides } : s))
         );
         if (status === 'done' || status === 'error') {
-            setParticles(p => ({ ...p, [id]: true }));
-            setTimeout(() => setParticles(p => ({ ...p, [id]: false })), 1200);
+            setParticlesState(p => ({ ...p, [id]: true }));
+            setTimeout(() => setParticlesState(p => ({ ...p, [id]: false })), 1200);
         }
     };
 
@@ -239,11 +274,25 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
         
         // Prevent React 18 Strict Mode double-firing the pipeline for the exact same batch
         if (batchName && processedBatches.has(batchName)) return;
+
+        // If we have external stages already progressed beyond initial, don't restart
+        const hasExternalProgress = externalStages && externalStages.some(s => 
+            (s.id !== 'uploading' && s.status !== 'idle') || 
+            (s.id === 'uploading' && (s.status === 'done' || s.status === 'error'))
+        );
+
+        if (hasExternalProgress) {
+            if (batchName) processedBatches.add(batchName);
+            return;
+        }
+        
         if (batchName) processedBatches.add(batchName);
 
-        // Reset state on new files
-        setStages(STAGES_INIT);
-        setParticles({});
+        // Reset state on new files if not already initialized externally
+        if (!externalStages) {
+            setStages(STAGES_INIT);
+            setParticlesState({});
+        }
         setBatchCount(0);
         timers.current.forEach(t => clearTimeout(t as ReturnType<typeof setTimeout>));
         timers.current = [];
@@ -268,12 +317,6 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 if (uploadFailed) {
                     console.error('[Pipeline] One or more uploads failed');
                     updateStage('uploading', 'error', 'File storage failed', { sublabel: 'Could not store file in batch folder' });
-                    // Clean up and stop
-                    for (const data of uploadedData) {
-                        if (data.invoice) {
-                            // Optionally delete from DB? For now just mark done
-                        }
-                    }
                     onComplete();
                     return;
                 }
@@ -286,11 +329,10 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 // Step 2 & 3: Run pipeline for all files in parallel (Pre-OCR -> OCR)
                 updateStage('analyzing', 'active');
 
-                setBatchCount(0); // Reset for pipeline tracking if desired, or keep total
+                setBatchCount(0); 
                 const pipelineResults = await runWithConcurrency(uploadedData, 1, async (data) => {
                     if (!data.invoice) return { success: false, error: 'No invoice record' };
                     setActiveFileName(data.name);
-                    // Use the correct file path from the created invoice record
                     const res = await runPipeline(data.invoice.id, data.invoice.file_path, data.name);
                     setBatchCount(prev => prev + 1);
                     return res;
@@ -301,10 +343,8 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 if (hasError) {
                     const errorMsgs = pipelineResults.filter(r => !r.success).map(r => r.error).join(' | ');
                     updateStage('analyzing', 'error', undefined, { sublabel: `Error: ${errorMsgs || 'Extraction failed'}` });
-                    // Provide error feedback on the processing stage as well
                     updateStage('processing', 'error', undefined, { sublabel: 'Halted due to prior step' });
 
-                    // Finalize storage as failed
                     for (const data of uploadedData) {
                         if (data.invoice) {
                             // @ts-ignore
@@ -324,7 +364,6 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
 
                 // Step 3: agent_w Processing
                 updateStage('processing', 'active');
-                // Since OCR already completed in the combined pipeline, we simulate a small delay for cognitive visual feedback 
                 await new Promise(r => setTimeout(r, 1000));
                 updateStage('processing', 'done', undefined, { sublabel: 'Processing finalized' });
 
@@ -349,7 +388,6 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                 onComplete();
             } catch (err: any) {
                 console.error('Pipeline error:', err);
-                // Improved technical error mapping
                 const errMsg = err.message || 'Unknown error';
                 updateStage('uploading', 'error', 'Upload failed', { 
                     sublabel: errMsg.includes('disk') ? 'Disk space error' : 
@@ -362,7 +400,7 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
         processFiles();
     }, [filePaths, isBatch, batchName]);
 
-    const hasFailed = stages.some(s => s.status === 'error');
+    const hasFailed = stages.some((s: PipelineStage) => s.status === 'error');
     const allDone = stages[3].status === 'done';
 
     return (
@@ -397,10 +435,9 @@ export function ProcessingPipeline({ isBatch, fileNames, batchName, filePaths, f
                             {/* Horizontal Line Background */}
                             <div className="absolute top-[35px] left-0 right-0 h-[2px] bg-slate-100 -z-0" />
                             
-                            {stages.map((stage, i) => (
+                            {stages.map((stage: PipelineStage, i: number) => (
                                 <React.Fragment key={stage.id}>
                                     <StageNode stage={stage} index={i} showParticles={particles[stage.id] ?? false} />
-                                    {/* Connectors are handled by the space-between + StageNode margin logic or internal drawing */}
                                 </React.Fragment>
                             ))}
                         </div>

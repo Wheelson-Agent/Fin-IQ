@@ -19,9 +19,6 @@ const navItemsMain = [
 ];
 
 const navItemsManage = [
-  { id: 'vendors', label: 'Vendors', path: '/vendors', icon: Users },
-  { id: 'items', label: 'Item Master', path: '/items', icon: Package },
-  { id: 'tally-logs', label: 'Tally Sync Monitor', path: '/tally-logs', icon: Terminal },
   { id: 'reports', label: 'Reports', path: '/reports', icon: BarChart3 },
 ];
 
