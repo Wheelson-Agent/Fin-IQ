@@ -597,6 +597,140 @@ app.post('/tally/companies', requireApiKey, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────
+// POST /tally/stock-items
+// Fetches Stock Item masters from Tally and returns
+// a normalized JSON array
+// ──────────────────────────────────────────────
+app.post('/tally/stock-items', requireApiKey, async (req, res) => {
+  const stockItemXml = `<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>EXPORT</TALLYREQUEST>
+    <TYPE>COLLECTION</TYPE>
+    <ID>Stock Item Collection</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="Stock Item Collection" ISINITIALIZE="Yes">
+            <TYPE>StockItem</TYPE>
+            <FETCH>
+              MASTERID,
+              GUID,
+              NAME,
+              BASEUNITS,
+              PARTNUMBER,
+              HSNCODE,
+              OPENINGRATE,
+              GSTRATEDETAILS
+            </FETCH>
+          </COLLECTION>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>`;
+
+  // ── local helpers (do not affect other routes) ──
+
+  function sGetValue(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'object') {
+      if (Object.prototype.hasOwnProperty.call(v, '#text')) return String(v['#text']);
+      return null;
+    }
+    return v;
+  }
+
+  function sToStr(v) {
+    const raw = sGetValue(v);
+    if (raw === null || raw === undefined) return null;
+    const s = String(raw).trim();
+    return s === '' ? null : s;
+  }
+
+  function sToArray(val) {
+    if (!val) return [];
+    return Array.isArray(val) ? val : [val];
+  }
+
+  function sToNumber(val) {
+    const raw = sGetValue(val);
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = parseFloat(raw.toString().replace(/[^\d.-]/g, ''));
+    return isNaN(n) ? null : n;
+  }
+
+  try {
+    const tallyResponse = await axios.post(TALLY_URL, stockItemXml, {
+      headers: { 'Content-Type': 'text/xml' },
+      timeout: 30000,
+    });
+
+    const parsed = xmlParser.parse(tallyResponse.data);
+
+    const rawStockItems = parsed?.ENVELOPE?.BODY?.DATA?.COLLECTION?.STOCKITEM;
+    const stockItems = sToArray(rawStockItems);
+
+    const mappedRecords = stockItems.map((item) => {
+      const erp_sync_id = sToStr(item.MASTERID) || sToStr(item.GUID) || sToStr(item['@_MASTERID']);
+      const item_name = sToStr(item.NAME) || sToStr(item['@_NAME']);
+      const item_code = sToStr(item.PARTNUMBER) || null;
+      const hsn_sac = sToStr(item.HSNCODE) || null;
+      const uom = sToStr(item.BASEUNITS) || null;
+      const base_price = sToNumber(item.OPENINGRATE);
+      
+      let tax_rate = null;
+      try {
+        const gstDetails = sToArray(item.GSTRATEDETAILS?.['GSTRATE.LIST']);
+        if (gstDetails.length > 0) {
+          const rateInfo = gstDetails[0];
+          tax_rate = sToNumber(rateInfo?.GSTRATE);
+        }
+      } catch (_) {}
+
+      return {
+        item_name,
+        item_code,
+        hsn_sac,
+        uom,
+        base_price,
+        tax_rate,
+        erp_sync_id,
+        raw_payload: item,
+      };
+    });
+
+    const records = mappedRecords.filter((r) => {
+      if (!r.item_name || !r.erp_sync_id) return false;
+      const cleanName = r.item_name.trim().toLowerCase();
+      if (cleanName === '' || cleanName === 'null') return false;
+      return true;
+    });
+
+    return res.json({
+      success: true,
+      entity_type: 'stock_items',
+      count: records.length,
+      records: records,
+      fetched_at: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    console.error('[tally/stock-items] Error:', err.message);
+    return res.status(502).json({
+      success: false,
+      error: 'Failed to fetch stock items from Tally',
+      details: err.message,
+    });
+  }
+});
+
+// ──────────────────────────────────────────────
 // 404 Handler
 // ──────────────────────────────────────────────
 app.use((req, res) => {
