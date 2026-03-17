@@ -41,6 +41,7 @@ const ALLOWED_CHANNELS = [
     'vendors:get-all',
     'vendors:get-by-id',
     'vendors:save',
+    'vendors:sync-tally',
     // Tally & Masters
     'tally:get-sync-logs',
     'po:get-all',

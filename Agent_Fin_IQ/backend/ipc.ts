@@ -327,6 +327,17 @@ export function registerIpcHandlers() {
         return await queries.saveVendor(vendor);
     });
 
+    /**
+     * Sync vendor to Tally via n8n vendor-creation webhook.
+     * Payload must match n8n workflow contract. Returns { success, message?, data? }.
+     */
+    ipcMain.handle('vendors:sync-tally', async (_event, { payload }) => {
+        console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
+        const result = await n8n.sendVendorCreationToN8n(payload || {});
+        console.log('[IPC] vendors:sync-tally result:', result.success, result.message?.slice(0, 80));
+        return { success: result.success, message: result.message, data: result.data };
+    });
+
 
     // ─── AUDIT ─────────────────────────────────────────────
 
