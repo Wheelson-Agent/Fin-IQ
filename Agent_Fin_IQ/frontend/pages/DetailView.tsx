@@ -8,6 +8,8 @@ import {
 import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import * as Popover from '@radix-ui/react-popover';
+import { Command } from 'cmdk';
 
 import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally, createLedgerMaster } from '../lib/api';
 import { toast } from 'sonner';
@@ -1156,84 +1158,107 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
 
 function CustomTableSelect({ value, onChange, options, disabled, highlight, showCreate, onCreateClick }: any) {
   const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState('');
+
+  const filteredOptions = options.filter((opt: any) => {
+    const label = (opt?.name || opt || '').toString().toLowerCase();
+    return label.includes(search.toLowerCase());
+  });
   
   return (
-    <div className="relative">
-      <div
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        aria-expanded={open}
-        onClick={() => !disabled && setOpen(!open)}
-        onKeyDown={(e) => {
-          if (disabled) return;
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setOpen(!open);
-          }
-          if (e.key === 'Escape') setOpen(false);
-        }}
-        className={[
-          'w-full h-[38px] px-3 rounded-xl border-2',
-          'flex items-center justify-between gap-2',
-          'text-[13px] font-bold',
-          'transition-all select-none',
-          disabled
-            ? 'cursor-not-allowed bg-slate-50 text-slate-400 border-slate-100'
-            : 'cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-300 hover:bg-slate-50/40',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/20 focus-visible:border-blue-500',
-          highlight && !value && !disabled ? 'ring-2 ring-blue-600/15 border-blue-500' : '',
-        ].join(' ')}
-      >
-        <div className="min-w-0 flex-1 truncate" title={value ? String(value) : undefined}>
-          {value || (disabled ? '—' : 'Select ledger…')}
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <div
+          role="button"
+          tabIndex={disabled ? -1 : 0}
+          className={[
+            'w-full h-[38px] px-3 rounded-xl border-2',
+            'flex items-center justify-between gap-2',
+            'text-[13px] font-bold',
+            'transition-all select-none outline-none',
+            disabled
+              ? 'cursor-not-allowed bg-slate-50 text-slate-400 border-slate-100'
+              : 'cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-300 hover:bg-slate-50/40 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10',
+            highlight && !value && !disabled ? 'ring-2 ring-blue-600/15 border-blue-500' : '',
+          ].join(' ')}
+          title={value ? String(value) : undefined}
+        >
+          <div className="min-w-0 flex-1 truncate">
+            {value || (disabled ? '—' : 'Select ledger…')}
+          </div>
+          {!disabled && <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />}
         </div>
-        {!disabled && <ChevronDown size={16} className="text-slate-400 shrink-0 stroke-[2.5px]" />}
-      </div>
-      
-      {open && (
-        <div className="absolute bottom-full left-0 mb-2 z-[100] bg-white border border-slate-200/80 rounded-xl shadow-[0_14px_34px_rgba(0,0,0,0.14)] overflow-hidden">
-          <div className="min-w-[280px] max-w-[420px] w-max">
-            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-3 py-2 border-b border-slate-100 bg-slate-50">
-              Select ledger
+      </Popover.Trigger>
+
+      <Popover.Portal>
+        <Popover.Content 
+          sideOffset={8} 
+          align="start" 
+          className="z-[100] w-[320px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2),0_0_0_1px_rgba(0,0,0,0.05)] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        >
+          <Command className="flex flex-col h-full">
+            <div className="p-2 border-b border-slate-50">
+              <div className="relative flex items-center">
+                <Search size={14} className="absolute left-3 text-slate-400" />
+                <Command.Input 
+                  value={search}
+                  onValueChange={setSearch}
+                  placeholder="Search ledgers..." 
+                  className="w-full bg-slate-50 border-none h-10 pl-9 pr-3 rounded-xl text-[13px] font-bold text-slate-700 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500/10"
+                />
+              </div>
             </div>
-            <div className="max-h-[260px] overflow-y-auto p-2">
-              {options.map((opt: any) => {
+
+            <Command.List className="max-h-[280px] overflow-y-auto p-1.5 custom-scrollbar">
+              <Command.Empty className="text-center py-6">
+                <div className="text-[12px] font-bold text-slate-400 mb-1">No results found</div>
+                <div className="text-[10px] text-slate-300 uppercase tracking-widest font-black">Try a different name</div>
+              </Command.Empty>
+
+              <div className="px-2 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Ledger List
+              </div>
+
+              {filteredOptions.map((opt: any) => {
                 const label = opt?.name || opt;
                 const isSelected = value && String(value).toLowerCase() === String(label).toLowerCase();
 
                 return (
-                  <div
+                  <Command.Item
                     key={opt?.id || label}
+                    onSelect={() => { onChange(label); setOpen(false); setSearch(''); }}
                     className={[
-                      'px-3 py-2.5 rounded-xl',
+                      'px-3 py-2.5 rounded-xl mb-0.5',
                       'text-[13px] font-bold',
                       'flex items-center justify-between gap-3',
-                      'cursor-pointer transition-colors',
-                      isSelected ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-600/10' : 'text-slate-700 hover:bg-slate-50',
+                      'cursor-pointer transition-all outline-none',
+                      isSelected 
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                        : 'text-slate-700 hover:bg-slate-50 data-[selected=true]:bg-slate-50',
                     ].join(' ')}
-                    title={String(label)}
-                    onClick={() => { onChange(label); setOpen(false); }}
                   >
                     <div className="min-w-0 flex-1 truncate">{label}</div>
-                    <div className="shrink-0">
-                      {isSelected ? <div className="w-2 h-2 rounded-full bg-blue-600" /> : <div className="w-2 h-2 rounded-full bg-transparent" />}
-                    </div>
-                  </div>
+                    {isSelected && <CheckCircle size={14} className="text-white shrink-0" />}
+                  </Command.Item>
                 );
               })}
+            </Command.List>
 
-              {showCreate && (
-                <div
-                  className="mt-2 px-3 py-2.5 text-[13px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors cursor-pointer flex items-center gap-2 border border-blue-100"
+            {showCreate && (
+              <div className="p-2 border-t border-slate-50 bg-slate-50/50">
+                <button
+                  type="button"
                   onClick={() => { onCreateClick(); setOpen(false); }}
+                  className="w-full h-11 px-4 flex items-center justify-center gap-2 text-[13px] font-black text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-[0.98]"
                 >
-                  <Plus size={16} strokeWidth={3} className="text-blue-700" /> Create ledger
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+                  <Plus size={16} strokeWidth={3} />
+                  Create New Ledger
+                </button>
+              </div>
+            )}
+          </Command>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
