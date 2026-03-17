@@ -134,6 +134,65 @@ export async function sendToTallyPrime(payload: Record<string, any>): Promise<{
     }
 }
 
+const N8N_VENDOR_CREATE_WEBHOOK =
+    process.env.N8N_VENDOR_CREATE_URL || 'https://wheelsonai.app.n8n.cloud/webhook/tally-vendor-creation';
+
+/**
+ * Send vendor creation payload to the n8n vendor-creation webhook.
+ * Used by DetailView "Sync with Tally" in the Vendor Master slideout.
+ * Success only when response.success === true.
+ *
+ * @param payload - Full payload per n8n workflow contract (process + invoice.payload)
+ * @returns Normalized { success, message, data }
+ */
+export async function sendVendorCreationToN8n(payload: Record<string, any>): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+}> {
+    const url = N8N_VENDOR_CREATE_WEBHOOK;
+    console.log('[N8N] Vendor creation: outgoing webhook URL:', url);
+
+    try {
+        const body = JSON.stringify(payload);
+        console.log('[N8N] Vendor creation: POST body length:', body.length);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            signal: AbortSignal.timeout(30000),
+        });
+
+        const rawText = await response.text();
+        let data: any = {};
+        try {
+            data = rawText ? JSON.parse(rawText) : {};
+        } catch {
+            console.warn('[N8N] Vendor creation: response not JSON:', rawText?.slice(0, 200));
+        }
+
+        console.log('[N8N] Vendor creation: response status:', response.status, 'body:', JSON.stringify(data).slice(0, 300));
+
+        if (!response.ok) {
+            const errMsg = (data && (data.message || data.error)) || `HTTP ${response.status}`;
+            console.error('[N8N] Vendor creation webhook returned', response.status, errMsg);
+            return { success: false, message: errMsg, data };
+        }
+
+        const success = data && data.success === true;
+        const message = (data && (data.message || data.error)) || (success ? 'Vendor created successfully in Tally' : 'Vendor creation failed');
+        if (success) {
+            console.log('[N8N] ✅ Vendor creation webhook success');
+        } else {
+            console.warn('[N8N] Vendor creation webhook returned success=false');
+        }
+        return { success, message, data };
+    } catch (error: any) {
+        console.error('[N8N] ❌ Vendor creation webhook failed:', error.message);
+        return { success: false, message: error.message || 'Network error' };
+    }
+}
+
 /**
  * Test n8n connectivity by sending a HEAD request to the validation webhook.
  * Used by the frontend status indicator.
