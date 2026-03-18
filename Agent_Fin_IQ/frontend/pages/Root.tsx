@@ -43,7 +43,7 @@ function AppShell() {
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         <Topbar
-          onOpenCmd={() => setCmdOpen(true)}
+          onOpenCmd={() => {}}
           onOpenNotif={() => setNotifOpen(!notifOpen)}
           pageTitle={getPageTitle(location.pathname)}
           theme={theme}
