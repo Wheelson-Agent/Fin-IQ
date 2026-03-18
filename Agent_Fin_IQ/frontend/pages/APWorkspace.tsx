@@ -167,9 +167,7 @@ export default function APWorkspace() {
           const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && (!isGoods || lMatch);
           const n8nAllPassed = mandatoryChecksPassed && !isDup;
 
-          if (bStatus === 'processing') {
-            status = 'processing';
-          } else if (inv.erp_sync_id || inv.tally_id) {
+          if (inv.erp_sync_id || inv.tally_id) {
             // Strict Posted rule: must have a sync ID (tally_id or erp_sync_id)
             status = 'posted';
           } else if (bStatus === 'failed' || bStatus === 'ocr_failed' || (inv.failure_reason && inv.failure_reason.trim() !== '')) {
@@ -185,12 +183,16 @@ export default function APWorkspace() {
             status = 'ready';
           } else if (!bVerif || !gValid || !dValid || isUnknownFile || isUnknownInv) {
             status = 'handoff';
+          } else if (bStatus === 'processing') {
+            // Processing only if not already failed/passed via other rules
+            status = 'processing';
           } else if (!vVerif || (isGoods && !lMatch)) {
             status = 'input';
           } else if (bStatus === 'ready' || bStatus === 'verified') {
             status = 'ready';
-          } else if (bStatus === 'awaiting input' || bStatus === 'pending approval') {
-            status = 'input';
+          } else if (bStatus === 'awaiting input' || bStatus === 'pending approval' || bStatus === 'handoff') {
+            // Ensure handoff status from backend is respected
+            status = bStatus === 'handoff' ? 'handoff' : 'input';
           } else {
             status = 'handoff';
           }
