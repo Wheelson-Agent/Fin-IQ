@@ -94,6 +94,9 @@ export default function DetailView() {
   };
 
   const [isSyncingVendor, setIsSyncingVendor] = useState(false);
+  const [isCreatingLedger, setIsCreatingLedger] = useState(false);
+  const [vendorCreateUi, setVendorCreateUi] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message: string }>({ state: 'idle', message: '' });
+  const [ledgerCreateUi, setLedgerCreateUi] = useState<{ state: 'idle' | 'loading' | 'success' | 'error'; message: string }>({ state: 'idle', message: '' });
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [taxOptions, setTaxOptions] = useState<string[]>([]);
@@ -440,6 +443,16 @@ export default function DetailView() {
     const key = String(value).toLowerCase();
     return ledgerNameToId[key] || String(value);
   };
+
+  async function revalidateInvoice(invoiceId: string) {
+    if (!invoice?.file_path) return { success: false, error: 'Missing file path' as const };
+    try {
+      await runPipeline(invoiceId, invoice.file_path, invoice.file_name || '');
+      return { success: true as const };
+    } catch (err) {
+      return { success: false as const, error: err instanceof Error ? err.message : 'Revalidation failed' };
+    }
+  }
 
   const handleAddLineItem = () => {
     if (readOnly) return;
@@ -1081,9 +1094,13 @@ export default function DetailView() {
                 </div>
               </div>
             </div>
-            <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-              <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
-              <Button
+            <div className="p-8 border-t border-slate-100 bg-white shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+              <div className="mb-4">
+                <InlineCreateStatus state={vendorCreateUi.state} message={vendorCreateUi.message} />
+              </div>
+              <div className="flex justify-end gap-4">
+                <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
+                <Button
                 disabled={isSyncingVendor}
                 onClick={async () => {
                   if (!id || !invoice) return;
@@ -1147,21 +1164,29 @@ export default function DetailView() {
                   };
                   console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
                   setIsSyncingVendor(true);
+                  setVendorCreateUi({ state: 'loading', message: 'Creating vendor…' });
                   toast.info('Vendor creation started');
                   try {
                     const result = await syncVendorWithTally(payload);
                     console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
                     if (result.success) {
-                      toast.success(result.message || 'Vendor created successfully in Tally');
-                      setIsVendorMapped(true);
-                      setDocFields(prev => ({ ...prev, vendor_name: name }));
-                      setShowVendorSlideout(false);
+                      const msg = result.message || 'Vendor created successfully in Tally.';
+                      setVendorCreateUi({ state: 'success', message: msg });
+                      toast.success(msg);
+                      // Refresh the page or update UI state as needed
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 1500);
                     } else {
-                      toast.error(result.message || 'Vendor sync with Tally failed');
+                      const msg = result.message || 'Vendor creation failed.';
+                      setVendorCreateUi({ state: 'error', message: msg });
+                      toast.error(msg);
+                      console.error('[DetailView] Vendor Sync Failure:', result);
                     }
                   } catch (err) {
-                    const msg = err instanceof Error ? err.message : 'Vendor sync failed';
                     console.error('[DetailView] syncVendorWithTally error:', err);
+                    const msg = 'Unable to reach vendor creation service.';
+                    setVendorCreateUi({ state: 'error', message: msg });
                     toast.error(msg);
                   } finally {
                     setIsSyncingVendor(false);
@@ -1178,6 +1203,7 @@ export default function DetailView() {
                   'Sync with Tally'
                 )}
               </Button>
+              </div>
             </div>
           </div>
 
@@ -1200,10 +1226,14 @@ export default function DetailView() {
               <InputField label="Under Group" value={newLedger.underGroup} required onChange={(val: string) => setNewLedger({ ...newLedger, underGroup: val })} Icon={ChevronDown} selectOptions={['Indirect Expenses', 'Direct Expenses', 'Fixed Assets']} />
               <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} />
             </div>
-            <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-              <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor || saving}>Cancel</Button>
-              <Button 
-                disabled={saving}
+            <div className="p-8 border-t border-slate-100 bg-white shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+              <div className="mb-4">
+                <InlineCreateStatus state={ledgerCreateUi.state} message={ledgerCreateUi.message} />
+              </div>
+              <div className="flex justify-end gap-4">
+                <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isCreatingLedger}>Cancel</Button>
+                <Button 
+                disabled={isCreatingLedger}
                 onClick={async () => {
                   if (readOnly) return;
                   if (activeLedgerIndex === null) return;
@@ -1220,7 +1250,8 @@ export default function DetailView() {
                     return;
                   }
                   
-                  setSaving(true);
+                  setIsCreatingLedger(true);
+                  setLedgerCreateUi({ state: 'loading', message: 'Creating ledger…' });
                   toast.info('Ledger creation started');
 
                   try {
@@ -1257,26 +1288,31 @@ export default function DetailView() {
                       return next;
                     });
 
-                    toast.success(result.message || 'Ledger created and synced with Tally');
+                    const msg = result.message || 'Ledger created.';
+                    setLedgerCreateUi({ state: 'success', message: msg });
+                    toast.success(msg);
                     setShowLedgerSlideout(false);
                   } catch (err) {
-                    const msg = err instanceof Error ? err.message : 'Failed to create ledger';
+                    console.error('[DetailView] createLedgerMaster error:', err);
+                    const msg = err instanceof Error ? (err.message || 'Ledger creation failed.') : 'Ledger creation failed.';
+                    setLedgerCreateUi({ state: 'error', message: msg });
                     toast.error(msg);
                   } finally {
-                    setSaving(false);
+                    setIsCreatingLedger(false);
                   }
                 }} 
                 className="h-12 px-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
               >
-                {saving ? (
+                {isCreatingLedger ? (
                   <>
                     <RefreshCw size={16} className="animate-spin mr-2" />
-                    Syncing with Tally...
+                    Creating ledger...
                   </>
                 ) : (
                   'Create Ledger'
                 )}
               </Button>
+              </div>
             </div>
           </div>
         </ResizablePanel>
@@ -1435,5 +1471,51 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+function InlineCreateStatus({ state, message }: { state: 'idle' | 'loading' | 'success' | 'error'; message: string }) {
+  if (state === 'idle' || !message) return null;
+
+  const base = 'rounded-2xl border px-4 py-3 text-[13px] font-bold flex items-start gap-3 transition-all shadow-[0_10px_30px_rgba(2,6,23,0.06)]';
+  const variant =
+    state === 'loading'
+      ? 'bg-gradient-to-br from-blue-50 to-white border-blue-100 text-blue-900'
+      : state === 'success'
+      ? 'bg-gradient-to-br from-emerald-50 to-white border-emerald-100 text-emerald-900'
+      : 'bg-gradient-to-br from-rose-50 to-white border-rose-100 text-rose-900';
+  const title =
+    state === 'loading'
+      ? 'Working…'
+      : state === 'success'
+      ? 'Completed'
+      : 'Action needed';
+
+  return (
+    <div className={`${base} ${variant} animate-[fadeInUp_180ms_ease-out]`}>
+      <div className={`mt-[1px] shrink-0 rounded-2xl p-2 border ${
+        state === 'loading'
+          ? 'bg-blue-50 border-blue-100 text-blue-700'
+          : state === 'success'
+          ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+          : 'bg-rose-50 border-rose-100 text-rose-700'
+      }`}>
+        {state === 'loading' ? <RefreshCw size={16} className="animate-spin" /> : state === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[11px] font-black uppercase tracking-widest opacity-70">{title}</div>
+          {state === 'loading' && <div className="text-[11px] font-black uppercase tracking-widest text-blue-700/80">Please wait</div>}
+        </div>
+        <div className="mt-1 text-[13px] font-extrabold leading-snug text-slate-900/90" title={message}>
+          {message}
+        </div>
+        {state === 'loading' && (
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-blue-100/70">
+            <div className="h-full w-1/2 bg-blue-600/70 animate-[pulse_1200ms_ease-in-out_infinite]" />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
