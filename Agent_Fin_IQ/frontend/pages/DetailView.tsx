@@ -67,7 +67,7 @@ export default function DetailView() {
   const [newVendor, setNewVendor] = useState({ 
     name: '', underGroup: 'Sundry Creditors', gstin: '', state: 'Karnataka',
     vendor_code: '', tax_id: '', pan: '', city: '', pincode: '', phone: '', email: '',
-    bank_name: '', bank_account_no: '', bank_ifsc: ''
+    bank_name: '', bank_account_no: '', bank_ifsc: '', buyerErpName: ''
   });
   const [newLedger, setNewLedger] = useState({ name: '', underGroup: 'Indirect Expenses', gstApplicable: 'Yes', hsn: '' });
   const [billingAddress, setBillingAddress] = useState('Karnataka, India');
@@ -152,6 +152,21 @@ export default function DetailView() {
             }
           }
           setIsVendorMapped(vendorVerified);
+
+          // Extract Buyer ERP Name from ocr_raw_payload for Vendor Master
+          let buyerErpName = '';
+          if (invoiceRecord.ocr_raw_payload) {
+            try {
+              const raw = typeof invoiceRecord.ocr_raw_payload === 'string'
+                ? JSON.parse(invoiceRecord.ocr_raw_payload)
+                : invoiceRecord.ocr_raw_payload;
+              buyerErpName = raw?.['Name as per Tally'] || '';
+            } catch (e) {
+               // Safe fallback
+            }
+          }
+          setNewVendor(prev => ({ ...prev, buyerErpName }));
+
           // Build unified Document Fields from Invoice table and OCR Raw Payload
           const fields: Record<string, any> = {
             irn: invoiceRecord.irn || '',
@@ -1036,6 +1051,7 @@ export default function DetailView() {
             </div>
             <div className="p-10 flex-1 overflow-y-auto space-y-10">
               <InputField label="Vendor Name" value={newVendor.name} required onChange={(val: string) => setNewVendor({ ...newVendor, name: val })} />
+              <InputField label="Buyer ERP Name" value={newVendor.buyerErpName} onChange={(val: string) => setNewVendor({ ...newVendor, buyerErpName: val })} />
               <div className="grid grid-cols-2 gap-x-6 gap-y-10">
                 <InputField label="Vendor Code" value={newVendor.vendor_code} onChange={(val: string) => setNewVendor({ ...newVendor, vendor_code: val })} />
                 <InputField label="Under Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} />
@@ -1097,6 +1113,7 @@ export default function DetailView() {
                       payload: {
                         vendorNameAsPerTally: name,
                         vendorName: name,
+                        "Name as per Tally": newVendor.buyerErpName || '',
                         group: underGroup || 'Sundry Creditors',
                         maintainBillByBill: true,
                         mailingName: name,
