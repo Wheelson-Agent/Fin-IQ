@@ -54,6 +54,7 @@ const ALLOWED_CHANNELS = [
     // Companies & Dashboard
     'companies:get-active',
     'companies:get-all',
+    'api/companies',
     'dashboard:get-metrics',
     // Audit
     'audit:get-logs',
