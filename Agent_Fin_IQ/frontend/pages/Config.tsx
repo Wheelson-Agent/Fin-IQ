@@ -2,12 +2,27 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence, Variants } from 'motion/react';
 import {
     Zap, Download, Target, BarChart2, Check, Settings,
-    Mail, HardDrive, Share2, Cloud, MessageSquare, Layers,
+    Mail, HardDrive, Share2, Cloud, Layers,
     CheckCircle, AlertTriangle, AlertCircle, Save, ChevronDown, SlidersHorizontal,
     UserCheck, Receipt, Link, Key, Eye, EyeOff, Server, Globe, Building2, Database, Briefcase, Folder, CloudUpload,
-    Plus, Trash2, MapPin, Phone, IndianRupee, Calendar, FileCheck, Hash, Shield, Edit2, ChevronRight, XCircle
+    Plus, Trash2, MapPin, Phone, IndianRupee, Calendar, FileCheck, Hash, Shield, Edit2, ChevronRight, XCircle, RefreshCw
 } from 'lucide-react';
 import { useEffect } from 'react';
+import { toast } from 'sonner';
+
+/* ─── WhatsApp Icon Component ────────────────────────── */
+const WhatsAppIcon = ({ size = 20, className = "" }: { size?: number; className?: string }) => (
+    <svg 
+        width={size} 
+        height={size} 
+        viewBox="0 0 24 24" 
+        fill="currentColor" 
+        className={className} 
+        xmlns="http://www.w3.org/2000/svg"
+    >
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.438 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+    </svg>
+);
 
 /* ─── Premium Toggle Switch ──────────────────────────── */
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -60,7 +75,7 @@ function RadioPill({
                 {onConfigure && (
                     <button
                         onClick={onConfigure}
-                        className={`p-[6px] rounded-[8px] transition-colors ${isConfigOpen ? 'bg-[#1E6FD9] text-white' : 'text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#1A2640]'}`}
+                        className={`p-[6px] rounded-[8px] transition-colors ${isConfigOpen ? 'bg-[#1E6FD9]' : 'text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#1A2640]'}`}
                     >
                         <Settings size={16} />
                     </button>
@@ -108,7 +123,7 @@ function ToggleRow({
                 {onConfigure && (
                     <button
                         onClick={onConfigure}
-                        className={`p-[6px] rounded-[8px] transition-colors ${isConfigOpen ? 'bg-[#1E6FD9] text-white' : 'text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#1A2640]'}`}
+                        className={`p-[6px] rounded-[8px] transition-colors ${isConfigOpen ? 'bg-[#1E6FD9]' : 'text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#1A2640]'}`}
                     >
                         <Settings size={16} />
                     </button>
@@ -121,14 +136,17 @@ function ToggleRow({
 
 /* ─── Integration Input Field ──────────────────────────── */
 function IntegrationField({
-    icon, label, type = "text", value, onChange, placeholder, isSecret
-}: { icon: React.ReactNode; label: string; type?: string; value: string; onChange: (e: any) => void; placeholder: string; isSecret?: boolean }) {
+    icon, label, type = "text", value, onChange, placeholder, isSecret, required
+}: { icon: React.ReactNode; label: string; type?: string; value: string; onChange: (e: any) => void; placeholder: string; isSecret?: boolean; required?: boolean }) {
     const [show, setShow] = useState(false);
     return (
         <div className="flex items-center gap-[12px] bg-white border border-[#E2E8F0] rounded-[10px] p-[8px_14px] focus-within:border-[#1E6FD9] focus-within:ring-2 focus-within:ring-[rgba(30,111,217,0.1)] transition-all">
             <div className="text-[#94A3B8]">{icon}</div>
             <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">{label}</div>
+                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">
+                    {required && <span className="text-[#EF4444] mr-[2px]">*</span>}
+                    {label}
+                </div>
                 <input
                     type={isSecret && !show ? "password" : type}
                     value={value}
@@ -204,15 +222,14 @@ export default function Config() {
         reportConfigs: {
             email: { recipients: ['finance@wheelsontech.com'], schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
             teams: { webhookUrl: 'https://sigma.webhook.office.com/123...', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
-            sharepoint: { folderPath: '/Finance/DailyReports', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
+            sharepoint: { folderPath: '/Finance/DailyReports', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
             whatsapp: { phoneNumber: '', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } }
         },
         storage: {
             provider: 'local',
             localPath: 'C:\\Agent\\Batches',
             s3: { bucket: '', region: '', accessKey: '' },
-            gdrive: { folderId: '' },
-            onedrive: { folderPath: '' }
+            gdrive: { folderId: '' }
         }
     };
 
@@ -239,10 +256,16 @@ export default function Config() {
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ processing: true, amount: false, vendor: false, posting: false, approval: false });
     const [emailInput, setEmailInput] = useState('');
 
+    // Tally Connection state
+    const [isCheckingTally, setIsCheckingTally] = useState(false);
+    const [tallyConnectionStatus, setTallyConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [isCreatingCompany, setIsCreatingCompany] = useState(false);
+
     /* ─── Company Management State ─── */
     interface CompanyData {
         id: string;
         name: string;
+        mailingName: string;
         tradeName: string;
         type: string;
         gstin: string;
@@ -252,6 +275,7 @@ export default function Config() {
         address: string;
         city: string;
         state: string;
+        country: string;
         pincode: string;
         phone: string;
         email: string;
@@ -261,40 +285,86 @@ export default function Config() {
         booksFrom: string;
         tallyServerUrl: string;
         tallyCompanyName: string;
-        tallyLicenseSerial: string;
         tallyAutoSync: boolean;
         isActive: boolean;
     }
 
     const DEFAULT_COMPANY: Omit<CompanyData, 'id'> = {
-        name: '', tradeName: '', type: 'pvt_ltd',
+        name: '', mailingName: '', tradeName: '', type: 'pvt_ltd',
         gstin: '', pan: '', cin: '', tan: '',
-        address: '', city: '', state: 'Tamil Nadu', pincode: '', phone: '', email: '', website: '',
+        address: '', city: '', state: 'Tamil Nadu', country: 'India', pincode: '', phone: '', email: '', website: '',
         fyStart: 'april', currency: 'INR', booksFrom: '2024-04-01',
-        tallyServerUrl: 'http://localhost:9000', tallyCompanyName: '', tallyLicenseSerial: '', tallyAutoSync: true,
+        tallyServerUrl: 'http://localhost:9000', tallyCompanyName: '', tallyAutoSync: true,
         isActive: false,
     };
 
-    const [companies, setCompanies] = useState<CompanyData[]>([
-        {
-            id: 'comp_1', name: 'Wheels Tech Pvt Ltd', tradeName: 'Wheels Tech', type: 'pvt_ltd',
-            gstin: '33AABCT1234Q1Z5', pan: 'AABCT1234Q', cin: 'U72900TN2020PTC123456', tan: 'CHEW12345A',
-            address: '42, Tech Park, Anna Salai', city: 'Chennai', state: 'Tamil Nadu', pincode: '600002',
-            phone: '+91 44 2345 6789', email: 'accounts@wheelstech.in', website: 'www.wheelstech.in',
-            fyStart: 'april', currency: 'INR', booksFrom: '2024-04-01',
-            tallyServerUrl: 'http://localhost:9000', tallyCompanyName: 'Wheels Tech Pvt Ltd', tallyLicenseSerial: 'S 123456', tallyAutoSync: true,
-            isActive: true,
-        },
-        {
-            id: 'comp_2', name: 'Wheelson Logistics LLP', tradeName: 'Wheelson Logistics', type: 'llp',
-            gstin: '33AADFL5678K1ZP', pan: 'AADFL5678K', cin: '', tan: 'CHEW98765B',
-            address: '18, Industrial Estate, Guindy', city: 'Chennai', state: 'Tamil Nadu', pincode: '600032',
-            phone: '+91 44 8765 4321', email: 'finance@wheelsonlogistics.in', website: 'www.wheelsonlogistics.in',
-            fyStart: 'april', currency: 'INR', booksFrom: '2024-04-01',
-            tallyServerUrl: 'http://localhost:9000', tallyCompanyName: 'Wheelson Logistics LLP', tallyLicenseSerial: 'S 789012', tallyAutoSync: true,
-            isActive: false,
-        },
-    ]);
+    const [companies, setCompanies] = useState<CompanyData[]>([]);
+    const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+    const [lastSyncedAgoStr, setLastSyncedAgoStr] = useState<string>('');
+    const [syncError, setSyncError] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [pendingSyncData, setPendingSyncData] = useState<{added: any[], removed: any[], all: any[]} | null>(null);
+
+    // Persisted active company id
+    const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => {
+        return localStorage.getItem('activeCompanyId') || null;
+    });
+
+    const companiesRef = React.useRef(companies);
+    useEffect(() => { companiesRef.current = companies; }, [companies]);
+
+    const fetchCompaniesInfo = async (isManual = false) => {
+        if (isManual) setIsSyncing(true);
+        try {
+            // @ts-ignore
+            const res = await window.api.invoke('api/companies');
+            if (res && res.companies) {
+                setSyncError(false);
+                setLastSyncedAt(res.last_synced_at);
+                
+                const currentList = companiesRef.current;
+                
+                if (currentList.length === 0 || isManual) {
+                    setCompanies(res.companies);
+                } else {
+                    const currentIds = new Set(currentList.map(c => c.id));
+                    const newIds = new Set(res.companies.map((c: any) => c.id));
+                    
+                    const addedRows = res.companies.filter((c: any) => !currentIds.has(c.id));
+                    const removedRows = currentList.filter(c => !newIds.has(c.id));
+                    
+                    if (addedRows.length > 0 || removedRows.length > 0) {
+                        setPendingSyncData({ added: addedRows, removed: removedRows, all: res.companies });
+                    } else {
+                        // Data might have updated fields but same rows, just replace quietly
+                        setCompanies(res.companies);
+                    }
+                }
+                
+                if (isManual) toast.success("Synced");
+            }
+        } catch (err) {
+            setSyncError(true);
+            if (isManual) toast.error("Sync failed");
+        } finally {
+            if (isManual) setIsSyncing(false);
+        }
+    };
+    
+    useEffect(() => {
+        fetchCompaniesInfo();
+        const intervalId = setInterval(() => fetchCompaniesInfo(), 60000);
+        return () => clearInterval(intervalId);
+    }, []);
+    
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (!lastSyncedAt) return;
+            const diff = Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 1000);
+            setLastSyncedAgoStr(`${diff} seconds ago`);
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [lastSyncedAt]);
     const [editingCompany, setEditingCompany] = useState<CompanyData | null>(null);
     const [newCompany, setNewCompany] = useState<Omit<CompanyData, 'id'>>(DEFAULT_COMPANY);
 
@@ -325,7 +395,8 @@ export default function Config() {
     };
 
     const handleSetActive = (id: string) => {
-        setCompanies(prev => prev.map(c => ({ ...c, isActive: c.id === id })));
+        setActiveCompanyId(id);
+        localStorage.setItem('activeCompanyId', id);
     };
 
     const handleDeleteCompany = (id: string) => {
@@ -418,7 +489,7 @@ export default function Config() {
                 setReportConfigs(safeReportConfigs);
                 setStorage(parsed.storage || INIT.storage);
                 setCommittedConfig(parsed);
-                if (parsed.companies) setCompanies(parsed.companies);
+                // NOTE: companies are now synced live from the DB, not from localStorage
             } catch(e) {}
         }
     }, []);
@@ -442,6 +513,34 @@ export default function Config() {
         JSON.stringify(destConfigs) !== JSON.stringify(committedConfig.destConfigs) ||
         JSON.stringify(reportConfigs) !== JSON.stringify(committedConfig.reportConfigs) ||
         JSON.stringify(storage) !== JSON.stringify(committedConfig.storage);
+
+    const handleTestTallyConnection = async () => {
+        if (!newCompany.tallyServerUrl) {
+            toast.error("Please enter a Tally Server URL first");
+            return;
+        }
+
+        setIsCheckingTally(true);
+        setTallyConnectionStatus('idle');
+
+        try {
+            // @ts-ignore
+            const result = await window.api.invoke('tally:check-connection', { url: newCompany.tallyServerUrl });
+            
+            if (result.connected) {
+                setTallyConnectionStatus('success');
+                toast.success("Connection to Tally Prime successful!");
+            } else {
+                setTallyConnectionStatus('error');
+                toast.error(`Connection failed: ${result.message}`);
+            }
+        } catch (err: any) {
+            setTallyConnectionStatus('error');
+            toast.error(`Error: ${err.message}`);
+        } finally {
+            setIsCheckingTally(false);
+        }
+    };
 
     const validateConfig = () => {
         if (sources.email && !sourceConfigs.email.address) return "Email address is required for Email Ingestion.";
@@ -630,6 +729,57 @@ export default function Config() {
                 )}
             </AnimatePresence>
 
+            {/* Sync Results Modal */}
+            <AnimatePresence>
+                {pendingSyncData && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-white rounded-[20px] shadow-2xl p-[32px] w-[500px] border border-[#E2E8F0]"
+                        >
+                            <div className="flex items-center gap-[16px] mb-[16px]">
+                                <div className="w-[48px] h-[48px] bg-[#E0E7FF] rounded-full flex items-center justify-center text-[#4F46E5]">
+                                    <RefreshCw size={24} />
+                                </div>
+                                <h3 className="text-[18px] font-bold text-[#1A2640] m-0">Sync Complete</h3>
+                            </div>
+                            <div className="text-[14px] text-[#64748B] mb-[24px] max-h-[300px] overflow-y-auto pr-2">
+                                {pendingSyncData.added.length > 0 && (
+                                    <div className="mb-4">
+                                        <div className="font-bold text-[#10B981] mb-2 flex items-center gap-1">New Companies Found ({pendingSyncData.added.length}):</div>
+                                        <ul className="list-disc pl-5 m-0 space-y-1">
+                                            {pendingSyncData.added.map(c => <li key={c.id} className="truncate">{c.name} {c.gstin ? `(${c.gstin})` : ''}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                                {pendingSyncData.removed.length > 0 && (
+                                    <div>
+                                        <div className="font-bold text-[#EF4444] mb-2 flex items-center gap-1">Companies Removed from Tally ({pendingSyncData.removed.length}):</div>
+                                        <ul className="list-disc pl-5 m-0 space-y-1 text-[#EF4444]">
+                                            {pendingSyncData.removed.map(c => <li key={c.id} className="truncate">{c.name} {c.gstin ? `(${c.gstin})` : ''}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex gap-[12px]">
+                                <button
+                                    onClick={() => {
+                                        setCompanies(pendingSyncData.all);
+                                        setPendingSyncData(null);
+                                    }}
+                                    className="flex-1 w-full px-[16px] py-[12px] bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold rounded-[12px] transition-colors cursor-pointer"
+                                    style={{ boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)' }}
+                                >
+                                    Acknowledge & Update List
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
             {/* ─── Persistent Top Navigation ─── */}
             <div className="flex border-b border-[#E2E8F0] mb-[24px] overflow-x-auto no-scrollbar relative z-10 bg-white sticky top-0 px-[36px] py-[2px]">
                 {['Company', 'Rules', 'Source', 'ERP', 'Reports', 'Storage'].map((tab) => {
@@ -676,39 +826,69 @@ export default function Config() {
                                         <ConfigCard icon={<Building2 size={22} />} title="Company configurations" subtitle="Manage companies, statutory details and ERP connectivity" accentColor="#0F766E" delay={0}>
                                             <div className="flex flex-col gap-[8px] mb-[4px]">
                                                 <div className="flex items-center justify-between mb-[4px]">
-                                                    <div className="text-[11px] font-black text-[#64748B] uppercase tracking-wider flex items-center gap-[6px]">
-                                                        <Building2 size={12} /> Registered Companies ({companies.length})
+                                                    <div className="text-[11px] font-black text-[#64748B] uppercase tracking-wider flex flex-col gap-[2px]">
+                                                        <div className="flex items-center gap-[6px]">
+                                                            <Building2 size={12} /> Registered Companies ({companies.length})
+                                                        </div>
+                                                        {(lastSyncedAgoStr || syncError) && (
+                                                            <div className="font-normal text-[9px] lowercase flex items-center gap-[4px]" style={{ color: syncError ? '#EF4444' : '#94A3B8' }}>
+                                                                <RefreshCw size={9} className={isSyncing ? "animate-spin" : ""} /> 
+                                                                {syncError ? "Sync failed" : `Last synced: ${lastSyncedAgoStr}`}
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <button
-                                                        onClick={() => { setCompanyView('add'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); }}
-                                                        className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0] hover:bg-[#DCFCE7]"
-                                                    >
-                                                        <Plus size={12} /> Add Company
-                                                    </button>
+                                                    <div className="flex items-center gap-[8px]">
+                                                        <button
+                                                            onClick={() => fetchCompaniesInfo(true)}
+                                                            className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0F9FF] text-[#0284C7] border-[#BAE6FD] hover:bg-[#E0F2FE]"
+                                                        >
+                                                            <RefreshCw size={12} className={isSyncing ? "animate-spin" : ""} /> Sync with Tally
+                                                        </button>
+                                                        <button
+                                                            onClick={() => { setCompanyView('add'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); }}
+                                                            className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0] hover:bg-[#DCFCE7]"
+                                                        >
+                                                            <Plus size={12} /> Add Company
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                {companies.map(c => (
+                                                {companies.map(c => {
+                                                    const isRowActive = activeCompanyId === c.id;
+                                                    let hash = 0;
+                                                    const avatarName = c.name || (c as any).trade_name || '?';
+                                                    for (let i = 0; i < avatarName.length; i++) hash = avatarName.charCodeAt(i) + ((hash << 5) - hash);
+                                                    const bgHue = Math.abs(hash % 360);
+                                                    
+                                                    const typeLabel = companyTypes.find(t => t.value === c.type)?.label || c.type || 'Company';
+
+                                                    return (
                                                     <motion.div
                                                         key={c.id}
                                                         whileHover={{ x: 2 }}
-                                                        className={`flex items-center gap-[14px] p-[14px_18px] rounded-[12px] border transition-all cursor-pointer ${c.isActive ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm' : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'}`}
+                                                        className={`flex items-center gap-[14px] p-[14px_18px] rounded-[12px] border transition-all cursor-pointer ${isRowActive ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm' : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'}`}
                                                         onClick={() => handleSetActive(c.id)}
                                                     >
-                                                        <div className={`w-[40px] h-[40px] rounded-[10px] flex items-center justify-center shrink-0 text-[14px] font-black ${c.isActive ? 'bg-[#0F766E] text-white shadow-md' : 'bg-[#E2E8F0] text-[#64748B]'}`}>
-                                                            {c.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                                                        <div className="w-[40px] h-[40px] rounded-[10px] flex items-center justify-center shrink-0 text-[14px] font-black text-white shadow-md"
+                                                             style={{ backgroundColor: `hsl(${bgHue}, 70%, 45%)` }}>
+                                                            {avatarName.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
                                                         </div>
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-[8px]">
                                                                 <span className="text-[13px] font-bold text-[#1A2640] truncate">{c.name}</span>
-                                                                {c.isActive && (
+                                                                {isRowActive && (
                                                                     <span className="bg-[#0F766E] text-white text-[8px] font-black px-[6px] py-[2px] rounded-full uppercase tracking-wider">Active</span>
                                                                 )}
                                                             </div>
                                                             <div className="text-[11px] text-[#94A3B8] flex items-center gap-[12px] mt-[2px]">
-                                                                <span>GSTIN: {c.gstin || '—'}</span>
+                                                                {'GSTIN: ' + (c.gstin || '—')} 
                                                                 <span>·</span>
-                                                                <span>{companyTypes.find(t => t.value === c.type)?.label || c.type}</span>
-                                                                <span>·</span>
-                                                                <span>{c.city}, {c.state}</span>
+                                                                <span>{typeLabel}</span>
+                                                                {c.city && c.state && (
+                                                                    <>
+                                                                        <span>·</span>
+                                                                        <span>{c.city}, {c.state}</span>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-[8px]" onClick={e => e.stopPropagation()}>
@@ -719,18 +899,9 @@ export default function Config() {
                                                             >
                                                                 <Edit2 size={14} />
                                                             </button>
-                                                            {!c.isActive && (
-                                                                <button
-                                                                    onClick={() => handleDeleteCompany(c.id)}
-                                                                    className="text-[#94A3B8] hover:text-[#EF4444] p-[6px] rounded-[8px] hover:bg-[#FEF2F2] transition-all"
-                                                                    title="Delete Company"
-                                                                >
-                                                                    <Trash2 size={14} />
-                                                                </button>
-                                                            )}
                                                         </div>
                                                     </motion.div>
-                                                ))}
+                                                )})}
                                             </div>
 
                                             {/* Quick Info Banner */}
@@ -781,6 +952,15 @@ export default function Config() {
                                                             value={newCompany.name}
                                                             onChange={(e: any) => setNewCompany(p => ({ ...p, name: e.target.value }))}
                                                             placeholder="e.g. Wheels Tech Private Limited"
+                                                            required
+                                                        />
+                                                        <IntegrationField
+                                                            icon={<Building2 size={16} />}
+                                                            label="Mailing Name"
+                                                            value={newCompany.mailingName}
+                                                            onChange={(e: any) => setNewCompany(p => ({ ...p, mailingName: e.target.value }))}
+                                                            placeholder="Mailing name for documents"
+                                                            required
                                                         />
                                                         <IntegrationField
                                                             icon={<FileCheck size={16} />}
@@ -789,6 +969,8 @@ export default function Config() {
                                                             onChange={(e: any) => setNewCompany(p => ({ ...p, tradeName: e.target.value }))}
                                                             placeholder="e.g. Wheels Tech"
                                                         />
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-[10px] mt-[10px]">
                                                         <div className="flex items-center gap-[12px] bg-white border border-[#E2E8F0] rounded-[10px] p-[8px_14px] focus-within:border-[#1E6FD9] focus-within:ring-2 focus-within:ring-[rgba(30,111,217,0.1)] transition-all">
                                                             <div className="text-[#94A3B8]"><Briefcase size={16} /></div>
                                                             <div className="flex-1 min-w-0">
@@ -802,6 +984,14 @@ export default function Config() {
                                                                 </select>
                                                             </div>
                                                         </div>
+                                                        <IntegrationField
+                                                            icon={<Globe size={16} />}
+                                                            label="Country"
+                                                            value={newCompany.country}
+                                                            onChange={(e: any) => setNewCompany(p => ({ ...p, country: e.target.value }))}
+                                                            placeholder="e.g. India"
+                                                            required
+                                                        />
                                                     </div>
                                                 </div>
 
@@ -867,7 +1057,10 @@ export default function Config() {
                                                         <div className="flex items-center gap-[12px] bg-white border border-[#E2E8F0] rounded-[10px] p-[8px_14px] focus-within:border-[#1E6FD9] focus-within:ring-2 focus-within:ring-[rgba(30,111,217,0.1)] transition-all">
                                                             <div className="text-[#94A3B8]"><Globe size={16} /></div>
                                                             <div className="flex-1 min-w-0">
-                                                                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">State</div>
+                                                                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">
+                                                                    <span className="text-[#EF4444] mr-[2px]">*</span>
+                                                                    State
+                                                                </div>
                                                                 <select
                                                                     value={newCompany.state}
                                                                     onChange={(e) => setNewCompany(p => ({ ...p, state: e.target.value }))}
@@ -910,7 +1103,10 @@ export default function Config() {
                                                         <div className="flex items-center gap-[12px] bg-white border border-[#E2E8F0] rounded-[10px] p-[8px_14px] focus-within:border-[#1E6FD9] focus-within:ring-2 focus-within:ring-[rgba(30,111,217,0.1)] transition-all">
                                                             <div className="text-[#94A3B8]"><Calendar size={16} /></div>
                                                             <div className="flex-1 min-w-0">
-                                                                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">Financial Year Starts</div>
+                                                                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">
+                                                                    <span className="text-[#EF4444] mr-[2px]">*</span>
+                                                                    Financial Year Starts
+                                                                </div>
                                                                 <select
                                                                     value={newCompany.fyStart}
                                                                     onChange={(e) => setNewCompany(p => ({ ...p, fyStart: e.target.value }))}
@@ -925,7 +1121,10 @@ export default function Config() {
                                                         <div className="flex items-center gap-[12px] bg-white border border-[#E2E8F0] rounded-[10px] p-[8px_14px] focus-within:border-[#1E6FD9] focus-within:ring-2 focus-within:ring-[rgba(30,111,217,0.1)] transition-all">
                                                             <div className="text-[#94A3B8]"><IndianRupee size={16} /></div>
                                                             <div className="flex-1 min-w-0">
-                                                                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">Base Currency</div>
+                                                                <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">
+                                                                    <span className="text-[#EF4444] mr-[2px]">*</span>
+                                                                    Base Currency
+                                                                </div>
                                                                 <select
                                                                     value={newCompany.currency}
                                                                     onChange={(e) => setNewCompany(p => ({ ...p, currency: e.target.value }))}
@@ -945,6 +1144,7 @@ export default function Config() {
                                                             value={newCompany.booksFrom}
                                                             onChange={(e: any) => setNewCompany(p => ({ ...p, booksFrom: e.target.value }))}
                                                             placeholder="2024-04-01"
+                                                            required
                                                         />
                                                     </div>
                                                 </div>
@@ -954,14 +1154,39 @@ export default function Config() {
                                                     <div className="text-[10px] font-black text-[#0F766E] uppercase tracking-[1.5px] mb-[10px] flex items-center gap-[6px]">
                                                         <Server size={11} /> Tally Integration
                                                     </div>
-                                                    <div className="grid grid-cols-2 gap-[10px] mb-[10px]">
+                                                    <div className="grid grid-cols-[1fr_auto] items-end gap-[10px] mb-[10px]">
                                                         <IntegrationField
                                                             icon={<Server size={16} />}
                                                             label="Tally Prime Server URL"
                                                             value={newCompany.tallyServerUrl}
                                                             onChange={(e: any) => setNewCompany(p => ({ ...p, tallyServerUrl: e.target.value }))}
                                                             placeholder="http://localhost:9000"
+                                                            required
                                                         />
+                                                        <button
+                                                            onClick={handleTestTallyConnection}
+                                                            disabled={isCheckingTally}
+                                                            className={`mb-[2px] h-[46px] px-[16px] rounded-[10px] flex items-center gap-[8px] text-[12px] font-bold border transition-all cursor-pointer ${
+                                                                tallyConnectionStatus === 'success' 
+                                                                ? 'bg-[#ECFDF5] border-[#10B981] text-[#059669]' 
+                                                                : tallyConnectionStatus === 'error'
+                                                                ? 'bg-[#FEF2F2] border-[#EF4444] text-[#B91C1C]'
+                                                                : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#64748B] hover:bg-[#F1F5F9]'
+                                                            }`}
+                                                        >
+                                                            {isCheckingTally ? (
+                                                                <RefreshCw size={14} className="animate-spin" />
+                                                            ) : tallyConnectionStatus === 'success' ? (
+                                                                <Check size={14} />
+                                                            ) : tallyConnectionStatus === 'error' ? (
+                                                                <AlertCircle size={14} />
+                                                            ) : (
+                                                                <Link size={14} />
+                                                            )}
+                                                            {isCheckingTally ? 'Checking...' : tallyConnectionStatus === 'success' ? 'Connected' : 'Test Connection'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-[10px] mb-[10px]">
                                                         <IntegrationField
                                                             icon={<Building2 size={16} />}
                                                             label="Company Name in Tally"
@@ -970,15 +1195,7 @@ export default function Config() {
                                                             placeholder="Must match exactly as in Tally"
                                                         />
                                                     </div>
-                                                    <div className="grid grid-cols-2 gap-[10px]">
-                                                        <IntegrationField
-                                                            icon={<Key size={16} />}
-                                                            label="Tally License Serial"
-                                                            value={newCompany.tallyLicenseSerial}
-                                                            onChange={(e: any) => setNewCompany(p => ({ ...p, tallyLicenseSerial: e.target.value }))}
-                                                            placeholder="e.g. S 123456"
-                                                            isSecret
-                                                        />
+                                                    <div className="grid grid-cols-1 gap-[10px]">
                                                         <div className="flex items-center gap-[14px] bg-white border border-[#E2E8F0] rounded-[10px] p-[10px_14px]">
                                                             <div className="flex-1">
                                                                 <div className="text-[10px] font-bold text-[#64748B] uppercase tracking-wider mb-[2px]">Auto-Sync with Tally</div>
@@ -992,38 +1209,115 @@ export default function Config() {
                                                 {/* Submit Buttons */}
                                                 <div className="flex items-center gap-[10px] pt-[16px] border-t border-[#E2E8F0]">
                                                     <button
-                                                        onClick={() => {
-                                                            setShowConfirmAction({
-                                                                isOpen: true,
-                                                                title: companyView === 'add' ? 'Save New Company?' : 'Save Changes?',
-                                                                message: 'Are you sure you want to save these company details? You can edit them later if needed.',
-                                                                onConfirm: () => {
-                                                                    if (companyView === 'edit' && editingCompany) {
-                                                                        setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...newCompany as CompanyData, id: editingCompany.id } : c));
-                                                                        setEditingCompany(null);
-                                                                        setCompanyView('list');
-                                                                        setNewCompany(DEFAULT_COMPANY);
-                                                                    } else {
+                                                        onClick={async () => {
+                                                            const missingFields = [];
+                                                            if (!newCompany.name) missingFields.push('Company Name');
+                                                            if (!newCompany.mailingName) missingFields.push('Mailing Name');
+                                                            if (!newCompany.country) missingFields.push('Country');
+                                                            if (!newCompany.state) missingFields.push('State');
+                                                            if (!newCompany.fyStart) missingFields.push('FY Beginning From');
+                                                            if (!newCompany.booksFrom) missingFields.push('Books Beginning From');
+                                                            if (!newCompany.currency) missingFields.push('Base Currency');
+                                                            if (!newCompany.tallyServerUrl) missingFields.push('Tally Endpoint');
+
+                                                            if (missingFields.length > 0) {
+                                                                setValidationError(`Missing required fields: ${missingFields.join(', ')}`);
+                                                                return;
+                                                            }
+                                                            
+                                                            setValidationError(null);
+
+                                                            if (companyView === 'add') {
+                                                                const payload = {
+                                                                    process: {
+                                                                        company_creation: true,
+                                                                        vendor_creation: false,
+                                                                        ledger_creation: false
+                                                                    },
+                                                                    company: {
+                                                                        payload: {
+                                                                            registeredCompanyName: newCompany.name,
+                                                                            mailingName: newCompany.mailingName,
+                                                                            tradeName: newCompany.tradeName,
+                                                                            companyType: newCompany.type,
+                                                                            country: newCompany.country,
+                                                                            gstin: newCompany.gstin,
+                                                                            pan: newCompany.pan,
+                                                                            cin: newCompany.cin,
+                                                                            tan: newCompany.tan,
+                                                                            registeredAddress: newCompany.address,
+                                                                            city: newCompany.city,
+                                                                            state: newCompany.state,
+                                                                            pincode: newCompany.pincode,
+                                                                            phone: newCompany.phone,
+                                                                            accountsEmail: newCompany.email,
+                                                                            financialYearStarts: newCompany.fyStart,
+                                                                            booksBeginningFrom: newCompany.booksFrom ? newCompany.booksFrom.replace(/-/g, '') : '',
+                                                                            baseCurrency: {
+                                                                                'INR': '₹',
+                                                                                'USD': '$',
+                                                                                'EUR': '€',
+                                                                                'GBP': '£'
+                                                                            }[newCompany.currency as 'INR' | 'USD' | 'EUR' | 'GBP'] || newCompany.currency,
+                                                                        }
+                                                                    },
+                                                                    invoice: {},
+                                                                    ledger: {}
+                                                                };
+
+                                                                setIsCreatingCompany(true);
+                                                                try {
+                                                                    const response = await fetch('https://wheelsonai.app.n8n.cloud/webhook/tally-company-creation', {
+                                                                        method: 'POST',
+                                                                        headers: {
+                                                                            'Content-Type': 'application/json',
+                                                                            'x-api-key': 'WXuQeIpMOjxTkCsP1azLo9l0NB7GZqvUtSV6d42Jm3YhHwrE'
+                                                                        },
+                                                                        body: JSON.stringify(payload)
+                                                                    });
+                                                                    
+                                                                    if (response.ok) {
+                                                                        toast.success("Company created successfully in Tally");
                                                                         handleAddCompany();
+                                                                    } else {
+                                                                        const errorData = await response.json().catch(() => ({}));
+                                                                        toast.error(errorData.message || "Failed to create company");
                                                                     }
+                                                                } catch (err: any) {
+                                                                    toast.error(err.message || "Network error occurred");
+                                                                } finally {
+                                                                    setIsCreatingCompany(false);
                                                                 }
-                                                            });
+                                                            } else {
+                                                                setShowConfirmAction({
+                                                                    isOpen: true,
+                                                                    title: 'Save Changes?',
+                                                                    message: `Are you sure you want to save changes for "${newCompany.name}"?`,
+                                                                    onConfirm: () => {
+                                                                        if (editingCompany) {
+                                                                            setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...newCompany as CompanyData, id: editingCompany.id } : c));
+                                                                            setEditingCompany(null);
+                                                                            setCompanyView('list');
+                                                                            setNewCompany(DEFAULT_COMPANY);
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
                                                         }}
-                                                        disabled={!newCompany.name || !newCompany.gstin}
-                                                        className="flex items-center gap-[6px] bg-[#0F766E] hover:bg-[#115E59] disabled:bg-[#CBD5E1] disabled:cursor-not-allowed text-white text-[13px] font-bold px-[20px] py-[10px] rounded-[10px] border-none cursor-pointer transition-colors shadow-sm"
+                                                        disabled={isCreatingCompany}
+                                                        className={`flex items-center gap-[6px] text-white text-[13px] font-bold px-[20px] py-[10px] rounded-[10px] border-none transition-colors shadow-sm ${
+                                                            isCreatingCompany ? 'bg-[#94A3B8] cursor-not-allowed' : 'bg-[#0F766E] hover:bg-[#115E59] cursor-pointer'
+                                                        }`}
                                                     >
-                                                        <CheckCircle size={14} />
-                                                        {companyView === 'edit' ? 'Save Changes' : 'Create Company'}
+                                                        {isCreatingCompany ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                                                        {companyView === 'edit' ? 'Save Changes' : (isCreatingCompany ? 'Creating...' : 'Create Company')}
                                                     </button>
                                                     <button
-                                                        onClick={() => { setCompanyView('list'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); }}
+                                                        onClick={() => { setCompanyView('list'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); setValidationError(null); }}
                                                         className="text-[#64748B] hover:text-[#1A2640] text-[13px] font-semibold px-[16px] py-[10px] bg-transparent border-none cursor-pointer transition-colors"
                                                     >
                                                         Cancel
                                                     </button>
-                                                    {!newCompany.name && !newCompany.gstin && (
-                                                        <span className="text-[11px] text-[#94A3B8] italic ml-auto">Company Name and GSTIN are required</span>
-                                                    )}
                                                 </div>
                                             </div>
                                         </ConfigCard>
@@ -1247,7 +1541,7 @@ export default function Config() {
                             )}
                         </AnimatePresence>
 
-                        <ToggleRow checked={sources.whatsapp || false} label="WhatsApp" desc="Ingest invoices directly from WhatsApp business messages" icon={<MessageSquare size={16} />} onChange={() => setSources(s => ({ ...s, whatsapp: !s.whatsapp }))} />
+                        <ToggleRow checked={sources.whatsapp || false} label="WhatsApp" desc="Ingest invoices directly from WhatsApp business messages" icon={<WhatsAppIcon size={16} />} onChange={() => setSources(s => ({ ...s, whatsapp: !s.whatsapp }))} />
                         <AnimatePresence>
                             {sources.whatsapp && (
                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
@@ -1425,7 +1719,7 @@ export default function Config() {
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-[14px]">
                                         <div className="w-[40px] h-[40px] rounded-[10px] bg-[#F0FDF4] flex items-center justify-center text-[#16A34A]">
-                                            <MessageSquare size={18} />
+                                            <WhatsAppIcon size={18} />
                                         </div>
                                         <div>
                                             <div className="text-[14px] font-bold text-[#1A2640]">WhatsApp</div>
@@ -1446,7 +1740,7 @@ export default function Config() {
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-[14px]">
                                         <div className="w-[40px] h-[40px] rounded-[10px] bg-[#EFF6FF] flex items-center justify-center text-[#2563EB]">
-                                            <MessageSquare size={18} />
+                                            <Share2 size={18} />
                                         </div>
                                         <div>
                                             <div className="text-[14px] font-bold text-[#1A2640]">MS Teams</div>
@@ -1497,7 +1791,7 @@ export default function Config() {
                         </div>
 
                         <ConfigCard 
-                            icon={reportsView === 'email' ? <Mail size={22} /> : reportsView === 'whatsapp' ? <MessageSquare size={22} /> : reportsView === 'teams' ? <MessageSquare size={22} /> : <Share2 size={22} />} 
+                            icon={reportsView === 'email' ? <Mail size={22} /> : reportsView === 'whatsapp' ? <WhatsAppIcon size={22} /> : reportsView === 'teams' ? <Share2 size={22} /> : <Share2 size={22} />} 
                             title={`${reportsView === 'email' ? 'Email' : reportsView === 'whatsapp' ? 'WhatsApp' : reportsView === 'teams' ? 'Teams' : 'SharePoint'} Configuration`} 
                             subtitle={`Configure destination, schedule, and content for this channel`} 
                             accentColor={reportsView === 'whatsapp' ? '#16A34A' : '#1E6FD9'}

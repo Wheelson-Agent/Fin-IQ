@@ -657,6 +657,10 @@ export function registerIpcHandlers() {
         return await queries.getAllCompanies();
     });
 
+    ipcMain.handle('api/companies', async () => {
+        return await queries.getSyncedCompanies();
+    });
+
     // ─── DASHBOARD ──────────────────────────────────────────────
 
     // ─── CONFIGURATION ──────────────────────────────────────────
