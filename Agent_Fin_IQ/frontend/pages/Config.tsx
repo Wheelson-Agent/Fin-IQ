@@ -336,11 +336,39 @@ export default function Config() {
         const loadPaths = async () => {
             // @ts-ignore
             if (window.api && window.api.invoke) {
+                // Load Storage Config from Database
                 // @ts-ignore
-                const path = await window.api.invoke('config:get-storage-path');
-                if (path) {
-                    setStorage(s => ({ ...s, localPath: path }));
-                    setCommittedConfig(c => ({ ...c, storage: { ...c.storage, localPath: path } }));
+                const storageConfig = await window.api.invoke('config:get-storage-path');
+                if (storageConfig) {
+                    setStorage({
+                        ...INIT.storage,
+                        provider: storageConfig.provider || INIT.storage.provider,
+                        localPath: storageConfig.localPath || INIT.storage.localPath
+                    });
+                    setCommittedConfig(prev => ({
+                        ...prev,
+                        storage: {
+                            ...prev.storage,
+                            provider: storageConfig.provider || INIT.storage.provider,
+                            localPath: storageConfig.localPath || INIT.storage.localPath
+                        }
+                    }));
+                }
+
+                // Load Posting Rules from Database
+                // @ts-ignore
+                const rules = await window.api.invoke('config:get-rules');
+                if (rules) {
+                    setPostingMode(rules.postingMode || INIT.postingMode);
+                    setCriteria(rules.criteria || INIT.criteria);
+                    setDestination(rules.destination || INIT.destination);
+                    // Update committed config to prevent "unsaved changes" on load
+                    setCommittedConfig(prev => ({
+                        ...prev,
+                        postingMode: rules.postingMode || INIT.postingMode,
+                        criteria: rules.criteria || INIT.criteria,
+                        destination: rules.destination || INIT.destination
+                    }));
                 }
             }
         };
@@ -423,6 +451,9 @@ export default function Config() {
         if (sources.whatsapp && !sourceConfigs.whatsapp.phoneNumber) return "Phone number is required for WhatsApp source.";
         if (sources.local_folder && !sourceConfigs.local_folder.folderPath) return "Local folder path is required.";
         
+        // Storage validation
+        if (storage.provider === 'local' && !storage.localPath) return "Local Storage Path is required.";
+        
         if (postingMode === 'auto' && (criteria as any).enableValueLimit && !criteria.valueLimit) {
             return "Maximum invoice value limit is required when enabled.";
         }
@@ -450,8 +481,22 @@ export default function Config() {
 
         // @ts-ignore
         if (window.api && window.api.invoke) {
+            // Persist Storage Config to Database (Provider + Path)
             // @ts-ignore
-            await window.api.invoke('config:set-storage-path', storage.localPath);
+            await window.api.invoke('config:set-storage-path', {
+                provider: storage.provider,
+                localPath: storage.localPath
+            });
+
+            // Persist Posting Rules to Database
+            // @ts-ignore
+            await window.api.invoke('config:save-rules', {
+                rules: {
+                    postingMode: newConfig.postingMode,
+                    criteria: newConfig.criteria,
+                    destination: newConfig.destination
+                }
+            });
         }
         
         setSaved(true);

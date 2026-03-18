@@ -108,10 +108,8 @@ export default function APWorkspace() {
       if (invoices && Array.isArray(invoices)) {
         // Map backend Invoice type to frontend APRecord type
         const mapped: APRecord[] = invoices.map((inv: any) => {
-          // Robust status mapping
-          // Priority-based status mapping based on validation results
-          const bStatus = (inv.processing_status || '').toLowerCase();
           let status: RecordStatus = 'received';
+          const bStatus = (inv.processing_status || '').toLowerCase();
 
           const docType = (inv.doc_type || '').toLowerCase();
           const isGoods = docType.includes('goods');
@@ -156,6 +154,7 @@ export default function APWorkspace() {
           const bVerif = getVal('Company Verified', 'buyer_verification');
           const gValid = getVal('GST Validated', 'gst_validation_status');
           const dValid = getVal('Data Validated', 'invoice_ocr_data_valdiation');
+          // Note: isDup === true means a duplicate WAS found (failure state)
           const isDup = getVal('Document Duplicate Check', 'duplicate_check');
 
           const isUnknownFile = !inv.file_name || inv.file_name.toLowerCase() === 'unknown' || inv.file_name === 'N/A';
@@ -163,33 +162,37 @@ export default function APWorkspace() {
             (inv.invoice_number?.toLowerCase() === 'unknown' || inv.invoice_no?.toLowerCase() === 'unknown') ||
             (inv.invoice_number === 'N/A' || inv.invoice_no === 'N/A');
 
+          // ─── CANONICAL READY-TO-POST RULE ───
+          // Must pass all required checks AND NOT be a duplicate
+          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && (!isGoods || lMatch);
+          const n8nAllPassed = mandatoryChecksPassed && !isDup;
+
           if (bStatus === 'processing') {
             status = 'processing';
-          } else if (bStatus === 'posted' || bStatus === 'auto-posted' || (inv.erp_sync_status || '').toLowerCase() === 'processed') {
+          } else if (inv.erp_sync_id || inv.tally_id) {
+            // Strict Posted rule: must have a sync ID (tally_id or erp_sync_id)
             status = 'posted';
+          } else if (bStatus === 'failed' || bStatus === 'ocr_failed' || (inv.failure_reason && inv.failure_reason.trim() !== '')) {
+            // Map 'Failed' invoices to 'handoff' for user review
+            status = 'handoff';
+          } else if (isDup) {
+            // Duplicates always go to Handoff (Awaiting Input / Review) 
+            // as per "Duplicate Check = true means failed"
+            status = 'handoff';
+          } else if (n8nAllPassed || bStatus === 'ready to post') {
+            // Ready to Post only if all mandatory checks pass AND it is NOT a duplicate
+            // bStatus === 'ready to post' is the backend's canonical decision
+            status = 'ready';
+          } else if (!bVerif || !gValid || !dValid || isUnknownFile || isUnknownInv) {
+            status = 'handoff';
+          } else if (!vVerif || (isGoods && !lMatch)) {
+            status = 'input';
+          } else if (bStatus === 'ready' || bStatus === 'verified') {
+            status = 'ready';
+          } else if (bStatus === 'awaiting input' || bStatus === 'pending approval') {
+            status = 'input';
           } else {
-            // Check for failures that go to handoff (Highest Priority)
-            // If ALL n8n checks pass, we SKIP the handoff failure logic entirely
-            const n8nAllPassed = bVerif && gValid && dValid && isDup && vVerif && (!isGoods || lMatch) && !isUnknownFile && !isUnknownInv;
-
-            if (bStatus.includes('ready to post') || n8nAllPassed) {
-              status = 'ready';
-            }
-            else if (!bVerif || !gValid || !dValid || !isDup || isUnknownFile || isUnknownInv) {
-              status = 'handoff';
-            }
-            else if (!vVerif || (isGoods && !lMatch)) {
-              status = 'input';
-            }
-            else if (bStatus === 'ready' || bStatus === 'verified' || bStatus === 'pending approval') {
-              status = 'ready';
-            }
-            else if (bStatus === 'awaiting input') {
-              status = 'input';
-            }
-            else if (bStatus === 'failed' || bStatus === 'ocr_failed') {
-              status = 'handoff';
-            }
+            status = 'handoff';
           }
 
           // Construct Failure Reasons (remarks) dynamically with DetailView matching labels
