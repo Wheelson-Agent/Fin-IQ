@@ -30,6 +30,7 @@ import fs from 'fs';
 import path from 'path';
 import { initBatchesDir } from './utils/filesystem';
 import { fileURLToPath } from 'url';
+import * as n8nWatcher from './sync/n8nStatusWatcher';
 
 // ESM Compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -81,6 +82,9 @@ export async function initializeBackend(): Promise<boolean> {
     console.log('\n[3/3] Registering IPC handlers...');
     registerIpcHandlers();
     console.log('[IPC] ✅ All handlers registered');
+
+    // Step 4: Start background watchers
+    n8nWatcher.startWatching();
 
     // Create data directories
     const configPath = path.resolve(__dirname, '../config/app.config.json');

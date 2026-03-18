@@ -37,6 +37,7 @@ const ALLOWED_CHANNELS = [
     'invoices:update-ocr',
     'invoices:update-remarks',
     'invoices:delete',
+    'invoices:revalidate',
     // Vendors
     'vendors:get-all',
     'vendors:get-by-id',
@@ -60,8 +61,12 @@ const ALLOWED_CHANNELS = [
     // Processing
     'processing:get-jobs',
     'processing:run-pipeline',
+    'processing:get-batch-logs',
+    'processing:get-worker-status',
+    'processing:get-all-logs-debug',
     // Health checks
     'status:check-n8n',
+    'status:get-n8n-full',
     'status:check-ocr',
     // Config & Dialogs
     'dialog:open-directory',
