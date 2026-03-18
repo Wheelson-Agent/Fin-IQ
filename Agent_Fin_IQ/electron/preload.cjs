@@ -42,6 +42,7 @@ const ALLOWED_CHANNELS = [
     'vendors:get-all',
     'vendors:get-by-id',
     'vendors:save',
+    'vendors:sync-tally',
     // Tally & Masters
     'tally:get-sync-logs',
     'po:get-all',
@@ -49,6 +50,7 @@ const ALLOWED_CHANNELS = [
     'grn:get-all',
     'ses:get-all',
     'masters:get-ledgers',
+    'masters:create-ledger',
     'masters:get-tds-sections',
     // Companies & Dashboard
     'companies:get-active',

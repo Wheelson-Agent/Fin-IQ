@@ -13,8 +13,11 @@ import {
 } from "../components/ui/resizable";
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import * as Popover from '@radix-ui/react-popover';
+import { Command } from 'cmdk';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, revalidateInvoice } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally, createLedgerMaster } from '../lib/api';
+import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
 const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
@@ -90,9 +93,12 @@ export default function DetailView() {
     }
   };
 
+  const [isSyncingVendor, setIsSyncingVendor] = useState(false);
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [taxOptions, setTaxOptions] = useState<string[]>([]);
+  const [ledgerNameToId, setLedgerNameToId] = useState<Record<string, string>>({});
+  const [ledgerIdToName, setLedgerIdToName] = useState<Record<string, string>>({});
 
   useEffect(() => {
     async function loadData() {
@@ -252,6 +258,16 @@ export default function DetailView() {
             const taxes = ledgersRecord.filter(l => l.ledger_type === 'tax_gst' || l.ledger_type === 'tax').map(l => l.name);
             setLedgerOptions(expenses);
             setTaxOptions(taxes);
+
+            const nextNameToId: Record<string, string> = {};
+            const nextIdToName: Record<string, string> = {};
+            ledgersRecord.forEach((l: any) => {
+              if (!l?.id || !l?.name) return;
+              nextNameToId[String(l.name).toLowerCase()] = String(l.id);
+              nextIdToName[String(l.id)] = String(l.name);
+            });
+            setLedgerNameToId(nextNameToId);
+            setLedgerIdToName(nextIdToName);
           }
 
           if (itemsRecord && itemsRecord.length > 0) {
@@ -398,6 +414,17 @@ export default function DetailView() {
 
   const isManualReview = invoice.status === 'Manual Review';
   const isFailed = invoice.status === 'Failed';
+
+  const isUuid = (value: unknown) =>
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+  const resolveLedgerId = (value: unknown) => {
+    if (!value) return '';
+    if (isUuid(value)) return String(value);
+    const key = String(value).toLowerCase();
+    return ledgerNameToId[key] || String(value);
+  };
 
   const handleAddLineItem = () => {
     if (readOnly) return;
@@ -688,9 +715,56 @@ export default function DetailView() {
                   {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Save Changes'}
                 </Button>
                 <Button
-                  variant="ghost"
-                  onClick={() => window.location.reload()}
-                  className="h-9 px-3 text-slate-400 hover:text-slate-600"
+                  disabled={saving}
+                  onClick={async () => {
+                    if (!id) return;
+                    setSaving(true);
+                    try {
+                      if (isHandoff) {
+                        // Re-validate action
+                        await runPipeline(id, invoice.file_path || '', invoice.file_name || '');
+                        alert('Re-validation started.');
+                        window.location.reload();
+                      } else {
+                        // Approve & Post action
+                        await saveInvoiceItems(id, lineItems.map(item => ({
+                          description: item.description,
+                          ledger: resolveLedgerId(item.ledger),
+                          hsn_sac: item.hsn_sac,
+                          tax: item.tax,
+                          quantity: item.qty,
+                          rate: item.rate,
+                          discount: item.discount,
+                          item: item.item_id || null
+                        })));
+                        
+                        const processedFields: any = { ...docFields };
+                        
+                        // Fix 1: Date Format
+                        // User wants DDMMYYYY (e.g. 03012025) for Tally.
+                        // We send the raw 8-digit string; backend uses to_date(?, 'DDMMYYYY').
+                        processedFields.date = docFields.date;
+
+                        // Fix 2: Field Mapping (Map docFields keys to DB column expectations)
+                        processedFields.amount = processedFields.sub_total;
+                        processedFields.gst = processedFields.tax_total;
+                        processedFields.total = processedFields.grand_total;
+                        processedFields.invoice_no = processedFields.invoice_no; // Already named correctly but for clarity
+
+                        await updateInvoiceOCR(id, processedFields);
+                        await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
+                        alert('Document Approved and posted to Tally.');
+                        navigate('/ap-workspace');
+                      }
+                    } catch (err) {
+                      alert('Action failed: ' + err);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  className={`h-10 px-6 font-black rounded-xl shadow-lg border-none transition-all active:scale-95 flex items-center gap-2 ${
+                    isHandoff ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#3b82f6] hover:bg-[#2563eb]'
+                  } text-white`}
                 >
                   <X className="w-4 h-4" />
                 </Button>
@@ -846,8 +920,16 @@ export default function DetailView() {
                               </td>
                               <td className="p-3 align-top">
                                 <CustomTableSelect
-                                  value={(docFields.doc_type_label?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true')) ? item.description : item.ledger}
-                                  onChange={(val: string) => { const newLines = [...lineItems]; newLines[index].ledger = val; setLineItems(newLines); }}
+                                  value={(docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))
+                                    ? item.description
+                                    : (ledgerIdToName[String(item.ledger || '')] || item.ledger)}
+                                  onChange={(val: string) => {
+                                    const key = String(val || '').toLowerCase();
+                                    const resolvedId = ledgerNameToId[key];
+                                    const newLines = [...lineItems];
+                                    newLines[index].ledger = resolvedId || val;
+                                    setLineItems(newLines);
+                                  }}
                                   options={ledgerOptions}
                                   disabled={readOnly || (docFields.doc_type_label?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))}
                                   highlight
@@ -984,44 +1066,100 @@ export default function DetailView() {
               </div>
             </div>
             <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-              <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl">Cancel</Button>
+              <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
               <Button
-                disabled={saving}
+                disabled={isSyncingVendor}
                 onClick={async () => {
-                  if (!id) return;
-                  setSaving(true);
+                  if (!id || !invoice) return;
+                  const name = (newVendor.name || '').trim();
+                  const underGroup = (newVendor.underGroup || '').trim();
+                  const state = (newVendor.state || '').trim();
+                  const gstin = (newVendor.gstin || '').trim();
+                  if (!name) {
+                    toast.error('Vendor name is required');
+                    return;
+                  }
+                  if (!underGroup) {
+                    toast.error('Under Group is required');
+                    return;
+                  }
+                  if (!gstin) {
+                    toast.error('GSTIN is required');
+                    return;
+                  }
+                  if (!state) {
+                    toast.error('State is required');
+                    return;
+                  }
+                  const payload = {
+                    process: { vendor_creation: true },
+                    invoice: {
+                      payload: {
+                        vendorNameAsPerTally: name,
+                        vendorName: name,
+                        group: underGroup || 'Sundry Creditors',
+                        maintainBillByBill: true,
+                        mailingName: name,
+                        address: {
+                          line1: billingAddress || '',
+                          line2: '',
+                          line3: '',
+                          state: state || '',
+                          country: 'India',
+                          pincode: (newVendor.pincode || '').trim() || '',
+                        },
+                        contact: {
+                          mobile: (newVendor.phone || '').trim() || '',
+                          phone: (newVendor.phone || '').trim() || '',
+                          email: (newVendor.email || '').trim() || '',
+                        },
+                        tax: {
+                          pan: (newVendor.pan || '').trim() || '',
+                          gstRegistrationType: gstin ? 'Regular' : '',
+                          gstin: gstin || '',
+                        },
+                        meta: {
+                          invoice_id: invoice.id || '',
+                          invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
+                          file_name: (invoice.file_name || '').trim() || '',
+                          invoice_vendor_name: (invoice.vendor_name || '').trim() || '',
+                          invoice_vendor_gst: (invoice.vendor_gst || '').trim() || '',
+                        },
+                      },
+                    },
+                  };
+                  console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
+                  setIsSyncingVendor(true);
+                  toast.info('Vendor creation started');
                   try {
-                    const vendor = await saveVendor({
-                      name: newVendor.name,
-                      under_group: newVendor.underGroup,
-                      state: newVendor.state,
-                      gstin: newVendor.gstin,
-                      address: billingAddress,
-                      tds_nature: 'Any',
-                      vendor_code: newVendor.vendor_code,
-                      tax_id: newVendor.tax_id,
-                      pan: newVendor.pan,
-                      city: newVendor.city,
-                      pincode: newVendor.pincode,
-                      phone: newVendor.phone,
-                      email: newVendor.email,
-                      bank_name: newVendor.bank_name,
-                      bank_account_no: newVendor.bank_account_no,
-                      bank_ifsc: newVendor.bank_ifsc
-                    });
-                    await mapVendorToInvoice(id, vendor.id);
-                    setIsVendorMapped(true);
-                    setDocFields(prev => ({ ...prev, vendor_name: newVendor.name }));
-                    setShowVendorSlideout(false);
+                    const result = await syncVendorWithTally(payload);
+                    console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
+                    if (result.success) {
+                      toast.success(result.message || 'Vendor created successfully in Tally');
+                      setIsVendorMapped(true);
+                      setDocFields(prev => ({ ...prev, vendor_name: name }));
+                      setShowVendorSlideout(false);
+                    } else {
+                      toast.error(result.message || 'Vendor sync with Tally failed');
+                    }
                   } catch (err) {
-                    alert('Failed to create vendor: ' + err);
+                    const msg = err instanceof Error ? err.message : 'Vendor sync failed';
+                    console.error('[DetailView] syncVendorWithTally error:', err);
+                    toast.error(msg);
                   } finally {
-                    setSaving(false);
+                    setIsSyncingVendor(false);
                   }
                 }}
                 className="h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95"
               >
-                {saving ? 'Processing...' : 'Sync with Tally'}
+                {isSyncingVendor ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin mr-2" />
+                    Syncing with Tally...
+                  </>
+                ) : (
+                  'Sync with Tally'
+                )}
               </Button>
             </div>
           </div>
@@ -1046,19 +1184,81 @@ export default function DetailView() {
               <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} />
             </div>
             <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-              <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl">Cancel</Button>
+              <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor || saving}>Cancel</Button>
               <Button 
-                onClick={() => {
-                  if (activeLedgerIndex !== null && newLedger.name) {
-                    const newLines = [...lineItems];
-                    newLines[activeLedgerIndex].ledger = newLedger.name;
-                    setLineItems(newLines);
+                disabled={saving}
+                onClick={async () => {
+                  if (readOnly) return;
+                  if (activeLedgerIndex === null) return;
+                  const name = (newLedger.name || '').trim();
+                  const parentGroup = (newLedger.underGroup || '').trim();
+                  const gstApplicable = (newLedger.gstApplicable || 'Yes').trim();
+
+                  if (!name) {
+                    toast.error('Ledger name is required');
+                    return;
                   }
-                  setShowLedgerSlideout(false);
+                  if (!parentGroup) {
+                    toast.error('Under Group is required');
+                    return;
+                  }
+                  
+                  setSaving(true);
+                  toast.info('Ledger creation started');
+
+                  try {
+                    const result = await createLedgerMaster({
+                      name,
+                      parent_group: parentGroup,
+                      account_type: 'expense',
+                      company_id: (invoice as any)?.company_id ?? null,
+                      // @ts-ignore - passing extra meta for n8n
+                      meta: {
+                        gst_applicable: gstApplicable,
+                        hsn: newLedger.hsn || '',
+                        invoice_id: invoice.id || '',
+                        invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
+                        file_name: (invoice.file_name || '').trim() || ''
+                      }
+                    });
+
+                    if (!result.success || !result.ledger) {
+                      throw new Error(result.message || 'Failed to create ledger');
+                    }
+
+                    const createdId = String((result.ledger as any).id);
+                    const createdName = String((result.ledger as any).name || name);
+                    
+                    setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
+                    setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
+                    setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
+
+                    setLineItems(prev => {
+                      const next = [...prev];
+                      if (!next[activeLedgerIndex]) return next;
+                      next[activeLedgerIndex] = { ...next[activeLedgerIndex], ledger: createdId };
+                      return next;
+                    });
+
+                    toast.success(result.message || 'Ledger created and synced with Tally');
+                    setShowLedgerSlideout(false);
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : 'Failed to create ledger';
+                    toast.error(msg);
+                  } finally {
+                    setSaving(false);
+                  }
                 }} 
                 className="h-12 px-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
               >
-                Create Ledger
+                {saving ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin mr-2" />
+                    Syncing with Tally...
+                  </>
+                ) : (
+                  'Create Ledger'
+                )}
               </Button>
             </div>
           </div>
@@ -1116,44 +1316,107 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
 
 function CustomTableSelect({ value, onChange, options, disabled, highlight, showCreate, onCreateClick }: any) {
   const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState('');
+
+  const filteredOptions = options.filter((opt: any) => {
+    const label = (opt?.name || opt || '').toString().toLowerCase();
+    return label.includes(search.toLowerCase());
+  });
   
   return (
-    <div className="relative">
-      <div 
-        onClick={() => !disabled && setOpen(!open)}
-        className={`w-full border-2 p-2 rounded-xl text-[13px] font-black outline-none flex items-center justify-between transition-all cursor-pointer ${
-          disabled 
-            ? 'border-transparent bg-transparent text-slate-800 cursor-default px-0' 
-            : `border-slate-100 bg-slate-50/50 hover:bg-white hover:border-slate-200 focus-within:border-blue-600 ${highlight && !value ? 'ring-4 ring-blue-600/5 border-blue-600 bg-white' : ''}`
-        }`}
-      >
-        <span className="truncate">{value || (disabled ? '—' : 'Select...')}</span>
-        {!disabled && <ChevronDown size={14} className="text-slate-300 shrink-0 stroke-[3px]" />}
-      </div>
-      
-      {open && (
-        <div className="absolute bottom-full left-0 w-full mb-2 bg-white border-2 border-slate-100 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] max-h-[250px] overflow-y-auto overflow-x-hidden p-2">
-          <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest px-3 py-2 border-b border-slate-50 mb-1">Select Option</div>
-          {options.map((opt: any) => (
-            <div 
-              key={opt.id || opt} 
-              className="px-3 py-2.5 text-[13px] font-black text-slate-600 hover:bg-blue-50 hover:text-blue-600 rounded-xl transition-all cursor-pointer flex items-center justify-between group"
-              onClick={() => { onChange(opt.name || opt); setOpen(false); }}
-            >
-              {opt.name || opt}
-              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-          ))}
-          {showCreate && (
-            <div 
-              className="mt-2 px-3 py-3 text-[13px] font-black text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-blue-500/20"
-              onClick={() => { onCreateClick(); setOpen(false); }}
-            >
-              <Plus size={16} strokeWidth={3} /> New Ledger
-            </div>
-          )}
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <div
+          role="button"
+          tabIndex={disabled ? -1 : 0}
+          className={[
+            'w-full h-[38px] px-3 rounded-xl border-2',
+            'flex items-center justify-between gap-2',
+            'text-[13px] font-bold',
+            'transition-all select-none outline-none',
+            disabled
+              ? 'cursor-not-allowed bg-slate-50 text-slate-400 border-slate-100'
+              : 'cursor-pointer bg-white text-slate-800 border-slate-200 hover:border-slate-300 hover:bg-slate-50/40 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10',
+            highlight && !value && !disabled ? 'ring-2 ring-blue-600/15 border-blue-500' : '',
+          ].join(' ')}
+          title={value ? String(value) : undefined}
+        >
+          <div className="min-w-0 flex-1 truncate">
+            {value || (disabled ? '—' : 'Select ledger…')}
+          </div>
+          {!disabled && <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />}
         </div>
-      )}
-    </div>
+      </Popover.Trigger>
+
+      <Popover.Portal>
+        <Popover.Content 
+          sideOffset={8} 
+          align="start" 
+          className="z-[100] w-[320px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2),0_0_0_1px_rgba(0,0,0,0.05)] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        >
+          <Command className="flex flex-col h-full">
+            <div className="p-2 border-b border-slate-50">
+              <div className="relative flex items-center">
+                <Search size={14} className="absolute left-3 text-slate-400" />
+                <Command.Input 
+                  value={search}
+                  onValueChange={setSearch}
+                  placeholder="Search ledgers..." 
+                  className="w-full bg-slate-50 border-none h-10 pl-9 pr-3 rounded-xl text-[13px] font-bold text-slate-700 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500/10"
+                />
+              </div>
+            </div>
+
+            <Command.List className="max-h-[280px] overflow-y-auto p-1.5 custom-scrollbar">
+              <Command.Empty className="text-center py-6">
+                <div className="text-[12px] font-bold text-slate-400 mb-1">No results found</div>
+                <div className="text-[10px] text-slate-300 uppercase tracking-widest font-black">Try a different name</div>
+              </Command.Empty>
+
+              <div className="px-2 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Ledger List
+              </div>
+
+              {filteredOptions.map((opt: any) => {
+                const label = opt?.name || opt;
+                const isSelected = value && String(value).toLowerCase() === String(label).toLowerCase();
+
+                return (
+                  <Command.Item
+                    key={opt?.id || label}
+                    onSelect={() => { onChange(label); setOpen(false); setSearch(''); }}
+                    className={[
+                      'px-3 py-2.5 rounded-xl mb-0.5',
+                      'text-[13px] font-bold',
+                      'flex items-center justify-between gap-3',
+                      'cursor-pointer transition-all outline-none',
+                      isSelected 
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                        : 'text-slate-700 hover:bg-slate-50 data-[selected=true]:bg-slate-50',
+                    ].join(' ')}
+                  >
+                    <div className="min-w-0 flex-1 truncate">{label}</div>
+                    {isSelected && <CheckCircle size={14} className="text-white shrink-0" />}
+                  </Command.Item>
+                );
+              })}
+            </Command.List>
+
+            {showCreate && (
+              <div className="p-2 border-t border-slate-50 bg-slate-50/50">
+                <button
+                  type="button"
+                  onClick={() => { onCreateClick(); setOpen(false); }}
+                  className="w-full h-11 px-4 flex items-center justify-center gap-2 text-[13px] font-black text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-[0.98]"
+                >
+                  <Plus size={16} strokeWidth={3} />
+                  Create New Ledger
+                </button>
+              </div>
+            )}
+          </Command>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

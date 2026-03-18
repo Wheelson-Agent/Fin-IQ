@@ -327,6 +327,41 @@ export async function getLedgerMasters(companyId?: string) {
     return rows;
 }
 
+export async function createLedgerMaster(data: {
+    name: string;
+    parent_group: string;
+    account_type: string;
+    company_id?: string | null;
+}) {
+    const name = (data.name || '').trim();
+    const parentGroup = (data.parent_group || '').trim();
+    const accountType = (data.account_type || '').trim();
+
+    if (!name) throw new Error('Ledger name is required');
+    if (!parentGroup) throw new Error('Parent group is required');
+    if (!accountType) throw new Error('Account type is required');
+
+    // De-dupe by (company_id, lower(name)) to avoid accidental duplicates.
+    const existing = await query(
+        `SELECT id, name, parent_group, account_type as ledger_type, is_active
+         FROM ledger_master
+         WHERE is_active = true
+           AND LOWER(name) = LOWER($1)
+           AND (company_id = $2 OR (company_id IS NULL AND $2 IS NULL))
+         LIMIT 1`,
+        [name, data.company_id ?? null]
+    );
+    if (existing.rows.length > 0) return existing.rows[0];
+
+    const inserted = await query(
+        `INSERT INTO ledger_master (company_id, name, parent_group, account_type, is_active)
+         VALUES ($1, $2, $3, $4, true)
+         RETURNING id, name, parent_group, account_type as ledger_type, is_active`,
+        [data.company_id ?? null, name, parentGroup, accountType]
+    );
+    return inserted.rows[0];
+}
+
 export async function getTdsSections() {
     // temporary mapping for old frontend
     const { rows } = await query(`SELECT tax_code as section, description, rate_percentage as rate_individual, rate_percentage as rate_company, is_active FROM tax_codes WHERE tax_authority = 'TDS' AND is_active = true ORDER BY tax_code`);
