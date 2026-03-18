@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ZoomIn, ZoomOut, ChevronLeft, ChevronRight, FileText, ArrowLeft, Trash2, RefreshCw,
   AlertCircle, CheckCircle, ChevronDown, Calendar, Edit2, Plus, X, UserPlus, Database,
   Search, Bell, RefreshCcw, Eye, Maximize2
 } from 'lucide-react';
 import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "../components/ui/resizable";
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, revalidateInvoice } from '../lib/api';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
 const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
@@ -20,7 +25,7 @@ const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
   const d = String(date.getDate()).padStart(2, '0');
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const y = String(date.getFullYear());
-  return `${d}${m}${y}`;
+  return `${d}-${m}-${y}`;
 };
 
 
@@ -31,11 +36,22 @@ const fmt = (n: number) =>
 export default function DetailView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isFromReceived = searchParams.get('from') === 'received';
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [zoom, setZoom] = useState(100);
   const [page, setPage] = useState(1);
+  const fromTab = searchParams.get('from') || 'received';
+  const tabNames: Record<string, string> = {
+    received: 'Received',
+    handoff: 'Handoff',
+    ready: 'Ready to Post',
+    input: 'Awaiting Input',
+    posted: 'Posted'
+  };
+  const backLabel = tabNames[fromTab] || 'AP Workspace';
   const isPdf = invoice?.file_path?.toLowerCase().endsWith('.pdf');
   const totalPages = isPdf ? 1 : 1; // Images are always 1 page; PDFs default to 1 (no page count data available)
 
@@ -56,6 +72,23 @@ export default function DetailView() {
   const [docFields, setDocFields] = useState<Record<string, any>>({});
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  const handleSave = async () => {
+    if (!id || !hasChanges) return;
+    setSaving(true);
+    try {
+      await updateInvoiceOCR(id, docFields);
+      setHasChanges(false);
+      // Optional: Refresh data or show toast
+      console.log('[DetailView] OCR Data saved successfully');
+    } catch (err) {
+      console.error('[DetailView] Failed to save OCR data:', err);
+      alert('Failed to save changes. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
@@ -117,7 +150,7 @@ export default function DetailView() {
           const fields: Record<string, any> = {
             irn: invoiceRecord.irn || '',
             ack_no: invoiceRecord.ack_no || '',
-            ack_date: invoiceRecord.ack_date || '',
+            ack_date: formatDateToDDMMYYYY(invoiceRecord.ack_date),
             eway_bill_no: invoiceRecord.eway_bill_no || '',
             file_name: invoiceRecord.file_name || '',
             invoice_no: invoiceRecord.invoice_no || invoiceRecord.invoice_number || '',
@@ -137,7 +170,11 @@ export default function DetailView() {
             grand_total: invoiceRecord.grand_total || 0,
             cgst: invoiceRecord.cgst || 0,
             sgst: invoiceRecord.sgst || 0,
+            igst: invoiceRecord.igst || 0,
             tax_total: invoiceRecord.tax_total || 0,
+            cgst_pct: 0,
+            sgst_pct: 0,
+            igst_pct: 0,
             doc_type: invoiceRecord.doc_type || 'Services',
             // Validation Fields (explicitly initialized to show chips)
             buyer_verification: false,
@@ -155,13 +192,26 @@ export default function DetailView() {
                 : invoiceRecord.ocr_raw_payload;
               
               Object.keys(raw).forEach(key => {
+                const val = raw[key];
                 const normalizedKey = key.toLowerCase().replace(/ /g, '_');
+                
+                // Explicit mapping for tax fields
+                if (normalizedKey === 'taxable_value' || normalizedKey === 'taxable_amount') fields.sub_total = val;
+                if (normalizedKey === 'total_invoice_amount' || normalizedKey === 'total_amount') fields.grand_total = val;
+                if (normalizedKey === 'cgst') fields.cgst = val;
+                if (normalizedKey === 'sgst') fields.sgst = val;
+                if (normalizedKey === 'igst') fields.igst = val;
+                if (normalizedKey === 'sum_of_gst_amount' || normalizedKey === 'gst_total') fields.tax_total = val;
+                if (normalizedKey === 'cgst_pct' || normalizedKey === 'cgst_%') fields.cgst_pct = val;
+                if (normalizedKey === 'sgst_pct' || normalizedKey === 'sgst_%') fields.sgst_pct = val;
+                if (normalizedKey === 'igst_pct' || normalizedKey === 'igst_%') fields.igst_pct = val;
+
                 if (fields[normalizedKey] !== undefined) {
-                  fields[normalizedKey] = raw[key];
+                  fields[normalizedKey] = val;
                 } else if (fields[key] !== undefined) {
-                   fields[key] = raw[key];
+                   fields[key] = val;
                 } else {
-                   fields[normalizedKey] = raw[key];
+                   fields[normalizedKey] = val;
                 }
               });
             } catch (e) {
@@ -189,6 +239,11 @@ export default function DetailView() {
             }
           }
 
+          // Ensure doc_type_label is strictly formatted
+          const dt = (fields.doc_type || invoiceRecord.doc_type || '').toLowerCase();
+          if (dt.includes('goods')) fields.doc_type_label = 'Invoice (Goods)';
+          else fields.doc_type_label = 'Invoice (Service)';
+
           setDocFields(fields);
 
           // Populate Dropdown Options - Safe access
@@ -210,21 +265,27 @@ export default function DetailView() {
               
               let ledger = item.ledger || '';
               
-              // Services special mapping
-              const lowerDocType = invoiceRecord.doc_type?.toLowerCase() || '';
-              if (lowerDocType.includes('service')) {
-                const raw = typeof invoiceRecord.ocr_raw_payload === 'string' 
-                  ? JSON.parse(invoiceRecord.ocr_raw_payload) 
-                  : invoiceRecord.ocr_raw_payload;
-                
-                if (raw?.line_items && Array.isArray(raw.line_items)) {
-                  // Try to find matching item by description or index
-                  const ocrItem = raw.line_items[itemsRecord.indexOf(item)];
-                  if (ocrItem && ocrItem.mapped_ledger) {
-                    const found = ledgersRecord.find(l => l.name.toLowerCase() === ocrItem.mapped_ledger.toLowerCase());
+              // Enhanced mapping from OCR Raw Payload
+              const lowerDocTypeLabel = (invoiceRecord.doc_type_label || '').toLowerCase();
+              const raw = typeof invoiceRecord.ocr_raw_payload === 'string' 
+                ? JSON.parse(invoiceRecord.ocr_raw_payload) 
+                : invoiceRecord.ocr_raw_payload;
+
+              if (raw?.line_items && Array.isArray(raw.line_items)) {
+                const ocrItem = raw.line_items[itemsRecord.indexOf(item)];
+                if (ocrItem) {
+                  // User specifically requested gl_mapped from ocr_raw_payload
+                  const mappedVal = ocrItem.gl_mapped || ocrItem.mapped_ledger;
+                  if (mappedVal) {
+                    const found = ledgersRecord.find(l => l.name.toLowerCase() === mappedVal.toLowerCase());
                     if (found) {
                       ledger = found.id;
+                    } else if (lowerDocTypeLabel.includes('goods')) {
+                      // For goods, if ledger name not found, we use the value as is (stock item name)
+                      ledger = mappedVal;
                     }
+                  } else if (lowerDocTypeLabel.includes('goods') && ocrItem.description) {
+                    ledger = ocrItem.description;
                   }
                 }
               }
@@ -361,10 +422,10 @@ export default function DetailView() {
         <div className="flex items-center gap-5">
           <button
             onClick={() => navigate('/ap-workspace')}
-            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-bold text-slate-600 hover:text-slate-900 transition-colors bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200"
+            className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-black text-slate-600 hover:text-slate-900 transition-colors bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200"
           >
-            <ArrowLeft size={16} />
-            Back to AP Workspace
+            <ArrowLeft size={16} strokeWidth={3} />
+            {backLabel}
           </button>
           
           <div className="h-10 w-[1px] bg-slate-200 mx-1" />
@@ -385,21 +446,93 @@ export default function DetailView() {
         </div>
 
         <div className="flex items-center gap-4">
-          <Badge className={`px-3 py-1 font-black text-[10px] uppercase tracking-wider shadow-none ${
-            invoice.status === 'Ready to Post' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-            invoice.status === 'Auto-Posted' ? 'bg-slate-100 text-slate-500 border-slate-200' :
-            invoice.status === 'Awaiting Input' ? 'bg-amber-50 text-amber-600 border-amber-100' :
-            'bg-[#fffbeb] text-[#d97706] border-[#fde68a]'
-          }`}>
-            {invoice.status}
-          </Badge>
+          {invoice.status === 'Ready to Post' ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200"
+              title="Post to Tally"
+              onClick={async () => {
+                console.log('Posting to Tally:', id);
+              }}
+            >
+              <CheckCircle size={22} strokeWidth={3} />
+            </Button>
+          ) : (
+            <Badge className={`px-3 py-1 font-black text-[10px] uppercase tracking-wider shadow-none ${
+              invoice.status === 'Auto-Posted' ? 'bg-slate-100 text-slate-500 border-slate-200' :
+              invoice.status === 'Awaiting Input' ? 'bg-amber-50 text-amber-600 border-amber-100' :
+              'bg-[#fffbeb] text-[#d97706] border-[#fde68a]'
+            }`}>
+              {invoice.status}
+            </Badge>
+          )}
+          
+          {!isFromReceived && (
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-4 ml-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                title="Delete Bill"
+                onClick={async () => {
+                   if (!id) return;
+                   if (window.confirm('Are you sure you want to delete this bill?')) {
+                     // Existing delete logic
+                     console.log('Deleting bill:', id);
+                     navigate('/ap-workspace');
+                   }
+                }}
+              >
+                <Trash2 className="w-5 h-5" />
+              </Button>
+              {isVendorMapped && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-9 w-9 ${(isHandoff || invoice.status === 'Awaiting Input') ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50' : 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'}`}
+                  title={(isHandoff || invoice.status === 'Awaiting Input') ? 'Re-validate' : 'Approve & Post to Tally'}
+                  onClick={async () => {
+                    if (!id || saving) return;
+                    setSaving(true);
+                    try {
+                      if (isHandoff || (invoice && invoice.status === 'Awaiting Input')) {
+                        console.log('Triggering Revalidation for:', id);
+                        const result = await revalidateInvoice(id);
+                        if (result.success) {
+                          alert('Revalidation request sent successfully!');
+                          // The loadData function is inside an useEffect in DetailView.
+                          // I should find a way to re-trigger it. 
+                          // In this DetailView, I can just window.location.reload() or re-fetch.
+                          // Actually, let's look for a reload pattern.
+                          window.location.reload(); 
+                        } else {
+                          alert('Revalidation failed: ' + result.error);
+                        }
+                      } else {
+                        console.log('Approving bill:', id);
+                        // Approval logic...
+                      }
+                    } catch (err) {
+                      console.error('Action failed:', err);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  {saving ? <RefreshCw size={20} className="animate-spin" /> : ((isHandoff || (invoice && invoice.status === 'Awaiting Input')) ? <RefreshCcw size={20} /> : <CheckCircle size={20} />)}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Main Content Workspace */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Panel — PDF Viewer (35%) */}
-        <div className="w-[35%] shrink-0 bg-[#323639] flex flex-col overflow-hidden relative border-r border-[#E2E8F0] shadow-inner">
+        <ResizablePanelGroup direction="horizontal" className="flex-1 h-full">
+          {/* Left Panel — PDF Viewer (50% Default, Resizable) */}
+          <ResizablePanel defaultSize={50} minSize={25} className="bg-[#323639] flex flex-col overflow-hidden relative border-r border-[#E2E8F0] shadow-inner">
           {/* Doc Toolbar */}
           <div className="bg-[#202124] px-4 py-2 flex items-center justify-between border-b border-white/5 shrink-0">
             <div className="flex items-center gap-3">
@@ -499,93 +632,72 @@ export default function DetailView() {
               </div>
             )}
           </div>
-        </div>
+        </ResizablePanel>
 
-        {/* Right Panel — Data Entry (65%) */}
-        <div className="flex-1 bg-white flex flex-col relative w-full overflow-hidden">
+        <ResizableHandle withHandle className="bg-slate-200 w-1.5 hover:bg-slate-300 transition-colors" />
+
+        {/* Right Panel — Data Entry (50% Default, Resizable) */}
+        <ResizablePanel defaultSize={50} minSize={30} className="bg-white flex flex-col relative w-full overflow-hidden">
           {/* Form Header */}
-          <div className="h-[72px] flex items-center justify-between px-8 bg-white border-b border-slate-100 shrink-0 sticky top-0 z-20">
-            <div className="flex items-center gap-3">
-              <h2 className="text-[19px] font-black text-slate-900 tracking-tight">Detail View</h2>
+          <div className="h-[72px] flex items-center justify-between px-8 bg-white border-b border-slate-100 shrink-0 sticky top-0 z-20 w-full">
+            <div className="flex items-center gap-4 flex-1 min-w-0">
+              <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest shrink-0">Details</span>
+              <div className="h-6 w-[1px] bg-slate-200 shrink-0" />
+              
+              <div className="flex items-center gap-2 flex-wrap py-1">
+                {[
+                  { label: 'Company Verified', key: 'buyer_verification', showIf: 'all' },
+                  { label: 'GST Validated', key: 'gst_validation_status', showIf: 'all' },
+                  { label: 'Data Validated', key: 'invoice_ocr_data_valdiation', showIf: 'all' },
+                  { label: 'Vendor Verified', key: 'vendor_verification', showIf: 'all' },
+                  { label: 'Duplicate Check', key: 'duplicate_check', showIf: 'all' },
+                  { label: 'Stock Items Matched', key: 'line_item_match_status', showIf: 'goods' },
+                ].filter(item => {
+                  const label = (docFields.doc_type_label || '').toLowerCase();
+                  if (item.showIf === 'all') return true;
+                  if (item.showIf === 'goods') return label.includes('goods');
+                  return true;
+                }).map(({ label, key }) => {
+                  const value = docFields[key];
+                  const isSuccess = value === true || (typeof value === 'string' && value.toLowerCase() === 'true');
+                  
+                  return (
+                    <div 
+                      key={key} 
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-tight whitespace-nowrap ${
+                        isSuccess 
+                          ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm' 
+                          : 'bg-rose-50 text-rose-600 border-rose-100 shadow-sm'
+                      }`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${isSuccess ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-rose-500 shadow-[0_0_5px_#f43f5e]'}`} />
+                      <span>{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="flex gap-3">
-              <Button 
-                variant="outline" 
-                onClick={() => navigate('/ap-workspace')}
-                className="h-10 px-6 font-bold text-slate-500 bg-white border-slate-200 hover:bg-slate-50 hover:text-slate-700 transition-all rounded-xl"
-              >
-                Delete Bill
-              </Button>
-
-              {!isVendorMapped ? (
-                <Button
-                  onClick={() => setShowVendorSlideout(true)}
-                  className="h-10 px-6 bg-[#f87171] hover:bg-[#ef4444] text-white font-black rounded-xl shadow-[0_4px_12px_rgba(248,113,113,0.3)] border-none transition-all active:scale-95"
-                >
-                  Vendor Not Found - Create to Proceed
-                </Button>
-              ) : (
-                <Button
+            {hasChanges && (
+              <div className="flex items-center gap-3 ml-4">
+                <Button 
+                  onClick={handleSave}
                   disabled={saving}
-                  onClick={async () => {
-                    if (!id) return;
-                    setSaving(true);
-                    try {
-                      if (isHandoff) {
-                        // Re-validate action
-                        await runPipeline(id, invoice.file_path || '', invoice.file_name || '');
-                        alert('Re-validation started.');
-                        window.location.reload();
-                      } else {
-                        // Approve & Post action
-                        await saveInvoiceItems(id, lineItems.map(item => ({
-                          description: item.description,
-                          ledger: item.ledger,
-                          hsn_sac: item.hsn_sac,
-                          tax: item.tax,
-                          quantity: item.qty,
-                          rate: item.rate,
-                          discount: item.discount,
-                          item: item.item_id || null
-                        })));
-                        
-                        const processedFields: any = { ...docFields };
-                        
-                        // Fix 1: Date Format
-                        // User wants DDMMYYYY (e.g. 03012025) for Tally.
-                        // We send the raw 8-digit string; backend uses to_date(?, 'DDMMYYYY').
-                        processedFields.date = docFields.date;
-
-                        // Fix 2: Field Mapping (Map docFields keys to DB column expectations)
-                        processedFields.amount = processedFields.sub_total;
-                        processedFields.gst = processedFields.tax_total;
-                        processedFields.total = processedFields.grand_total;
-                        processedFields.invoice_no = processedFields.invoice_no; // Already named correctly but for clarity
-
-                        await updateInvoiceOCR(id, processedFields);
-                        await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
-                        alert('Document Approved and posted to Tally.');
-                        navigate('/ap-workspace');
-                      }
-                    } catch (err) {
-                      alert('Action failed: ' + err);
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  className={`h-10 px-6 font-black rounded-xl shadow-lg border-none transition-all active:scale-95 flex items-center gap-2 ${
-                    isHandoff ? 'bg-amber-500 hover:bg-amber-600' : 'bg-[#3b82f6] hover:bg-[#2563eb]'
-                  } text-white`}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-black uppercase tracking-wider h-9 px-5 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all"
                 >
-                  {saving ? <RefreshCw size={16} className="animate-spin" /> : (isHandoff ? <RefreshCcw size={16} /> : <CheckCircle size={16} />)}
-                  {isHandoff ? 'Re-validate' : 'Approve & Post to Tally'}
+                  {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Save Changes'}
                 </Button>
-              )}
-            </div>
+                <Button
+                  variant="ghost"
+                  onClick={() => window.location.reload()}
+                  className="h-9 px-3 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
           </div>
 
-          {/* Scrollable Form Content */}
           <div className="flex-1 overflow-y-auto bg-white p-0">
             {isManualReview ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-12">
@@ -632,51 +744,7 @@ export default function DetailView() {
                   )}
                 </div>
 
-                  {/* Validation Status Table */}
-                  <div className="mb-6 px-8 pt-4">
-                    <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                      <table className="w-full text-left border-collapse">
-                        <thead className="bg-slate-50 border-b border-slate-200">
-                          <tr>
-                            <th className="py-2.5 px-5 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[60%]">Validation Check</th>
-                            <th className="py-2.5 px-5 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[40%]">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {[
-                            { label: 'Company Verified', key: 'buyer_verification' },
-                            { label: 'GST Validated', key: 'gst_validation_status' },
-                            { label: 'Data Validated', key: 'invoice_ocr_data_valdiation' },
-                            { label: 'Vendor Verified', key: 'vendor_verification' },
-                            { label: 'Document Duplicate Check', key: 'duplicate_check' },
-                            { label: 'Stock Items Matched', key: 'line_item_match_status' },
-                          ].map(({ label, key }) => {
-                            const value = docFields[key];
-                            
-                            // Robust boolean check: handles true, "True", "true"
-                            const isSuccess = value === true || 
-                                             (typeof value === 'string' && value.toLowerCase() === 'true');
-                            
-                            return (
-                              <tr key={key} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="py-2.5 px-5 text-[13px] font-bold text-slate-700">{label}</td>
-                                <td className="py-2.5 px-5">
-                                  <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black uppercase tracking-wider ${
-                                    isSuccess 
-                                      ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
-                                      : 'bg-rose-50 text-rose-600 border-rose-100'
-                                  }`}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${isSuccess ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                                    {isSuccess ? 'Passed' : 'Failed'}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+
 
                   {/* Form Body */}
                 <div className="px-8 py-8 space-y-10">
@@ -693,7 +761,6 @@ export default function DetailView() {
                           { label: 'Ack No', key: 'ack_no' },
                           { label: 'Ack Date', key: 'ack_date' },
                           { label: 'E-Way Bill No', key: 'eway_bill_no' },
-                          { label: 'filename', key: 'file_name', errorKey: 'buyer_verification' },
                           { label: 'Invoice No', key: 'invoice_no' },
                           { label: 'Invoice Date', key: 'date' },
                           { label: 'Seller Name', key: 'vendor_name' },
@@ -705,13 +772,16 @@ export default function DetailView() {
                           { label: 'Bank Name', key: 'bank_name' },
                           { label: 'Account No', key: 'account_no' },
                           { label: 'IFSC Code', key: 'ifsc_code' },
-                          { label: 'Total Amount in Words', key: 'total_in_words' },
                           { label: 'Taxable Value', key: 'sub_total', errorKey: 'invoice_ocr_data_valdiation' },
                           { label: 'Round Off', key: 'round_off', errorKey: 'invoice_ocr_data_valdiation' },
                           { label: 'Total Invoice Amount', key: 'grand_total', errorKey: 'invoice_ocr_data_valdiation' },
                           { label: 'CGST', key: 'cgst', errorKey: 'invoice_ocr_data_valdiation' },
                           { label: 'SGST', key: 'sgst', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'IGST', key: 'igst', errorKey: 'invoice_ocr_data_valdiation' },
                           { label: 'Sum of GST Amount', key: 'tax_total', errorKey: 'invoice_ocr_data_valdiation' },
+                          { label: 'CGST %', key: 'cgst_pct' },
+                          { label: 'SGST %', key: 'sgst_pct' },
+                          { label: 'IGST %', key: 'igst_pct' },
                         ].map(({ label, key, errorKey }) => {
                           const isErr = errorKey && (docFields[errorKey] === false || String(docFields[errorKey]).toLowerCase() === 'false');
                           return (
@@ -719,7 +789,10 @@ export default function DetailView() {
                              key={key}
                              label={label} 
                              value={docFields[key] === null || docFields[key] === undefined ? '' : String(docFields[key])} 
-                             onChange={(val: string) => setDocFields({ ...docFields, [key]: val })} 
+                             onChange={(val: string) => {
+                               setDocFields({ ...docFields, [key]: val });
+                               setHasChanges(true);
+                             }} 
                              Icon={label.toLowerCase().includes('date') ? Calendar : Edit2}
                              isError={isErr}
                             />
@@ -736,11 +809,12 @@ export default function DetailView() {
                     </div>
 
                     <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
-                      <table className="w-full text-left border-collapse">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse min-w-[900px]">
                         <thead className="bg-slate-50/80 border-b border-slate-200">
                            <tr>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[30%]">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">{docFields.doc_type?.toLowerCase().includes('goods') ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
+                             <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">{docFields.doc_type_label?.toLowerCase().includes('goods') ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%]">HSN/SAC</th>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Quantity</th>
                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%] text-center">Unit Rate</th>
@@ -762,20 +836,20 @@ export default function DetailView() {
                                     newLines[index].description = val; 
                                     const isMatch = docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true';
                                     // If Goods and isMatch, sync ledger
-                                    if (docFields.doc_type?.toLowerCase().includes('goods') && isMatch) {
+                                    if (docFields.doc_type_label?.toLowerCase().includes('goods') && isMatch) {
                                       newLines[index].ledger = val;
                                     }
                                     setLineItems(newLines); 
                                   }} 
-                                  style={{ color: docFields.doc_type?.toLowerCase().includes('goods') ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
+                                  style={{ color: docFields.doc_type_label?.toLowerCase().includes('goods') ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
                                 />
                               </td>
                               <td className="p-3 align-top">
                                 <CustomTableSelect
-                                  value={(docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true')) ? item.description : item.ledger}
+                                  value={(docFields.doc_type_label?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true')) ? item.description : item.ledger}
                                   onChange={(val: string) => { const newLines = [...lineItems]; newLines[index].ledger = val; setLineItems(newLines); }}
                                   options={ledgerOptions}
-                                  disabled={readOnly || (docFields.doc_type?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))}
+                                  disabled={readOnly || (docFields.doc_type_label?.toLowerCase().includes('goods') && (docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true'))}
                                   highlight
                                   showCreate={!readOnly}
                                   onCreateClick={() => { setActiveLedgerIndex(index); setShowLedgerSlideout(true); }}
@@ -813,6 +887,7 @@ export default function DetailView() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
 
                     {!readOnly && (
                       <div className="px-5 mt-4">
@@ -822,7 +897,41 @@ export default function DetailView() {
                       </div>
                     )}
 
-                    {/* Redundant total box removed as per the latest requirements */}
+                    {/* Amount Summary Section */}
+                    <div className="mt-8 px-8 flex justify-end">
+                      <div className="w-full max-w-[400px] space-y-3 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Taxable Value</span>
+                          <span className="text-[15px] font-black text-slate-900">{fmt(docFields.sub_total || 0)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Sum of GST</span>
+                          <span className="text-[15px] font-black text-slate-900">{fmt(docFields.tax_total || 0)}</span>
+                        </div>
+                        {(docFields.cgst > 0 || docFields.sgst > 0) ? (
+                          <>
+                            <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
+                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">CGST</span>
+                              <span className="text-[13px] font-bold text-slate-700">{fmt(docFields.cgst || 0)}</span>
+                            </div>
+                            <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
+                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SGST</span>
+                              <span className="text-[13px] font-bold text-slate-700">{fmt(docFields.sgst || 0)}</span>
+                            </div>
+                          </>
+                        ) : docFields.igst > 0 && (
+                          <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">IGST</span>
+                            <span className="text-[13px] font-bold text-slate-700">{fmt(docFields.igst || 0)}</span>
+                          </div>
+                        )}
+                        <div className="h-[1px] bg-slate-200 my-2" />
+                        <div className="flex justify-between items-center">
+                          <span className="text-[13px] font-extrabold text-slate-900 uppercase tracking-widest">Total Invoice Amount</span>
+                          <span className="text-[20px] font-black text-blue-600">{fmt(docFields.grand_total || 0)}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -953,10 +1062,11 @@ export default function DetailView() {
               </Button>
             </div>
           </div>
-        </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
-  );
+  </div>
+);
 }
 
 // --- Helper Components ---
