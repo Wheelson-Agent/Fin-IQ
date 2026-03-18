@@ -661,7 +661,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             finalStatus = 'Ready to Post';
         } else if (isDuplicate || !allPassed || invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
             // Any failure or duplicate check is true must NOT be Ready to Post
-            finalStatus = 'Awaiting Input';
+            // Directing to 'Handoff' for manual review as per user request
+            finalStatus = 'Handoff';
         }
 
         // --- POSTING RULES EVALUATION ---
