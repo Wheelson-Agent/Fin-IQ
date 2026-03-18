@@ -135,7 +135,7 @@ export async function sendToTallyPrime(payload: Record<string, any>): Promise<{
 }
 
 const N8N_VENDOR_CREATE_WEBHOOK =
-    process.env.N8N_VENDOR_CREATE_URL || 'https://wheelsonai.app.n8n.cloud/webhook/tally-vendor-creation';
+    process.env.N8N_VENDOR_CREATE_URL || process.env.N8N_MASTER_WEBHOOK_URL || 'https://wheelsonai.app.n8n.cloud/webhook/tally-master-creation';
 
 /**
  * Send vendor creation payload to the n8n vendor-creation webhook.
@@ -179,7 +179,7 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
             return { success: false, message: errMsg, data };
         }
 
-        const success = data && data.success === true;
+        const success = data && (data.success === true || data.status === 'success');
         const message = (data && (data.message || data.error)) || (success ? 'Vendor created successfully in Tally' : 'Vendor creation failed');
         if (success) {
             console.log('[N8N] ✅ Vendor creation webhook success');
@@ -235,13 +235,13 @@ export async function sendLedgerCreationToN8n(payload: Record<string, any>): Pro
 
         const success = data && (data.success === true || data.status === 'success');
         const message = (data && (data.message || data.error)) || (success ? 'Ledger created successfully in Tally' : 'Ledger creation failed');
-        
+
         if (success) {
             console.log('[N8N] ✅ Ledger creation webhook success');
         } else {
             console.warn('[N8N] Ledger creation webhook returned success=false');
         }
-        
+
         return { success, message, data };
     } catch (error: any) {
         console.error('[N8N] ❌ Ledger creation webhook failed:', error.message);
