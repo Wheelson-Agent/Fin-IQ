@@ -33,12 +33,18 @@ import { query, pool } from './connection';
 export async function getAllInvoices(companyId?: string) {
     let sql = `
         SELECT *, 
-               invoice_number as invoice_no, 
+               COALESCE(invoice_number, 'Unknown Invoice') as invoice_no, 
                invoice_date as date, 
+               created_at as uploaded_date,
                processing_status as status,
                sub_total as amount,
                tax_total as gst,
                grand_total as total,
+               CASE 
+                 WHEN LOWER(doc_type) LIKE '%goods%' THEN 'Invoice (Goods)'
+                 WHEN LOWER(doc_type) LIKE '%service%' THEN 'Invoice (Service)'
+                 ELSE 'Invoice (Service)'
+               END as doc_type_label,
                (SELECT COUNT(*) FROM ap_invoice_lines WHERE ap_invoice_id = ap_invoices.id)::int as items_count
         FROM ap_invoices
     `;
@@ -64,12 +70,18 @@ export async function getAllInvoices(companyId?: string) {
 export async function getInvoiceById(id: string) {
     const result = await query(`
         SELECT *, 
-               invoice_number as invoice_no, 
+               COALESCE(invoice_number, 'Unknown Invoice') as invoice_no, 
                invoice_date as date, 
+               created_at as uploaded_date,
                processing_status as status,
                sub_total as amount,
                tax_total as gst,
-               grand_total as total
+               grand_total as total,
+               CASE 
+                 WHEN LOWER(doc_type) LIKE '%goods%' THEN 'Invoice (Goods)'
+                 WHEN LOWER(doc_type) LIKE '%service%' THEN 'Invoice (Service)'
+                 ELSE 'Invoice (Service)'
+               END as doc_type_label
         FROM ap_invoices 
         WHERE id = $1
     `, [id]);
@@ -141,6 +153,8 @@ export async function updateInvoiceWithOCR(id: string, data: {
        invoice_date = CASE 
            WHEN $4 ~ '^\d{8}$' THEN to_date($4, 'DDMMYYYY')
            WHEN $4 ~ '^\d{4}-\d{2}-\d{2}$' THEN $4::date
+           WHEN $4 ~ '^\d{2}-\d{2}-\d{4}$' THEN to_date($4, 'DD-MM-YYYY')
+           WHEN $4 ~ '^\d{2}/\d{2}/\d{4}$' THEN to_date($4, 'DD/MM/YYYY')
            ELSE invoice_date 
        END,
        due_date = COALESCE($5::date, due_date),
@@ -568,6 +582,16 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
 
         const invData = payload.ap_invoices && Array.isArray(payload.ap_invoices) ? payload.ap_invoices[0] : (payload.ap_invoices || payload);
 
+        // --- CANONICAL SOURCE-TO-TARGET RULE ---
+        // Explicitly preserve the full ocr_raw_payload from the n8n response array if it exists.
+        // This ensures no keys, nested objects, or arrays (like line_items) are lost.
+        const canonicalRawPayload = payload.ap_invoices?.[0]?.ocr_raw_payload;
+        if (canonicalRawPayload && typeof canonicalRawPayload === 'object') {
+            invData.ocr_raw_payload = canonicalRawPayload;
+        } else {
+            console.warn(`[DB] ingestN8nData: Canonical ocr_raw_payload missing in payload.ap_invoices[0]. File: ${invData.file_name || 'unknown'}`);
+        }
+
         // 1. Vendor Upsert (Auto-creation of vendors if missing)
         let vendorId = invData.vendor_id;
         if (!vendorId && invData.vendor_name) {
@@ -672,7 +696,13 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             const invKeys = Object.keys(invData).filter(k => allowedApInvoicesCols.includes(k) && invData[k] !== undefined);
             if (invKeys.length > 0) {
                 const setClause = invKeys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-                const invParams = invKeys.map(k => invData[k]);
+                const invParams = invKeys.map(k => {
+                    // Explicitly stringify the full payload object for JSONB persistence
+                    if (k === 'ocr_raw_payload' && typeof invData[k] === 'object') {
+                        return JSON.stringify(invData[k]);
+                    }
+                    return invData[k];
+                });
                 const updateSql = `UPDATE ap_invoices SET ${setClause}, updated_at = NOW() WHERE id = $1`;
                 await client.query(updateSql, [invoiceId, ...invParams]);
             }

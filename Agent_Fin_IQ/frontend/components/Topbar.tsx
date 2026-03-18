@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Bell, ChevronDown, Palette, Circle, Check, Wifi, WifiOff, RefreshCw, Building2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { DateRangeValue } from '../context/DateContext';
+import { Calendar } from '../components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+import { format, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, isSameDay, startOfDay, endOfDay } from 'date-fns';
 
 type Theme = 'color' | 'mono';
 
 /**
  * Connection status for a single service.
- * - 'connected'   → Green dot (solid)
- * - 'connecting'  → Yellow dot (blinks light↔dark)
- * - 'disconnected'→ Red dot (solid)
  */
 type ServiceStatus = 'connected' | 'connecting' | 'disconnected';
 
@@ -24,32 +25,26 @@ interface TopbarProps {
     theme: Theme;
     onToggleTheme: (t: Theme) => void;
     onRefresh?: () => void;
-    selectedCompany?: string; // Display Name
-    selectedCompanyId?: string; // ID or 'ALL'
+    selectedCompany?: string; 
+    selectedCompanyId?: string; 
     onCompanyChange?: (id: string) => void;
     companies?: any[];
-    dateFilter?: string;
-    setDateFilter?: (filter: string) => void;
+    dateFilter?: DateRangeValue;
+    setDateFilter?: (filter: DateRangeValue) => void;
+    notifications?: any[];
 }
 
-/**
- * Compute the combined status from n8n + OCR.
- * Worst state wins: disconnected > connecting > connected
- */
 function getCombinedStatus(n8n: ServiceStatus, ocr: ServiceStatus): ServiceStatus {
     if (n8n === 'disconnected' || ocr === 'disconnected') return 'disconnected';
     if (n8n === 'connecting' || ocr === 'connecting') return 'connecting';
     return 'connected';
 }
 
-/**
- * Status dot colors for each state.
- */
 function getStatusColor(status: ServiceStatus): string {
     switch (status) {
-        case 'connected': return '#22C55E';    // green
-        case 'connecting': return '#EAB308';   // yellow
-        case 'disconnected': return '#EF4444'; // red
+        case 'connected': return '#22C55E';
+        case 'connecting': return '#EAB308';
+        case 'disconnected': return '#EF4444';
     }
 }
 
@@ -61,12 +56,9 @@ function getStatusLabel(status: ServiceStatus): string {
     }
 }
 
-/**
- * CSS keyframes for the yellow blinking animation.
- * Injected once into the document head.
- */
 const BLINK_STYLE_ID = 'agent-tally-blink-style';
 function ensureBlinkStyle() {
+    if (typeof document === 'undefined') return;
     if (document.getElementById(BLINK_STYLE_ID)) return;
     const style = document.createElement('style');
     style.id = BLINK_STYLE_ID;
@@ -82,87 +74,96 @@ function ensureBlinkStyle() {
     document.head.appendChild(style);
 }
 
-/**
- * ConnectionStatusIndicator — Shows n8n + OCR connection health.
- *
- * HOW EACH CHECK WORKS (no simulation):
- *   n8n  → IPC 'status:check-n8n'  → Electron sends HTTP HEAD to the webhook
- *          URL from .env. If it responds (any status) → green. Timeout/refused → red.
- *   OCR  → IPC 'status:check-ocr'  → Electron runs `python --version` AND
- *          checks if GOOGLE_SERVICE_ACCOUNT_PATH file exists. Both must pass → green.
- *
- * In browser dev mode (no Electron), both show red (disconnected) since
- * there's no IPC bridge — this is honest, not simulated.
- */
 function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
     const [n8nStatus, setN8nStatus] = useState<ServiceStatus>('connecting');
     const [ocrStatus, setOcrStatus] = useState<ServiceStatus>('connecting');
+    const [n8nRetries, setN8nRetries] = useState(0);
+    const [ocrRetries, setOcrRetries] = useState(0);
 
     useEffect(() => {
         ensureBlinkStyle();
     }, []);
 
-    // Poll every 15 seconds via real IPC
+    // Listen for pushed updates and perform initial check
     useEffect(() => {
-        async function checkServices() {
-            // n8n: calls Electron → HTTP HEAD to webhook URL
+        async function initialCheck() {
             try {
                 const api = (window as any).api;
                 if (api?.invoke) {
-                    const ok = await api.invoke('status:check-n8n');
-                    setN8nStatus(ok ? 'connected' : 'disconnected');
-                } else {
-                    // No Electron IPC available (plain browser) → disconnected
-                    setN8nStatus('disconnected');
+                    // Initial n8n status
+                    const n8nFull = await api.invoke('status:get-n8n-full');
+                    setN8nStatus(n8nFull === 'live' ? 'connected' : (n8nFull === 'offline' ? 'disconnected' : 'connecting'));
+                    
+                    // Initial OCR check (still manual for now as it's less frequent)
+                    const ocrOk = await api.invoke('status:check-ocr');
+                    setOcrStatus(ocrOk ? 'connected' : 'disconnected');
                 }
-            } catch {
-                setN8nStatus('disconnected');
-            }
-
-            // OCR: calls Electron → python --version + creds file check
-            try {
-                const api = (window as any).api;
-                if (api?.invoke) {
-                    const ok = await api.invoke('status:check-ocr');
-                    setOcrStatus(ok ? 'connected' : 'disconnected');
-                } else {
-                    setOcrStatus('disconnected');
-                }
-            } catch {
-                setOcrStatus('disconnected');
+            } catch (err) {
+                console.warn('[Topbar] Initial status check failed', err);
             }
         }
 
-        checkServices();
-        const interval = setInterval(checkServices, 15000);
-        return () => clearInterval(interval);
+        initialCheck();
+
+        const api = (window as any).api;
+        if (api?.on) {
+            // Listen for background pushes
+            api.on('n8n:status-update', (data: any) => {
+                if (data.service === 'n8n') {
+                    setN8nStatus(data.status === 'live' ? 'connected' : (data.status === 'offline' ? 'disconnected' : 'connecting'));
+                }
+            });
+        }
     }, []);
 
-    const combined = getCombinedStatus(n8nStatus, ocrStatus);
-    const color = getStatusColor(combined);
+    // Logic: 
+    // - Steady Green: Both connected (0 retries)
+    // - Blinking Yellow: Either is 'connecting' (retries 1-4)
+    // - Steady Red: Either is 'disconnected' (5+ retries)
+    
+    let visualStatus: ServiceStatus = 'connected';
+    if (n8nStatus === 'disconnected' || ocrStatus === 'disconnected') {
+        visualStatus = 'disconnected';
+    } else if (n8nStatus === 'connecting' || ocrStatus === 'connecting') {
+        visualStatus = 'connecting';
+    }
+
+    const color = getStatusColor(visualStatus);
 
     return (
-        <div
-            className="flex items-center ml-[2px]"
-            title={`n8n: ${getStatusLabel(n8nStatus)} · OCR: ${getStatusLabel(ocrStatus)}`}
-        >
-            <div
-                className={`w-[8px] h-[8px] rounded-full shrink-0 ${combined === 'connecting' ? 'status-dot-blink' : ''}`}
-                style={combined !== 'connecting' ? { backgroundColor: color, boxShadow: `0 0 6px ${color}80` } : {}}
+        <div className="flex items-center ml-[2px]" title={`n8n: ${getStatusLabel(n8nStatus)} (${n8nRetries}/5) · OCR: ${getStatusLabel(ocrStatus)} (${ocrRetries}/5)`}>
+            <div 
+                className={`w-[8px] h-[8px] rounded-full shrink-0 ${visualStatus === 'connecting' ? 'status-dot-blink' : ''}`} 
+                style={visualStatus !== 'connecting' 
+                    ? { backgroundColor: color, boxShadow: `0 0 6px ${color}80` } 
+                    : {}
+                } 
             />
         </div>
     );
 }
 
-export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme, onRefresh, selectedCompany, selectedCompanyId, onCompanyChange, companies = [], dateFilter, setDateFilter }: TopbarProps) {
+const presets = [
+    { label: 'All', getValue: () => ({ from: undefined, to: undefined }) },
+    { label: 'Today', getValue: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
+    { label: 'This Week', getValue: () => ({ from: startOfWeek(new Date(), { weekStartsOn: 1 }), to: endOfWeek(new Date(), { weekStartsOn: 1 }) }) },
+    { label: 'Last 7 Days', getValue: () => ({ from: startOfDay(subDays(new Date(), 6)), to: endOfDay(new Date()) }) },
+    { label: 'This Month', getValue: () => ({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) }) },
+    { label: 'Last 30 Days', getValue: () => ({ from: startOfDay(subDays(new Date(), 29)), to: endOfDay(new Date()) }) },
+    { label: 'Last 3 Months', getValue: () => ({ from: startOfMonth(subMonths(new Date(), 2)), to: endOfMonth(new Date()) }) },
+];
+
+export function Topbar({ 
+    onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme, onRefresh, 
+    selectedCompany, selectedCompanyId, onCompanyChange, companies = [], 
+    dateFilter, setDateFilter, notifications = [] 
+}: TopbarProps) {
     const isMono = theme === 'mono';
     const [themeOpen, setThemeOpen] = useState(false);
     const [companyOpen, setCompanyOpen] = useState(false);
-    const [dateOpen, setDateOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const dropRef = useRef<HTMLDivElement>(null);
     const companyDropRef = useRef<HTMLDivElement>(null);
-    const dateDropRef = useRef<HTMLDivElement>(null);
     const active = themes.find(t => t.id === theme)!;
 
     const currentCompany = selectedCompany || 'All Companies';
@@ -170,97 +171,109 @@ export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme
     const handleRefresh = async () => {
         if (isRefreshing) return;
         setIsRefreshing(true);
-        if (onRefresh) {
-            onRefresh();
-        } else {
-            // Dispatch a custom event that pages can listen to
-            window.dispatchEvent(new CustomEvent('app:refresh'));
-        }
-        // Auto-stop spinner after 1.5s
+        if (onRefresh) onRefresh();
+        else window.dispatchEvent(new CustomEvent('app:refresh'));
         setTimeout(() => setIsRefreshing(false), 1500);
     };
 
     useEffect(() => {
         function handleClick(e: MouseEvent) {
-            if (dropRef.current && !dropRef.current.contains(e.target as Node)) {
-                setThemeOpen(false);
-            }
-            if (companyDropRef.current && !companyDropRef.current.contains(e.target as Node)) {
-                setCompanyOpen(false);
-            }
-            if (dateDropRef.current && !dateDropRef.current.contains(e.target as Node)) {
-                setDateOpen(false);
-            }
+            if (dropRef.current && !dropRef.current.contains(e.target as Node)) setThemeOpen(false);
+            if (companyDropRef.current && !companyDropRef.current.contains(e.target as Node)) setCompanyOpen(false);
         }
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
     }, []);
 
+    const getDateLabel = () => {
+        if (!dateFilter) return 'Filter Date';
+        if (dateFilter.label && dateFilter.label !== 'Custom Range') return dateFilter.label;
+        if (dateFilter.from && dateFilter.to) {
+            if (isSameDay(dateFilter.from, dateFilter.to)) return format(dateFilter.from, 'MMM d, yyyy');
+            return `${format(dateFilter.from, 'MMM d')} - ${format(dateFilter.to, 'MMM d, yyyy')}`;
+        }
+        return 'Filter Date';
+    };
+
     return (
-        <div className={`h-[56px] backdrop-blur-[12px] border-b flex items-center justify-between px-[28px] shrink-0 relative z-10 w-full transition-colors duration-300 ${isMono ? 'bg-white/95 border-[#e4e4e7] shadow-[0_1px_0_rgba(0,0,0,0.06)]' : 'bg-white/90 border-[#D0D9E8]/50 shadow-[0_1px_0_rgba(0,0,0,0.04),_0_4px_12px_rgba(13,27,42,0.04)]'}`}>
+        <div className={`h-[56px] backdrop-blur-[12px] border-b flex items-center justify-between px-[28px] shrink-0 relative z-50 w-full transition-colors duration-300 ${isMono ? 'bg-white/95 border-[#e4e4e7] shadow-[0_1px_0_rgba(0,0,0,0.06)]' : 'bg-white/90 border-[#D0D9E8]/50 shadow-[0_1px_0_rgba(0,0,0,0.04),_0_4px_12px_rgba(13,27,42,0.04)]'}`}>
             <div className="flex items-center gap-[12px]">
                 <div className={`flex items-center gap-[6px] text-[12px] ${isMono ? 'text-[#71717a]' : 'text-[#4A5568]'}`}>
                     <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>agent_w</span>
-                    {/* ── Connection Status Indicator ── */}
                     <ConnectionStatusIndicator isMono={isMono} />
-                    <span className={isMono ? 'text-[#e4e4e7]' : 'text-[#D0D9E8]'}>›</span>
-                    <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>{pageTitle}</span>
+                    {pageTitle !== 'AP Workspace' && (
+                        <>
+                            <span className={isMono ? 'text-[#e4e4e7]' : 'text-[#D0D9E8]'}>›</span>
+                            <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>{pageTitle}</span>
+                        </>
+                    )}
                 </div>
 
-                {/* ── Date Filter Dropdown ── */}
+                {/* Date Filter */}
                 {dateFilter && setDateFilter && (
-                    <div ref={dateDropRef} className="relative mr-1">
-                        <button
-                            onClick={() => setDateOpen(v => !v)}
-                            className={`flex items-center gap-[6px] h-[30px] px-[12px] rounded-[7px] border text-[11px] font-semibold transition-all duration-200 select-none ${isMono
-                                ? 'border-[#e4e4e7] bg-[#f4f4f5] text-[#09090b] hover:border-[#d4d4d8]'
-                                : 'border-[#D0D9E8] bg-white text-[#1A2640] hover:border-[#b8c8e0]'
-                                } ${dateOpen ? (isMono ? 'border-[#09090b] shadow-[0_0_0_2px_rgba(0,0,0,0.06)]' : 'border-[#1E6FD9] shadow-[0_0_0_2px_rgba(30,111,217,0.1)]') : ''}`}
-                        >
-                            <span>{dateFilter}</span>
-                            <motion.div animate={{ rotate: dateOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                className={`flex items-center gap-[6px] h-[30px] px-[12px] rounded-[7px] border text-[11px] font-semibold transition-all duration-200 select-none ${isMono
+                                    ? 'border-[#e4e4e7] bg-[#f4f4f5] text-[#09090b] hover:border-[#d4d4d8]'
+                                    : 'border-[#D0D9E8] bg-white text-[#1A2640] hover:border-[#b8c8e0]'
+                                    }`}
+                            >
+                                <span>{getDateLabel()}</span>
                                 <ChevronDown size={11} className={isMono ? 'text-[#71717a]' : 'text-[#8899AA]'} />
-                            </motion.div>
-                        </button>
-
-                        <AnimatePresence>
-                            {dateOpen && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                                    transition={{ duration: 0.15, ease: 'easeOut' }}
-                                    className={`absolute left-0 top-[calc(100%+6px)] w-[160px] rounded-[10px] shadow-[0_8px_32px_rgba(0,0,0,0.12)] border overflow-hidden z-50 ${isMono ? 'bg-white border-[#e4e4e7]' : 'bg-white border-[#D0D9E8]'}`}
-                                >
-                                    <div className={`px-[10px] pt-[8px] pb-[4px] text-[9px] font-black uppercase tracking-[1.2px] ${isMono ? 'text-[#a1a1aa]' : 'text-[#8899AA]'}`}>
-                                        Date Range
-                                    </div>
-                                    {['All', 'Today', 'This Week', 'This Month', 'Custom...'].map(opt => {
-                                        const isActive = opt === dateFilter;
-                                        return (
-                                            <button
-                                                key={opt}
-                                                onClick={() => { setDateFilter(opt); setDateOpen(false); }}
-                                                className={`w-full flex items-center gap-[8px] px-[10px] py-[8px] transition-colors text-left text-[12px] font-medium ${isActive
-                                                    ? (isMono ? 'bg-[#f4f4f5] text-[#09090b] font-bold' : 'bg-[#EBF3FF] text-[#1E6FD9] font-bold')
-                                                    : (isMono ? 'text-[#3f3f46] hover:bg-[#f4f4f5]' : 'text-[#334155] hover:bg-[#F8FAFC]')
-                                                    }`}
-                                            >
-                                                <span className="flex-1 truncate">{opt}</span>
-                                                {isActive && (
-                                                    <div className={`w-[5px] h-[5px] rounded-full shrink-0 ${isMono ? 'bg-[#09090b]' : 'bg-[#1E6FD9]'}`} />
-                                                )}
-                                            </button>
-                                        );
-                                    })}
-                                    <div className="h-[6px]" />
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 flex" align="start">
+                            <div className={`flex flex-col border-r w-[140px] p-2 bg-slate-50/50 ${isMono ? 'border-[#e4e4e7]' : 'border-[#D0D9E8]'}`}>
+                                <div className="px-2 py-1 mb-1 text-[9px] font-black uppercase text-slate-400 tracking-wider">Presets</div>
+                                {presets.map((p) => {
+                                    const isActive = dateFilter.label === p.label;
+                                    return (
+                                        <button
+                                            key={p.label}
+                                            onClick={() => {
+                                                const vals = p.getValue();
+                                                setDateFilter({ label: p.label, ...vals });
+                                            }}
+                                            className={`text-left px-2 py-1.5 text-[11px] font-medium rounded-md transition-colors ${isActive
+                                                ? (isMono ? 'bg-[#09090b] text-white' : 'bg-blue-600 text-white')
+                                                : (isMono ? 'hover:bg-zinc-200 text-zinc-600' : 'hover:bg-blue-50 text-slate-600')
+                                                }`}
+                                        >
+                                            {p.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <div className="p-1">
+                                <Calendar
+                                    initialFocus
+                                    mode="range"
+                                    defaultMonth={dateFilter.from}
+                                    selected={{ from: dateFilter.from, to: dateFilter.to }}
+                                    onSelect={(range) => {
+                                        if (range?.from && range?.to) {
+                                            setDateFilter({
+                                                label: 'Custom Range',
+                                                from: startOfDay(range.from),
+                                                to: endOfDay(range.to)
+                                            });
+                                        } else if (range?.from) {
+                                            setDateFilter({
+                                                label: 'Custom Range',
+                                                from: startOfDay(range.from),
+                                                to: endOfDay(range.from)
+                                            });
+                                        }
+                                    }}
+                                    numberOfMonths={1}
+                                />
+                            </div>
+                        </PopoverContent>
+                    </Popover>
                 )}
 
-                {/* ── Company Filter Dropdown ── */}
+                {/* Company Filter */}
                 <div ref={companyDropRef} className="relative">
                     <button
                         onClick={() => setCompanyOpen(v => !v)}
@@ -271,169 +284,82 @@ export function Topbar({ onOpenCmd, onOpenNotif, pageTitle, theme, onToggleTheme
                     >
                         <Building2 size={12} className={isMono ? 'text-[#71717a]' : 'text-[#8899AA]'} />
                         <span className="max-w-[120px] truncate">{currentCompany}</span>
-                        <motion.div animate={{ rotate: companyOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                            <ChevronDown size={11} className={isMono ? 'text-[#71717a]' : 'text-[#8899AA]'} />
-                        </motion.div>
+                        <motion.div animate={{ rotate: companyOpen ? 180 : 0 }} transition={{ duration: 0.2 }}><ChevronDown size={11} /></motion.div>
                     </button>
 
                     <AnimatePresence>
                         {companyOpen && (
                             <motion.div
-                                initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                                transition={{ duration: 0.15, ease: 'easeOut' }}
-                                className={`absolute left-0 top-[calc(100%+6px)] w-[220px] rounded-[10px] shadow-[0_8px_32px_rgba(0,0,0,0.12)] border overflow-hidden z-50 ${isMono ? 'bg-white border-[#e4e4e7]' : 'bg-white border-[#D0D9E8]'}`}
+                                initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                                className={`absolute left-0 top-[calc(100%+6px)] w-[220px] rounded-[10px] shadow-xl border z-50 overflow-hidden ${isMono ? 'bg-white border-zinc-200' : 'bg-white border-blue-100'}`}
                             >
-                                <div className={`px-[10px] pt-[8px] pb-[4px] text-[9px] font-black uppercase tracking-[1.2px] ${isMono ? 'text-[#a1a1aa]' : 'text-[#8899AA]'}`}>
-                                    Company
-                                </div>
-                                <button
-                                    onClick={() => { if (onCompanyChange) onCompanyChange('ALL'); setCompanyOpen(false); }}
-                                    className={`w-full flex items-center gap-[8px] px-[10px] py-[8px] transition-colors text-left text-[12px] font-medium ${selectedCompanyId === 'ALL'
-                                        ? (isMono ? 'bg-[#f4f4f5] text-[#09090b] font-bold' : 'bg-[#EBF3FF] text-[#1E6FD9] font-bold')
-                                        : (isMono ? 'text-[#3f3f46] hover:bg-[#f4f4f5]' : 'text-[#334155] hover:bg-[#F8FAFC]')
-                                        }`}
-                                >
-                                    <Building2 size={13} className={selectedCompanyId === 'ALL' ? (isMono ? 'text-[#09090b]' : 'text-[#1E6FD9]') : 'text-[#94A3B8]'} />
-                                    <span className="flex-1 truncate">All Companies</span>
-                                    {selectedCompanyId === 'ALL' && (
-                                        <div className={`w-[5px] h-[5px] rounded-full shrink-0 ${isMono ? 'bg-[#09090b]' : 'bg-[#1E6FD9]'}`} />
-                                    )}
+                                <div className="p-2 border-b bg-slate-50 text-[10px] uppercase font-bold text-slate-400 tracking-wider">Select Company</div>
+                                <button onClick={() => { if (onCompanyChange) onCompanyChange('ALL'); setCompanyOpen(false); }} className="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 flex items-center justify-between">
+                                    <span>All Companies</span>
+                                    {selectedCompanyId === 'ALL' && <Check size={14} className="text-blue-600" />}
                                 </button>
-                                {companies.map(c => {
-                                    const isActive = c.id === selectedCompanyId;
-                                    return (
-                                        <button
-                                            key={c.id}
-                                            onClick={() => { if (onCompanyChange) onCompanyChange(c.id); setCompanyOpen(false); }}
-                                            className={`w-full flex items-center gap-[8px] px-[10px] py-[8px] transition-colors text-left text-[12px] font-medium ${isActive
-                                                ? (isMono ? 'bg-[#f4f4f5] text-[#09090b] font-bold' : 'bg-[#EBF3FF] text-[#1E6FD9] font-bold')
-                                                : (isMono ? 'text-[#3f3f46] hover:bg-[#f4f4f5]' : 'text-[#334155] hover:bg-[#F8FAFC]')
-                                                }`}
-                                        >
-                                            <Building2 size={13} className={isActive ? (isMono ? 'text-[#09090b]' : 'text-[#1E6FD9]') : 'text-[#94A3B8]'} />
-                                            <span className="flex-1 truncate">{c.name}</span>
-                                            {isActive && (
-                                                <div className={`w-[5px] h-[5px] rounded-full shrink-0 ${isMono ? 'bg-[#09090b]' : 'bg-[#1E6FD9]'}`} />
-                                            )}
-                                        </button>
-                                    );
-                                })}
-                                <div className="h-[6px]" />
+                                {companies.map(c => (
+                                    <button key={c.id} onClick={() => { if (onCompanyChange) onCompanyChange(c.id); setCompanyOpen(false); }} className="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 flex items-center justify-between">
+                                        <span className="truncate">{c.name}</span>
+                                        {selectedCompanyId === c.id && <Check size={14} className="text-blue-600" />}
+                                    </button>
+                                ))}
                             </motion.div>
                         )}
                     </AnimatePresence>
                 </div>
             </div>
+
             <div className="flex items-center gap-[10px]">
-
-                <div className="relative group">
-                    <Search className={`absolute left-[10px] top-1/2 -translate-y-1/2 w-[14px] h-[14px] pointer-events-none ${isMono ? 'text-[#71717a]' : 'text-[#8899AA]'}`} />
-                    <input
-                        readOnly
-                        onClick={onOpenCmd}
-                        placeholder="Search… ⌘K"
-                        className={`py-[7px] pr-[12px] pl-[34px] border-[1.5px] rounded-[8px] font-sans text-[12px] w-[200px] outline-none transition-all duration-200 cursor-pointer group-hover:w-[240px] ${isMono
-                            ? 'border-[#e4e4e7] bg-[#f4f4f5] text-[#09090b] group-hover:border-[#09090b] group-hover:bg-white group-hover:shadow-[0_0_0_3px_rgba(0,0,0,0.08)]'
-                            : 'border-[#D0D9E8] bg-[#F0F4FA] text-[#1A2640] group-hover:border-[#1E6FD9] group-hover:bg-white group-hover:shadow-[0_0_0_3px_rgba(30,111,217,0.35)]'
-                            }`}
-                    />
-                </div>
-
-                {/* ── Premium Theme Selector Dropdown ── */}
+                {/* Theme Selector */}
                 <div ref={dropRef} className="relative">
                     <button
                         onClick={() => setThemeOpen(v => !v)}
-                        className={`flex items-center gap-[7px] h-[34px] px-[12px] rounded-[9px] border-[1.5px] text-[12px] font-semibold transition-all duration-200 select-none ${isMono
-                            ? 'border-[#e4e4e7] bg-white text-[#09090b] hover:bg-[#f4f4f5] hover:border-[#d4d4d8]'
-                            : 'border-[#D0D9E8] bg-white text-[#1A2640] hover:bg-[#F0F4FA] hover:border-[#b8c8e0]'
-                            } ${themeOpen ? (isMono ? 'border-[#09090b] shadow-[0_0_0_3px_rgba(0,0,0,0.08)]' : 'border-[#1E6FD9] shadow-[0_0_0_3px_rgba(30,111,217,0.12)]') : ''}`}
+                        className="flex items-center gap-2 h-[34px] px-3 rounded-lg border text-xs font-semibold hover:bg-slate-50 transition-all"
                     >
-                        <span className="text-[13px] leading-none">{active.icon}</span>
+                        <span>{active.icon}</span>
                         <span>{active.label}</span>
-                        <motion.div
-                            animate={{ rotate: themeOpen ? 180 : 0 }}
-                            transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        >
-                            <ChevronDown size={13} className={isMono ? 'text-[#71717a]' : 'text-[#8899AA]'} />
-                        </motion.div>
+                        <ChevronDown size={13} />
                     </button>
 
                     <AnimatePresence>
                         {themeOpen && (
                             <motion.div
-                                initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                                transition={{ duration: 0.15, ease: 'easeOut' }}
-                                className={`absolute right-0 top-[calc(100%+8px)] w-[200px] rounded-[12px] shadow-[0_8px_32px_rgba(0,0,0,0.12)] border overflow-hidden z-50 ${isMono ? 'bg-white border-[#e4e4e7]' : 'bg-white border-[#D0D9E8]'}`}
+                                initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+                                className="absolute right-0 top-[calc(100%+8px)] w-[180px] rounded-xl shadow-2xl border bg-white z-50 overflow-hidden p-1"
                             >
-                                <div className={`px-[10px] pt-[10px] pb-[4px] text-[9.5px] font-black uppercase tracking-[1.2px] ${isMono ? 'text-[#a1a1aa]' : 'text-[#8899AA]'}`}>
-                                    Appearance
-                                </div>
-                                {themes.map(t => {
-                                    const isActive = t.id === theme;
-                                    return (
-                                        <button
-                                            key={t.id}
-                                            onClick={() => { onToggleTheme(t.id); setThemeOpen(false); }}
-                                            className={`w-full flex items-center gap-[10px] px-[10px] py-[10px] transition-colors text-left rounded-[8px] mx-[4px] mb-[2px] ${isActive
-                                                ? (isMono ? 'bg-[#09090b] text-white' : 'bg-[#EBF3FF] text-[#1E6FD9]')
-                                                : (isMono ? 'text-[#09090b] hover:bg-[#f4f4f5]' : 'text-[#1A2640] hover:bg-[#F8FAFC]')
-                                                }`}
-                                            style={{ width: 'calc(100% - 8px)' }}
-                                        >
-                                            <span className="text-[16px] w-[22px] text-center leading-none shrink-0">{t.icon}</span>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-[12px] font-bold leading-tight">{t.label}</div>
-                                                <div className={`text-[10px] leading-tight mt-[1px] ${isActive ? 'opacity-75' : (isMono ? 'text-[#71717a]' : 'text-[#8899AA]')}`}>{t.desc}</div>
-                                            </div>
-                                            {isActive && (
-                                                <div className={`w-[6px] h-[6px] rounded-full shrink-0 ${isMono ? 'bg-white' : 'bg-[#1E6FD9]'}`} />
-                                            )}
-                                        </button>
-                                    );
-                                })}
-                                <div className="h-[8px]" />
+                                {themes.map(t => (
+                                    <button
+                                        key={t.id} onClick={() => { onToggleTheme(t.id); setThemeOpen(false); }}
+                                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${t.id === theme ? 'bg-slate-100 font-bold' : 'hover:bg-slate-50'}`}
+                                    >
+                                        <span className="text-lg">{t.icon}</span>
+                                        <div className="flex-1">
+                                            <div className="text-[12px]">{t.label}</div>
+                                        </div>
+                                        {t.id === theme && <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+                                    </button>
+                                ))}
                             </motion.div>
                         )}
                     </AnimatePresence>
                 </div>
 
-
-                {/* ── Refresh Button ── */}
-                <button
-                    onClick={handleRefresh}
-                    title="Refresh data"
-                    className={`w-[36px] h-[36px] rounded-[10px] border-[1.5px] bg-white flex items-center justify-center transition-all ${isMono
-                        ? 'border-[#e4e4e7] text-[#3f3f46] hover:border-[#09090b] hover:bg-[#f4f4f5]'
-                        : 'border-[#D0D9E8] text-[#4A5568] hover:border-[#1E6FD9] hover:bg-[#EBF3FF] hover:text-[#1E6FD9]'
-                        }`}
-                >
-                    <motion.div animate={{ rotate: isRefreshing ? 360 : 0 }} transition={{ duration: 0.8, ease: 'easeInOut', repeat: isRefreshing ? Infinity : 0 }}>
-                        <RefreshCw className="w-4 h-4" />
+                <button onClick={handleRefresh} title="Refresh data" className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all">
+                    <motion.div animate={{ rotate: isRefreshing ? 360 : 0 }} transition={{ duration: 1, repeat: isRefreshing ? Infinity : 0, ease: 'linear' }}>
+                        <RefreshCw size={14} />
                     </motion.div>
                 </button>
 
-                <button
-                    onClick={onOpenNotif}
-                    className={`w-[36px] h-[36px] rounded-[10px] border-[1.5px] bg-white flex items-center justify-center relative transition-all ${isMono
-                        ? 'border-[#e4e4e7] text-[#3f3f46] hover:border-[#09090b] hover:bg-[#f4f4f5]'
-                        : 'border-[#D0D9E8] text-[#4A5568] hover:border-[#1E6FD9] hover:bg-[#EBF3FF] hover:text-[#1E6FD9]'
-                        }`}
-                >
-                    <Bell className="w-4 h-4" />
-                    <div className="absolute top-[6px] right-[6px] w-[7px] h-[7px] bg-[#EF4444] rounded-full border-[1.5px] border-white" />
-                </button>
-                <button className={`w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-[12px] font-bold text-white transition-shadow ${isMono
-                    ? 'bg-[#09090b] shadow-[0_0_12px_rgba(0,0,0,0.2)] hover:shadow-[0_0_20px_rgba(0,0,0,0.3)]'
-                    : 'bg-[#1E6FD9] shadow-[0_0_12px_rgba(30,111,217,0.35)] hover:shadow-[0_0_20px_rgba(30,111,217,0.35)]'
-                    }`}>
-                    WT
-                </button>
+                {notifications.length > 0 && (
+                    <button onClick={onOpenNotif} className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center relative hover:bg-slate-50 transition-all">
+                        <Bell size={14} />
+                        <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
+                    </button>
+                )}
+
+                <button className="w-[34px] h-[34px] rounded-lg bg-[#1E6FD9] flex items-center justify-center text-[10px] font-black text-white shadow-lg hover:shadow-xl transition-all">WT</button>
             </div>
         </div>
     );
 }
-
