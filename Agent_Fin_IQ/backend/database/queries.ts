@@ -18,6 +18,7 @@
  */
 
 import { query, pool } from './connection';
+import { sendInvoiceToTally } from '../sync/tally_posting';
 
 // ─────────────────────────────────────────────────────────────
 // AP INVOICES
@@ -637,27 +638,53 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             getVal('gst_validation_status'),
             getVal('invoice_ocr_data_valdiation'),
             getVal('vendor_verification'),
-            getVal('duplicate_check'),
             getVal('line_item_match_status')
         ];
+        
+        const isDuplicate = getVal('duplicate_check');
 
         console.log(`[DB] ingestN8nData Checks for ${invoiceId}:`, {
             buyer: checks[0],
             gst: checks[1],
             ocr: checks[2],
             vendor: checks[3],
-            duplicate: checks[4],
-            lineItems: checks[5],
+            lineItems: checks[4],
+            duplicate: isDuplicate,
             vendorId: vendorId
         });
 
         const allPassed = checks.every(c => c === true);
         
         let finalStatus = 'Pending Approval';
-        if (allPassed) {
+        // ─── CANONICAL READY-TO-POST RULE ───
+        if (allPassed && !isDuplicate && vendorId && (invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
             finalStatus = 'Ready to Post';
-        } else if (invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
+        } else if (isDuplicate || !allPassed || invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
+            // Any failure or duplicate check is true must NOT be Ready to Post
             finalStatus = 'Awaiting Input';
+        }
+
+        // --- POSTING RULES EVALUATION ---
+        // implemented as per request: Case A & Case B
+        if (finalStatus === 'Ready to Post') {
+            try {
+                const rules = await getAppConfig('posting_rules', invData.company_id);
+                if (rules && rules.postingMode === 'auto') {
+                    const limit = rules.criteria?.enableValueLimit ? (rules.criteria.valueLimit || 0) : Infinity;
+                    const total = Number(invData.grand_total || 0);
+
+                    if (total <= limit) {
+                        console.log(`[DB] Auto-Posting Case A: Total ${total} <= Limit ${limit}. Triggering Tally Post.`);
+                        finalStatus = 'Auto-Posted';
+                    } else {
+                        console.log(`[DB] Auto-Posting Case B: Total ${total} > Limit ${limit}. Remaining in Ready to Post.`);
+                    }
+                } else if (rules && rules.postingMode === 'manual') {
+                    console.log(`[DB] Manual Post active. Remaining in Ready to Post.`);
+                }
+            } catch (ruleErr) {
+                console.error('[DB] Error evaluating posting rules:', ruleErr);
+            }
         }
 
         console.log(`[DB] ingestN8nData Final Status for ${invoiceId}: ${finalStatus} (allPassed: ${allPassed})`);
@@ -705,6 +732,24 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                 });
                 const updateSql = `UPDATE ap_invoices SET ${setClause}, updated_at = NOW() WHERE id = $1`;
                 await client.query(updateSql, [invoiceId, ...invParams]);
+
+                // If finalStatus was changed to 'Auto-Posted', trigger the actual webhook
+                if (finalStatus === 'Auto-Posted') {
+                    // We call this AFTER the DB update so the row has latest data (ocr_raw_payload etc)
+                    // though we technically have it in memory as well.
+                    setTimeout(async () => {
+                        try {
+                            console.log(`[DB] Executing Auto-Post for ${invoiceId}`);
+                            const postResult = await sendInvoiceToTally(invoiceId, invData.ocr_raw_payload);
+                            const tallyIdStr = postResult.response?.tally_id || postResult.response?.masterid || postResult.response?.master_id || null;
+                            
+                            // Use the exported markPostedToTally to finalise
+                            await markPostedToTally(invoiceId, postResult.response, tallyIdStr, postResult.status);
+                        } catch (postErr) {
+                            console.error(`[DB] Auto-Post background task failed for ${invoiceId}:`, postErr);
+                        }
+                    }, 100); // Small delay to ensure transaction commit if pool was used
+                }
             }
         }
 
@@ -1129,4 +1174,53 @@ export async function getDashboardMetrics(companyId?: string) {
         pendingApproval: pendingApproval.rows[0].count,
         statusCounts
     };
+}
+
+// ─────────────────────────────────────────────────────────────
+// APP CONFIGURATION
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch a configuration value by key and company.
+ */
+export async function getAppConfig(key: string, companyId?: string) {
+    let sql = `SELECT config_value FROM app_config WHERE config_key = $1`;
+    const params: any[] = [key];
+
+    if (companyId) {
+        sql += ` AND (company_id = $2 OR company_id IS NULL)`;
+        params.push(companyId);
+    } else {
+        sql += ` AND company_id IS NULL`;
+    }
+
+    sql += ` ORDER BY company_id DESC LIMIT 1`; // Company-specific overrides global
+
+    const { rows } = await query(sql, params);
+    return rows[0]?.config_value || null;
+}
+
+/**
+ * Save a configuration value.
+ */
+export async function setAppConfig(key: string, value: any, companyId?: string) {
+    const valueJson = JSON.stringify(value);
+    
+    // UPSERT pattern
+    const existing = await query(
+        `SELECT id FROM app_config WHERE config_key = $1 AND (company_id = $2 OR (company_id IS NULL AND $2 IS NULL))`,
+        [key, companyId || null]
+    );
+
+    if (existing.rows.length > 0) {
+        await query(
+            `UPDATE app_config SET config_value = $2, updated_at = NOW() WHERE id = $1`,
+            [existing.rows[0].id, valueJson]
+        );
+    } else {
+        await query(
+            `INSERT INTO app_config (config_key, config_value, company_id) VALUES ($1, $2, $3)`,
+            [key, valueJson, companyId || null]
+        );
+    }
 }
