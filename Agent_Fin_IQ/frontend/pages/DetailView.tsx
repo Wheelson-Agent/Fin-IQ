@@ -756,11 +756,16 @@ export default function DetailView() {
                   if (!id) return;
                   setSaving(true);
                   try {
-                    if (isHandoff) {
+                    if (isHandoff || (invoice && invoice.status === 'Awaiting Input')) {
                       // Re-validate action
-                      await runPipeline(id, invoice.file_path || '', invoice.file_name || '');
-                      alert('Re-validation started.');
-                      window.location.reload();
+                      console.log('Triggering Revalidation for:', id);
+                      const result = await revalidateInvoice(id);
+                      if (result.success) {
+                        alert('Re-validation started.');
+                        window.location.reload();
+                      } else {
+                        alert('Re-validation failed: ' + result.error);
+                      }
                     } else {
                       // Approve & Post action
                       await saveInvoiceItems(id, lineItems.map(item => ({

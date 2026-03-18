@@ -259,11 +259,10 @@ export function registerIpcHandlers() {
 
             const result = await n8n.sendToValidation(payload);
             if (result.success) {
-                await queries.updateInvoiceWithOCR(id, {
-                    all_data_invoice: result.response,
-                    status: result.response?.status || invoice.processing_status,
-                    validation_time: new Date().toISOString()
-                });
+                // Use ingestN8nData to ensure ALL frontend fields (ocr_raw_payload, n8n_val_json_data) 
+                // are updated correctly from the n8n response.
+                await queries.ingestN8nData(id, result.response);
+                
                 return { success: true, response: result.response };
             } else {
                 return { success: false, error: result.error };
