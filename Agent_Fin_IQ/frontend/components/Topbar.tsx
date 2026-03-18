@@ -84,64 +84,36 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
         ensureBlinkStyle();
     }, []);
 
+    // Listen for pushed updates and perform initial check
     useEffect(() => {
-        async function checkStatuses() {
-            const api = (window as any).api;
-            if (!api?.invoke) return;
-
+        async function initialCheck() {
             try {
-                const n8nFull = await api.invoke('status:get-n8n-full');
-                if (n8nFull === 'live') {
-                    setN8nStatus('connected');
-                    setN8nRetries(0);
-                } else {
-                    setN8nRetries(prev => {
-                        const next = prev + 1;
-                        if (next >= 5) setN8nStatus('disconnected');
-                        else setN8nStatus('connecting');
-                        return next;
-                    });
-                }
-
-                const ocrOk = await api.invoke('status:check-ocr');
-                if (ocrOk) {
-                    setOcrStatus('connected');
-                    setOcrRetries(0);
-                } else {
-                    setOcrRetries(prev => {
-                        const next = prev + 1;
-                        if (next >= 5) setOcrStatus('disconnected');
-                        else setOcrStatus('connecting');
-                        return next;
-                    });
+                const api = (window as any).api;
+                if (api?.invoke) {
+                    // Initial n8n status
+                    const n8nFull = await api.invoke('status:get-n8n-full');
+                    setN8nStatus(n8nFull === 'live' ? 'connected' : (n8nFull === 'offline' ? 'disconnected' : 'connecting'));
+                    
+                    // Initial OCR check (still manual for now as it's less frequent)
+                    const ocrOk = await api.invoke('status:check-ocr');
+                    setOcrStatus(ocrOk ? 'connected' : 'disconnected');
                 }
             } catch (err) {
-                console.warn('[Topbar] Status check failed', err);
+                console.warn('[Topbar] Initial status check failed', err);
             }
         }
 
-        checkStatuses();
-        const interval = setInterval(checkStatuses, 30000);
+        initialCheck();
 
-        if ((window as any).api?.on) {
-            (window as any).api.on('n8n:status-update', (data: any) => {
+        const api = (window as any).api;
+        if (api?.on) {
+            // Listen for background pushes
+            api.on('n8n:status-update', (data: any) => {
                 if (data.service === 'n8n') {
-                    if (data.status === 'live') {
-                        setN8nStatus('connected');
-                        setN8nRetries(0);
-                    } else {
-                        setN8nRetries(prev => {
-                            const next = prev + 1;
-                            if (next >= 5) setN8nStatus('disconnected');
-                            else setN8nStatus('connecting');
-                            return next;
-                        });
-                    }
+                    setN8nStatus(data.status === 'live' ? 'connected' : (data.status === 'offline' ? 'disconnected' : 'connecting'));
                 }
             });
         }
-
-        return () => clearInterval(interval);
     }, []);
 
     // Logic: 
