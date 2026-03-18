@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle, XCircle, Loader2, Upload, FileSearch, Cpu, Zap, X, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { uploadInvoice, runPipeline } from '../../lib/api';
+import { uploadInvoice, runPipeline, getBatchLogs, getWorkerStatus, getAllLogsDebug } from '../../lib/api';
 import { Button } from '../../components/ui/button';
 
 /* ─────────────────────────── Types ─────────────────────────── */
@@ -26,10 +26,10 @@ export interface ProcessingPipelineProps {
     onStagesChange?: (stages: PipelineStage[]) => void;
     particles?: Record<string, boolean>;
     onParticlesChange?: (particles: Record<string, boolean>) => void;
-    fileDataArrays?: Uint8Array[];  // Raw file data as byte arrays
     onComplete: () => void;
     onDismiss?: () => void;
     uploaderName?: string;
+    onConfirmedCountChange?: (count: number) => void;
 }
 
 /**
@@ -217,7 +217,8 @@ export function ProcessingPipeline({
     isBatch, fileNames, batchName, filePaths, fileDataArrays, 
     onComplete, onDismiss, uploaderName,
     stages: externalStages, onStagesChange,
-    particles: externalParticles, onParticlesChange
+    particles: externalParticles, onParticlesChange,
+    onConfirmedCountChange
 }: ProcessingPipelineProps) {
     const STAGES_INIT: PipelineStage[] = [
         { id: 'uploading', label: 'Uploaded', sublabel: isBatch ? `Transferring ${fileNames.length} files...` : 'File secured', icon: <Upload size={28} />, status: 'active' },
@@ -256,8 +257,50 @@ export function ProcessingPipeline({
     };
 
     const [batchCount, setBatchCount] = useState(0);
+    const [confirmedCount, setConfirmedCount] = useState(0);
+    const [logs, setLogs] = useState<any[]>([]);
+    const [workerCount, setWorkerCount] = useState(0);
+    const [lastUpdate, setLastUpdate] = useState<string>('');
     const [activeFileName, setActiveFileName] = useState<string>('');
     const timers = useRef<ReturnType<typeof setTimeout>[] | ReturnType<typeof setInterval>[]>([]);
+    const logScrollRef = useRef<HTMLDivElement>(null);
+
+    // Periodic log and worker status fetching
+    useEffect(() => {
+        if (!batchName) return;
+
+        const interval = setInterval(async () => {
+            try {
+                console.log(`[Pipeline] Polling logs for batch: ${batchName}`);
+                const [fetchedLogs, status, debugLogs] = await Promise.all([
+                    getBatchLogs(batchName),
+                    getWorkerStatus(),
+                    getAllLogsDebug()
+                ]);
+                
+                console.log(`[Pipeline] Response: batch=${fetchedLogs?.length||0}, debug=${debugLogs?.length||0}`);
+                setLogs(fetchedLogs || []);
+                setWorkerCount(status?.activeWorkers || 0);
+                setLastUpdate(new Date().toLocaleTimeString('en-IN', { hour12: false }));
+            } catch (err) {
+                console.error('[Pipeline] Failed to fetch logs/status', err);
+            }
+        }, 2000); // Poll every 2 seconds
+
+        return () => clearInterval(interval);
+    }, [batchName]);
+
+    useEffect(() => {
+        if (logScrollRef.current) {
+            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        }
+    }, [logs]);
+
+    useEffect(() => {
+        if (onConfirmedCountChange) {
+            onConfirmedCountChange(confirmedCount);
+        }
+    }, [confirmedCount, onConfirmedCountChange]);
 
     const updateStage = (id: string, status: StageStatus, errorMsg?: string, overrides: Partial<PipelineStage> = {}) => {
         setStages(prev =>
@@ -306,9 +349,14 @@ export function ProcessingPipeline({
                     const name = fileNames[i] || `file_${i}`;
                     setActiveFileName(name);
                     const fileData = fileDataArrays?.[i];
-                    console.log(`[Pipeline] Uploading: ${name} (${fileData ? fileData.length + ' bytes' : 'no data'})`);
+                    
                     // @ts-ignore - added uploaderName last
                     const res = await uploadInvoice(fp, name, batchName, fileData, uploaderName);
+                    
+                    if (res && res.id) {
+                        setConfirmedCount(prev => prev + 1);
+                    }
+                    
                     setBatchCount(prev => prev + 1);
                     return { fp, name, invoice: res };
                 });
@@ -333,7 +381,8 @@ export function ProcessingPipeline({
                 const pipelineResults = await runWithConcurrency(uploadedData, 1, async (data) => {
                     if (!data.invoice) return { success: false, error: 'No invoice record' };
                     setActiveFileName(data.name);
-                    const res = await runPipeline(data.invoice.id, data.invoice.file_path, data.name);
+                    const res = await runPipeline(data.invoice.id, data.invoice.file_path, data.name, batchName);
+                    
                     setBatchCount(prev => prev + 1);
                     return res;
                 });
@@ -419,6 +468,9 @@ export function ProcessingPipeline({
                                     Item {batchCount}/{fileNames.length}
                                 </span>
                             )}
+                            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-md font-bold uppercase border border-emerald-500/30">
+                                Active Workers: {workerCount}
+                            </span>
                         </div>
                         {onDismiss && (
                             <button 
@@ -430,7 +482,7 @@ export function ProcessingPipeline({
                         )}
                     </div>
 
-                    <div className="p-10">
+                    <div className="p-10 border-b border-slate-100">
                         <div className="relative flex items-center justify-between gap-4">
                             {/* Horizontal Line Background */}
                             <div className="absolute top-[35px] left-0 right-0 h-[2px] bg-slate-100 -z-0" />
@@ -441,8 +493,62 @@ export function ProcessingPipeline({
                                 </React.Fragment>
                             ))}
                         </div>
+                    </div>
 
-                        {/* Summary Message */}
+                    {/* Logs Area — Grouped by File */}
+                    <div className="bg-[#0F172A] p-0 flex flex-col h-[320px]">
+                        <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Batch Activity Logs</span>
+                                {lastUpdate && <span className="text-[9px] text-slate-500 font-mono animate-pulse">Syncing... {lastUpdate}</span>}
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-500">{batchName}</span>
+                        </div>
+                        <div 
+                            ref={logScrollRef}
+                            className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed scrollbar-thin scrollbar-thumb-white/10"
+                        >
+                            {logs.length === 0 && (
+                                <div className="text-slate-600 italic">Waiting for processing events...</div>
+                            )}
+                            
+                            {/* Group logs by fileName */}
+                            {Array.from(new Set(logs.map(l => l.fileName))).map(fileName => {
+                                const fileLogs = logs.filter(l => l.fileName === fileName);
+                                const lastStage = fileLogs[fileLogs.length - 1]?.stage;
+                                const isFailed = fileLogs.some(l => l.status === 'Failed');
+                                
+                                return (
+                                    <div key={fileName} className="mb-6 last:mb-0 border-l border-white/5 pl-4 ml-1">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-blue-400 font-bold">{fileName}</span>
+                                            <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-black tracking-tighter ${
+                                                isFailed ? 'bg-red-500/20 text-red-400' : 'bg-blue-500/10 text-blue-300'
+                                            }`}>
+                                                {isFailed ? 'FAILED' : lastStage || 'QUEUED'}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-1 opacity-80">
+                                            {fileLogs.map((log) => (
+                                                <div key={log.id} className="flex gap-2">
+                                                    <span className="text-slate-600 shrink-0 text-[10px]">[{new Date(log.timestamp).toLocaleTimeString('en-IN', { hour12: false })}]</span>
+                                                    <span className="text-slate-400 shrink-0 select-none w-16 uppercase text-[9px] pt-0.5 font-black">[{log.stage}]</span>
+                                                    <span style={{ 
+                                                        color: log.status === 'Completed' ? '#4ADE80' : log.status === 'Failed' ? '#FB7185' : '#E2E8F0' 
+                                                    }}>
+                                                        {log.status === 'Failed' ? '✖ ' : log.status === 'Completed' ? '✔ ' : '→ '}
+                                                        {log.message}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="p-10 bg-slate-50/50">
                         <AnimatePresence>
                             {hasFailed && (
                                 <motion.div

@@ -288,9 +288,26 @@ export async function saveInvoiceItems(invoiceId: string, items: Partial<Invoice
  * @param invoiceId - Invoice UUID
  * @param filePath  - Storage path
  * @param fileName  - Original display name
+ * @param batchId   - Optional batch name for logging
  */
-export async function runPipeline(invoiceId: string, filePath: string, fileName: string) {
-    return invoke<{ success: boolean; decision?: any; error?: string }>('processing:run-pipeline', { invoiceId, filePath, fileName });
+export const runPipeline = async (invoiceId: string, filePath: string, fileName: string, batchId?: string) => {
+  return await window.api.invoke('processing:run-pipeline', { invoiceId, filePath, fileName, batchId });
+};
+
+export const revalidateInvoice = async (id: string) => {
+  return await window.api.invoke('invoices:revalidate', { id });
+};
+
+export async function getBatchLogs(batchName: string) {
+    return invoke<any[]>('processing:get-batch-logs', { batchName });
+}
+
+export async function getWorkerStatus() {
+    return invoke<{ activeWorkers: number }>('processing:get-worker-status');
+}
+
+export async function getAllLogsDebug() {
+    return invoke<any[]>('processing:get-all-logs-debug');
 }
 
 // ─── ERP MODULES ──────────────────────────────────────────

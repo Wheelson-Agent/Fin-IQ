@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { Toaster } from 'sonner';
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
 import { CommandPalette } from '../components/CommandPalette';
@@ -44,7 +43,7 @@ function AppShell() {
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         <Topbar
-          onOpenCmd={() => setCmdOpen(true)}
+          onOpenCmd={() => {}}
           onOpenNotif={() => setNotifOpen(!notifOpen)}
           pageTitle={getPageTitle(location.pathname)}
           theme={theme}
@@ -72,7 +71,6 @@ function AppShell() {
       <CommandPalette open={cmdOpen} setOpen={setCmdOpen} />
       <NotificationPanel open={notifOpen} />
       <FloatingAgent />
-      <Toaster richColors position="top-center" />
     </div>
   );
 }
