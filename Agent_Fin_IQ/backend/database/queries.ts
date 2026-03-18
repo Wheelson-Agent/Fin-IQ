@@ -369,6 +369,32 @@ export async function getAllCompanies() {
     return rows;
 }
 
+/**
+ * Fetch all synced companies, adhering to the REST endpoint shape.
+ * 
+ * @returns Object with companies (array), count, and last_synced_at
+ */
+export async function getSyncedCompanies() {
+    const { rows } = await query(`
+        SELECT *
+        FROM companies 
+        WHERE is_active = true
+        ORDER BY created_at DESC
+    `);
+    
+    // Find the latest created_at from the returned rows (since they are ordered DESC, it's the first row)
+    let lastSyncedAt = null;
+    if (rows.length > 0 && rows[0].created_at) {
+        lastSyncedAt = rows[0].created_at;
+    }
+
+    return {
+        companies: rows,
+        count: rows.length,
+        last_synced_at: lastSyncedAt
+    };
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // VENDORS (with dynamic calculations)

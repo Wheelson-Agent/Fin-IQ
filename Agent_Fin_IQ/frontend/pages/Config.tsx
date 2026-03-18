@@ -259,6 +259,7 @@ export default function Config() {
     // Tally Connection state
     const [isCheckingTally, setIsCheckingTally] = useState(false);
     const [tallyConnectionStatus, setTallyConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [isCreatingCompany, setIsCreatingCompany] = useState(false);
 
     /* ─── Company Management State ─── */
     interface CompanyData {
@@ -297,26 +298,73 @@ export default function Config() {
         isActive: false,
     };
 
-    const [companies, setCompanies] = useState<CompanyData[]>([
-        {
-            id: 'comp_1', name: 'Wheels Tech Pvt Ltd', mailingName: 'Wheels Tech Pvt Ltd', tradeName: 'Wheels Tech', type: 'pvt_ltd',
-            gstin: '33AABCT1234Q1Z5', pan: 'AABCT1234Q', cin: 'U72900TN2020PTC123456', tan: 'CHEW12345A',
-            address: '42, Tech Park, Anna Salai', city: 'Chennai', state: 'Tamil Nadu', country: 'India', pincode: '600002',
-            phone: '+91 44 2345 6789', email: 'accounts@wheelstech.in', website: 'www.wheelstech.in',
-            fyStart: 'april', currency: 'INR', booksFrom: '2024-04-01',
-            tallyServerUrl: 'http://localhost:9000', tallyCompanyName: 'Wheels Tech Pvt Ltd', tallyAutoSync: true,
-            isActive: true,
-        },
-        {
-            id: 'comp_2', name: 'Wheelson Logistics LLP', mailingName: 'Wheelson Logistics LLP', tradeName: 'Wheelson Logistics', type: 'llp',
-            gstin: '33AADFL5678K1ZP', pan: 'AADFL5678K', cin: '', tan: 'CHEW98765B',
-            address: '18, Industrial Estate, Guindy', city: 'Chennai', state: 'Tamil Nadu', country: 'India', pincode: '600032',
-            phone: '+91 44 8765 4321', email: 'finance@wheelsonlogistics.in', website: 'www.wheelsonlogistics.in',
-            fyStart: 'april', currency: 'INR', booksFrom: '2024-04-01',
-            tallyServerUrl: 'http://localhost:9000', tallyCompanyName: 'Wheelson Logistics LLP', tallyAutoSync: true,
-            isActive: false,
-        },
-    ]);
+    const [companies, setCompanies] = useState<CompanyData[]>([]);
+    const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+    const [lastSyncedAgoStr, setLastSyncedAgoStr] = useState<string>('');
+    const [syncError, setSyncError] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [pendingSyncData, setPendingSyncData] = useState<{added: any[], removed: any[], all: any[]} | null>(null);
+
+    // Persisted active company id
+    const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => {
+        return localStorage.getItem('activeCompanyId') || null;
+    });
+
+    const companiesRef = React.useRef(companies);
+    useEffect(() => { companiesRef.current = companies; }, [companies]);
+
+    const fetchCompaniesInfo = async (isManual = false) => {
+        if (isManual) setIsSyncing(true);
+        try {
+            // @ts-ignore
+            const res = await window.api.invoke('api/companies');
+            if (res && res.companies) {
+                setSyncError(false);
+                setLastSyncedAt(res.last_synced_at);
+                
+                const currentList = companiesRef.current;
+                
+                if (currentList.length === 0 || isManual) {
+                    setCompanies(res.companies);
+                } else {
+                    const currentIds = new Set(currentList.map(c => c.id));
+                    const newIds = new Set(res.companies.map((c: any) => c.id));
+                    
+                    const addedRows = res.companies.filter((c: any) => !currentIds.has(c.id));
+                    const removedRows = currentList.filter(c => !newIds.has(c.id));
+                    
+                    if (addedRows.length > 0 || removedRows.length > 0) {
+                        setPendingSyncData({ added: addedRows, removed: removedRows, all: res.companies });
+                    } else {
+                        // Data might have updated fields but same rows, just replace quietly
+                        setCompanies(res.companies);
+                    }
+                }
+                
+                if (isManual) toast.success("Synced");
+            }
+        } catch (err) {
+            setSyncError(true);
+            if (isManual) toast.error("Sync failed");
+        } finally {
+            if (isManual) setIsSyncing(false);
+        }
+    };
+    
+    useEffect(() => {
+        fetchCompaniesInfo();
+        const intervalId = setInterval(() => fetchCompaniesInfo(), 60000);
+        return () => clearInterval(intervalId);
+    }, []);
+    
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (!lastSyncedAt) return;
+            const diff = Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 1000);
+            setLastSyncedAgoStr(`${diff} seconds ago`);
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [lastSyncedAt]);
     const [editingCompany, setEditingCompany] = useState<CompanyData | null>(null);
     const [newCompany, setNewCompany] = useState<Omit<CompanyData, 'id'>>(DEFAULT_COMPANY);
 
@@ -347,7 +395,8 @@ export default function Config() {
     };
 
     const handleSetActive = (id: string) => {
-        setCompanies(prev => prev.map(c => ({ ...c, isActive: c.id === id })));
+        setActiveCompanyId(id);
+        localStorage.setItem('activeCompanyId', id);
     };
 
     const handleDeleteCompany = (id: string) => {
@@ -412,7 +461,7 @@ export default function Config() {
                 setReportConfigs(safeReportConfigs);
                 setStorage(parsed.storage || INIT.storage);
                 setCommittedConfig(parsed);
-                if (parsed.companies) setCompanies(parsed.companies);
+                // NOTE: companies are now synced live from the DB, not from localStorage
             } catch(e) {}
         }
     }, []);
@@ -635,6 +684,57 @@ export default function Config() {
                 )}
             </AnimatePresence>
 
+            {/* Sync Results Modal */}
+            <AnimatePresence>
+                {pendingSyncData && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-white rounded-[20px] shadow-2xl p-[32px] w-[500px] border border-[#E2E8F0]"
+                        >
+                            <div className="flex items-center gap-[16px] mb-[16px]">
+                                <div className="w-[48px] h-[48px] bg-[#E0E7FF] rounded-full flex items-center justify-center text-[#4F46E5]">
+                                    <RefreshCw size={24} />
+                                </div>
+                                <h3 className="text-[18px] font-bold text-[#1A2640] m-0">Sync Complete</h3>
+                            </div>
+                            <div className="text-[14px] text-[#64748B] mb-[24px] max-h-[300px] overflow-y-auto pr-2">
+                                {pendingSyncData.added.length > 0 && (
+                                    <div className="mb-4">
+                                        <div className="font-bold text-[#10B981] mb-2 flex items-center gap-1">New Companies Found ({pendingSyncData.added.length}):</div>
+                                        <ul className="list-disc pl-5 m-0 space-y-1">
+                                            {pendingSyncData.added.map(c => <li key={c.id} className="truncate">{c.name} {c.gstin ? `(${c.gstin})` : ''}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                                {pendingSyncData.removed.length > 0 && (
+                                    <div>
+                                        <div className="font-bold text-[#EF4444] mb-2 flex items-center gap-1">Companies Removed from Tally ({pendingSyncData.removed.length}):</div>
+                                        <ul className="list-disc pl-5 m-0 space-y-1 text-[#EF4444]">
+                                            {pendingSyncData.removed.map(c => <li key={c.id} className="truncate">{c.name} {c.gstin ? `(${c.gstin})` : ''}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex gap-[12px]">
+                                <button
+                                    onClick={() => {
+                                        setCompanies(pendingSyncData.all);
+                                        setPendingSyncData(null);
+                                    }}
+                                    className="flex-1 w-full px-[16px] py-[12px] bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold rounded-[12px] transition-colors cursor-pointer"
+                                    style={{ boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)' }}
+                                >
+                                    Acknowledge & Update List
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
             {/* ─── Persistent Top Navigation ─── */}
             <div className="flex border-b border-[#E2E8F0] mb-[24px] overflow-x-auto no-scrollbar relative z-10 bg-white sticky top-0 px-[36px] py-[2px]">
                 {['Company', 'Rules', 'Source', 'ERP', 'Reports', 'Storage'].map((tab) => {
@@ -681,39 +781,69 @@ export default function Config() {
                                         <ConfigCard icon={<Building2 size={22} />} title="Company configurations" subtitle="Manage companies, statutory details and ERP connectivity" accentColor="#0F766E" delay={0}>
                                             <div className="flex flex-col gap-[8px] mb-[4px]">
                                                 <div className="flex items-center justify-between mb-[4px]">
-                                                    <div className="text-[11px] font-black text-[#64748B] uppercase tracking-wider flex items-center gap-[6px]">
-                                                        <Building2 size={12} /> Registered Companies ({companies.length})
+                                                    <div className="text-[11px] font-black text-[#64748B] uppercase tracking-wider flex flex-col gap-[2px]">
+                                                        <div className="flex items-center gap-[6px]">
+                                                            <Building2 size={12} /> Registered Companies ({companies.length})
+                                                        </div>
+                                                        {(lastSyncedAgoStr || syncError) && (
+                                                            <div className="font-normal text-[9px] lowercase flex items-center gap-[4px]" style={{ color: syncError ? '#EF4444' : '#94A3B8' }}>
+                                                                <RefreshCw size={9} className={isSyncing ? "animate-spin" : ""} /> 
+                                                                {syncError ? "Sync failed" : `Last synced: ${lastSyncedAgoStr}`}
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <button
-                                                        onClick={() => { setCompanyView('add'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); }}
-                                                        className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0] hover:bg-[#DCFCE7]"
-                                                    >
-                                                        <Plus size={12} /> Add Company
-                                                    </button>
+                                                    <div className="flex items-center gap-[8px]">
+                                                        <button
+                                                            onClick={() => fetchCompaniesInfo(true)}
+                                                            className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0F9FF] text-[#0284C7] border-[#BAE6FD] hover:bg-[#E0F2FE]"
+                                                        >
+                                                            <RefreshCw size={12} className={isSyncing ? "animate-spin" : ""} /> Sync with Tally
+                                                        </button>
+                                                        <button
+                                                            onClick={() => { setCompanyView('add'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); }}
+                                                            className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0] hover:bg-[#DCFCE7]"
+                                                        >
+                                                            <Plus size={12} /> Add Company
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                {companies.map(c => (
+                                                {companies.map(c => {
+                                                    const isRowActive = activeCompanyId === c.id;
+                                                    let hash = 0;
+                                                    const avatarName = c.name || (c as any).trade_name || '?';
+                                                    for (let i = 0; i < avatarName.length; i++) hash = avatarName.charCodeAt(i) + ((hash << 5) - hash);
+                                                    const bgHue = Math.abs(hash % 360);
+                                                    
+                                                    const typeLabel = companyTypes.find(t => t.value === c.type)?.label || c.type || 'Company';
+
+                                                    return (
                                                     <motion.div
                                                         key={c.id}
                                                         whileHover={{ x: 2 }}
-                                                        className={`flex items-center gap-[14px] p-[14px_18px] rounded-[12px] border transition-all cursor-pointer ${c.isActive ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm' : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'}`}
+                                                        className={`flex items-center gap-[14px] p-[14px_18px] rounded-[12px] border transition-all cursor-pointer ${isRowActive ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm' : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'}`}
                                                         onClick={() => handleSetActive(c.id)}
                                                     >
-                                                        <div className={`w-[40px] h-[40px] rounded-[10px] flex items-center justify-center shrink-0 text-[14px] font-black ${c.isActive ? 'bg-[#0F766E] text-white shadow-md' : 'bg-[#E2E8F0] text-[#64748B]'}`}>
-                                                            {c.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                                                        <div className="w-[40px] h-[40px] rounded-[10px] flex items-center justify-center shrink-0 text-[14px] font-black text-white shadow-md"
+                                                             style={{ backgroundColor: `hsl(${bgHue}, 70%, 45%)` }}>
+                                                            {avatarName.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
                                                         </div>
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-[8px]">
                                                                 <span className="text-[13px] font-bold text-[#1A2640] truncate">{c.name}</span>
-                                                                {c.isActive && (
+                                                                {isRowActive && (
                                                                     <span className="bg-[#0F766E] text-white text-[8px] font-black px-[6px] py-[2px] rounded-full uppercase tracking-wider">Active</span>
                                                                 )}
                                                             </div>
                                                             <div className="text-[11px] text-[#94A3B8] flex items-center gap-[12px] mt-[2px]">
-                                                                <span>GSTIN: {c.gstin || '—'}</span>
+                                                                {'GSTIN: ' + (c.gstin || '—')} 
                                                                 <span>·</span>
-                                                                <span>{companyTypes.find(t => t.value === c.type)?.label || c.type}</span>
-                                                                <span>·</span>
-                                                                <span>{c.city}, {c.state}</span>
+                                                                <span>{typeLabel}</span>
+                                                                {c.city && c.state && (
+                                                                    <>
+                                                                        <span>·</span>
+                                                                        <span>{c.city}, {c.state}</span>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-[8px]" onClick={e => e.stopPropagation()}>
@@ -724,18 +854,9 @@ export default function Config() {
                                                             >
                                                                 <Edit2 size={14} />
                                                             </button>
-                                                            {!c.isActive && (
-                                                                <button
-                                                                    onClick={() => handleDeleteCompany(c.id)}
-                                                                    className="text-[#94A3B8] hover:text-[#EF4444] p-[6px] rounded-[8px] hover:bg-[#FEF2F2] transition-all"
-                                                                    title="Delete Company"
-                                                                >
-                                                                    <Trash2 size={14} />
-                                                                </button>
-                                                            )}
                                                         </div>
                                                     </motion.div>
-                                                ))}
+                                                )})}
                                             </div>
 
                                             {/* Quick Info Banner */}
@@ -1043,7 +1164,7 @@ export default function Config() {
                                                 {/* Submit Buttons */}
                                                 <div className="flex items-center gap-[10px] pt-[16px] border-t border-[#E2E8F0]">
                                                     <button
-                                                        onClick={() => {
+                                                        onClick={async () => {
                                                             const missingFields = [];
                                                             if (!newCompany.name) missingFields.push('Company Name');
                                                             if (!newCompany.mailingName) missingFields.push('Mailing Name');
@@ -1060,26 +1181,91 @@ export default function Config() {
                                                             }
                                                             
                                                             setValidationError(null);
-                                                            setShowConfirmAction({
-                                                                isOpen: true,
-                                                                title: companyView === 'add' ? 'Create New Company?' : 'Save Changes?',
-                                                                message: `Are you sure you want to ${companyView === 'add' ? 'create' : 'save changes for'} "${newCompany.name}"?`,
-                                                                onConfirm: () => {
-                                                                    if (companyView === 'edit' && editingCompany) {
-                                                                        setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...newCompany as CompanyData, id: editingCompany.id } : c));
-                                                                        setEditingCompany(null);
-                                                                        setCompanyView('list');
-                                                                        setNewCompany(DEFAULT_COMPANY);
-                                                                    } else {
+
+                                                            if (companyView === 'add') {
+                                                                const payload = {
+                                                                    process: {
+                                                                        company_creation: true,
+                                                                        vendor_creation: false,
+                                                                        ledger_creation: false
+                                                                    },
+                                                                    company: {
+                                                                        payload: {
+                                                                            registeredCompanyName: newCompany.name,
+                                                                            mailingName: newCompany.mailingName,
+                                                                            tradeName: newCompany.tradeName,
+                                                                            companyType: newCompany.type,
+                                                                            country: newCompany.country,
+                                                                            gstin: newCompany.gstin,
+                                                                            pan: newCompany.pan,
+                                                                            cin: newCompany.cin,
+                                                                            tan: newCompany.tan,
+                                                                            registeredAddress: newCompany.address,
+                                                                            city: newCompany.city,
+                                                                            state: newCompany.state,
+                                                                            pincode: newCompany.pincode,
+                                                                            phone: newCompany.phone,
+                                                                            accountsEmail: newCompany.email,
+                                                                            financialYearStarts: newCompany.fyStart,
+                                                                            booksBeginningFrom: newCompany.booksFrom ? newCompany.booksFrom.replace(/-/g, '') : '',
+                                                                            baseCurrency: {
+                                                                                'INR': '₹',
+                                                                                'USD': '$',
+                                                                                'EUR': '€',
+                                                                                'GBP': '£'
+                                                                            }[newCompany.currency as 'INR' | 'USD' | 'EUR' | 'GBP'] || newCompany.currency,
+                                                                        }
+                                                                    },
+                                                                    invoice: {},
+                                                                    ledger: {}
+                                                                };
+
+                                                                setIsCreatingCompany(true);
+                                                                try {
+                                                                    const response = await fetch('https://wheelsonai.app.n8n.cloud/webhook/tally-company-creation', {
+                                                                        method: 'POST',
+                                                                        headers: {
+                                                                            'Content-Type': 'application/json',
+                                                                            'x-api-key': 'WXuQeIpMOjxTkCsP1azLo9l0NB7GZqvUtSV6d42Jm3YhHwrE'
+                                                                        },
+                                                                        body: JSON.stringify(payload)
+                                                                    });
+                                                                    
+                                                                    if (response.ok) {
+                                                                        toast.success("Company created successfully in Tally");
                                                                         handleAddCompany();
+                                                                    } else {
+                                                                        const errorData = await response.json().catch(() => ({}));
+                                                                        toast.error(errorData.message || "Failed to create company");
                                                                     }
+                                                                } catch (err: any) {
+                                                                    toast.error(err.message || "Network error occurred");
+                                                                } finally {
+                                                                    setIsCreatingCompany(false);
                                                                 }
-                                                            });
+                                                            } else {
+                                                                setShowConfirmAction({
+                                                                    isOpen: true,
+                                                                    title: 'Save Changes?',
+                                                                    message: `Are you sure you want to save changes for "${newCompany.name}"?`,
+                                                                    onConfirm: () => {
+                                                                        if (editingCompany) {
+                                                                            setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...newCompany as CompanyData, id: editingCompany.id } : c));
+                                                                            setEditingCompany(null);
+                                                                            setCompanyView('list');
+                                                                            setNewCompany(DEFAULT_COMPANY);
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
                                                         }}
-                                                        className="flex items-center gap-[6px] bg-[#0F766E] hover:bg-[#115E59] text-white text-[13px] font-bold px-[20px] py-[10px] rounded-[10px] border-none cursor-pointer transition-colors shadow-sm"
+                                                        disabled={isCreatingCompany}
+                                                        className={`flex items-center gap-[6px] text-white text-[13px] font-bold px-[20px] py-[10px] rounded-[10px] border-none transition-colors shadow-sm ${
+                                                            isCreatingCompany ? 'bg-[#94A3B8] cursor-not-allowed' : 'bg-[#0F766E] hover:bg-[#115E59] cursor-pointer'
+                                                        }`}
                                                     >
-                                                        <CheckCircle size={14} />
-                                                        {companyView === 'edit' ? 'Save Changes' : 'Create Company'}
+                                                        {isCreatingCompany ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                                                        {companyView === 'edit' ? 'Save Changes' : (isCreatingCompany ? 'Creating...' : 'Create Company')}
                                                     </button>
                                                     <button
                                                         onClick={() => { setCompanyView('list'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); setValidationError(null); }}

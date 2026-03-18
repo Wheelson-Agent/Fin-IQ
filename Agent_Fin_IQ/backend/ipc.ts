@@ -581,6 +581,10 @@ export function registerIpcHandlers() {
         return await queries.getAllCompanies();
     });
 
+    ipcMain.handle('api/companies', async () => {
+        return await queries.getSyncedCompanies();
+    });
+
     // ─── DASHBOARD ──────────────────────────────────────────────
     ipcMain.handle('dashboard:get-metrics', async (_event, { companyId } = {}) => {
         return await queries.getDashboardMetrics(companyId);
