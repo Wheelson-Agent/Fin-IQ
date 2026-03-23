@@ -111,8 +111,8 @@ export async function updateInvoiceOCR(id: string, data: any): Promise<Invoice> 
  * Delete an invoice permanently.
  * @param id - Invoice UUID
  */
-export async function deleteInvoice(id: string): Promise<{ success: boolean }> {
-    return invoke<{ success: boolean }>('invoices:delete', { id });
+export async function deleteInvoice(id: string): Promise<{ success: boolean; error?: string }> {
+    return invoke<{ success: boolean; error?: string }>('invoices:delete', { id });
 }
 
 /**

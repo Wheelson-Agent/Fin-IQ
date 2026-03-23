@@ -228,7 +228,18 @@ export function registerIpcHandlers() {
     ipcMain.handle('invoices:finalize-batch-file', async (_event, { id, batchId, fileName, isSuccess }) => {
         const uploadDate = new Date().toISOString().split('T')[0];
         const newPath = await finalizeFileStorage(batchId, fileName, isSuccess, uploadDate);
-        return await queries.updateInvoiceWithOCR(id, { status: isSuccess ? 'Processing' : 'Failed', file_path: newPath });
+
+        // RACECONDITION FIX: Do not reset status to 'Processing' if n8n already moved it to a terminal state
+        const current = await queries.getInvoiceById(id);
+        const currentStatus = current?.status || 'Processing';
+        
+        const terminalStatuses = ['Ready to Post', 'Awaiting Input', 'Handoff', 'Posted', 'Auto-Posted'];
+        const nextStatus = (isSuccess && !terminalStatuses.includes(currentStatus)) ? 'Processing' : (isSuccess ? currentStatus : 'Failed');
+
+        return await queries.updateInvoiceWithOCR(id, { 
+            status: nextStatus, 
+            file_path: newPath 
+        });
     });
 
     ipcMain.handle('invoices:revalidate', async (_event, { id }) => {
@@ -657,6 +668,10 @@ export function registerIpcHandlers() {
         return await queries.getAllCompanies();
     });
 
+    ipcMain.handle('api/companies', async () => {
+        return await queries.getSyncedCompanies();
+    });
+
     // ─── DASHBOARD ──────────────────────────────────────────────
 
     // ─── CONFIGURATION ──────────────────────────────────────────
@@ -667,6 +682,15 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('config:save-rules', async (_event, { rules, companyId }) => {
         await queries.setAppConfig('posting_rules', rules, companyId);
+        return { success: true };
+    });
+
+    ipcMain.handle('config:get-extended-criteria', async (_event, { companyId }) => {
+        return await queries.getAppConfig('auto_post_criteria_extended', companyId);
+    });
+
+    ipcMain.handle('config:save-extended-criteria', async (_event, { criteria, companyId }) => {
+        await queries.setAppConfig('auto_post_criteria_extended', criteria, companyId);
         return { success: true };
     });
 

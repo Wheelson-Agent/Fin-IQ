@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { Search, ChevronUp, ChevronDown, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SectionHeader } from '../components/at/SectionHeader';
+import { RevalidationIcon } from '../components/at/RevalidationIcon';
 
 import { getInvoices } from '../lib/api';
 import type { Invoice } from '../lib/types';
@@ -93,7 +94,7 @@ export default function FailedQueue() {
                     </span>
                 )}
                 <button className="flex items-center gap-[6px] bg-white border border-[#1E6FD9] text-[#1E6FD9] rounded-[8px] p-[8px_14px] text-[13px] font-bold cursor-pointer hover:bg-[#EBF3FF] transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled={selectedRows.size === 0}>
-                    <RefreshCw size={16} /> Bulk Revalidate
+                    <RevalidationIcon size={16} /> Bulk Revalidate
                 </button>
                 <button className="flex items-center gap-[6px] bg-white border border-[#EF4444] text-[#EF4444] rounded-[8px] p-[8px_14px] text-[13px] font-bold cursor-pointer hover:bg-[#FEF2F2] transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled={selectedRows.size === 0}>
                     <Trash2 size={16} /> Bulk Delete

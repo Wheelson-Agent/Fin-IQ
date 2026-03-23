@@ -6,19 +6,10 @@ release/
 # Config secrets
 config/.env
 
-# Data directories
+# Data and Artifacts
 data/
+logs/
+tmp/
 *.log
-
-# OS files
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# IDE
-.vscode/
-.idea/
-
-# Temporary
 *.tmp
 *.bak

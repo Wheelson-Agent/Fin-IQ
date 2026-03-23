@@ -21,6 +21,7 @@ export interface Invoice {
     id: string;
     file_name: string;
     file_path: string;
+    file_location: string | null;
     batch_id: string | null;
     invoice_no: string | null;
     vendor_name: string | null;
@@ -65,6 +66,7 @@ export interface Invoice {
     total_in_words?: string | null;
 
     updated_at: string;
+    erp_sync_id?: string | null;
     items?: InvoiceItem[];
     vendor_gst?: string;
     validation_time?: string;
