@@ -55,6 +55,7 @@ const ALLOWED_CHANNELS = [
     // Companies & Dashboard
     'companies:get-active',
     'companies:get-all',
+    'api/companies',
     'dashboard:get-metrics',
     // Audit
     'audit:get-logs',
@@ -72,6 +73,7 @@ const ALLOWED_CHANNELS = [
     'dialog:open-directory',
     'config:get-storage-path',
     'config:set-storage-path',
+    'items:get-all',
 ];
 
 /**

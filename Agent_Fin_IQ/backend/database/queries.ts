@@ -25,6 +25,79 @@ import { sendInvoiceToTally } from '../sync/tally_posting';
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * Helper to determine the processing_status of an invoice based on validation flags and mapping state.
+ * This encapsulates the business logic for tab movement.
+ */
+export async function evaluateInvoiceStatus(
+    validationData: any, 
+    vendorId: string | null, 
+    invoiceNumber: string | null,
+    lineItems: any[] = [],
+    n8nStatus?: string,
+    companyId?: string,
+    grandTotal?: number
+): Promise<string> {
+    const getVal = (key: string) => {
+        if (!validationData) return false;
+        const val = validationData[key] ?? validationData[key.toLowerCase().replace(/ /g, '_')];
+        return val === true || String(val).toLowerCase() === 'true';
+    };
+
+    // 1. Structural / Technical Validations
+    const buyerPassed = getVal('buyer_verification');
+    const gstPassed = getVal('gst_validation_status');
+    const dataPassed = getVal('invoice_ocr_data_validation') || getVal('invoice_ocr_data_valdiation');
+    const duplicatePassed = getVal('duplicate_check');
+    const stockItemsMatch = getVal('line_item_match_status');
+
+    // 2. Master Data / Input Validations
+    const vendorPassed = getVal('vendor_verification') && !!vendorId;
+    
+    // Ledger validation: every line must have a ledger_id
+    const ledgerPassed = lineItems.length > 0 && lineItems.every(li => li.ledger_id || li.gl_account_id);
+
+    // 3. Status Decision
+    // We treat buyer, gst, duplicate, and basic extraction as 'Major' technical checks.
+    // Master data issues (Vendor, Ledger/Stock Items, Invoice No) route to 'Awaiting Input'.
+    const majorChecksPassed = buyerPassed && gstPassed && dataPassed && duplicatePassed;
+    const hasInvoiceNo = !!(invoiceNumber && invoiceNumber !== 'Unknown' && invoiceNumber !== 'N/A');
+
+    if (n8nStatus === 'Failed') return 'Handoff';
+
+    if (majorChecksPassed) {
+        if (vendorPassed && ledgerPassed && hasInvoiceNo && stockItemsMatch) {
+            let finalStatus = 'Ready to Post';
+            
+            // --- POSTING RULES EVALUATION ---
+            if (companyId) {
+                try {
+                    const rules = await getAppConfig('posting_rules', companyId);
+                    if (rules && rules.postingMode === 'auto') {
+                        const limit = rules.criteria?.enableValueLimit ? (rules.criteria.valueLimit || 0) : Infinity;
+                        const total = Number(grandTotal || 0);
+
+                        if (total <= limit) {
+                            console.log(`[DB] Auto-Posting: Total ${total} <= Limit ${limit}. Triggering 'Auto-Posted'.`);
+                            finalStatus = 'Auto-Posted';
+                        }
+                    }
+                } catch (ruleErr) {
+                    console.error('[DB] Error evaluating posting rules:', ruleErr);
+                }
+            }
+            
+            return finalStatus;
+        } else {
+            // Structurally valid but missing master data or invoice number -> Awaiting Input
+            return 'Awaiting Input';
+        }
+    } else {
+        // Broadly failed or duplicate found -> Handoff
+        return 'Handoff';
+    }
+}
+
+/**
  * Fetch all invoices, ordered by most recent first.
  * Supports optional company filtering.
  *
@@ -121,87 +194,90 @@ export async function createInvoice(data: {
  * @param data - Extracted fields from Document AI
  * @returns Updated invoice row
  */
-export async function updateInvoiceWithOCR(id: string, data: {
-    invoice_no?: string;
-    vendor_name?: string;
-    date?: string;
-    due_date?: string;
-    amount?: number;
-    gst?: number;
-    total?: number;
-    po_number?: string;
-    gl_account?: string;
-    ocr_raw_data?: object;
-    status?: string;
-    processing_time?: string;
-    doc_type?: string;
-    posted_to_tally_json?: object;
-    all_data_invoice?: object;
-    file_location?: string;
-    file_path?: string;
-    tally_id?: string;
-    uploader_name?: string;
-    vendor_id?: string;
-    is_mapped?: boolean;
-    vendor_gst?: string;
-    validation_time?: string;
-}) {
-    const result = await query(
+export async function updateInvoiceWithOCR(id: string, data: any) {
+    // 1. Fetch current invoice to get existing ocr_raw_payload
+    const current = await getInvoiceById(id);
+    if (!current) throw new Error('Invoice not found');
 
-        `UPDATE ap_invoices SET
-       invoice_number = COALESCE($2, invoice_number),
-       vendor_name = COALESCE($3, vendor_name),
-       invoice_date = CASE 
-           WHEN $4 ~ '^\d{8}$' THEN to_date($4, 'DDMMYYYY')
-           WHEN $4 ~ '^\d{4}-\d{2}-\d{2}$' THEN $4::date
-           WHEN $4 ~ '^\d{2}-\d{2}-\d{4}$' THEN to_date($4, 'DD-MM-YYYY')
-           WHEN $4 ~ '^\d{2}/\d{2}/\d{4}$' THEN to_date($4, 'DD/MM/YYYY')
-           ELSE invoice_date 
-       END,
-       due_date = COALESCE($5::date, due_date),
-       sub_total = COALESCE($6, sub_total),
-       tax_total = COALESCE($7, tax_total),
-       grand_total = COALESCE($8, grand_total),
-       po_number = COALESCE($9, po_number),
-       gl_account = COALESCE($10, gl_account),
-       ocr_raw_payload = COALESCE($11::jsonb, ocr_raw_payload),
-       processing_status = COALESCE($12, processing_status),
-       processing_time = COALESCE($13, processing_time),
-       doc_type = COALESCE($14, doc_type),
-       posted_to_tally_json = COALESCE($15::jsonb, posted_to_tally_json),
-       all_data_invoice = COALESCE($16::jsonb, all_data_invoice),
-       file_location = COALESCE($17, file_location),
-       file_path = COALESCE($18, file_path),
-       tally_id = COALESCE($19, tally_id),
-       uploader_name = COALESCE($20, uploader_name),
-       vendor_id = COALESCE($21::uuid, vendor_id),
-       is_mapped = COALESCE($22, is_mapped),
-       vendor_gst = COALESCE($23, vendor_gst),
-       validation_time = COALESCE($24, validation_time),
-       updated_at = NOW()
-      WHERE id = $1
-      RETURNING *`,
-        [
-            id,
-            data.invoice_no, data.vendor_name, data.date, data.due_date,
-            data.amount, data.gst, data.total, data.po_number, data.gl_account,
-            data.ocr_raw_data ? JSON.stringify(data.ocr_raw_data) : null,
-            data.status, data.processing_time,
-            data.doc_type,
-            data.posted_to_tally_json ? JSON.stringify(data.posted_to_tally_json) : null,
-            data.all_data_invoice ? JSON.stringify(data.all_data_invoice) : null,
-            data.file_location,
-            data.file_path,
-            data.tally_id,
-            data.uploader_name,
-            data.vendor_id,
-            data.is_mapped,
-            data.vendor_gst,
-            data.validation_time
-        ]
-    );
+    let rawPayload = current.ocr_raw_payload || {};
+    if (typeof rawPayload === 'string') {
+        try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
+    }
 
+    // 2. Identify allowed columns to separate from raw payload
+    const allowedCols = [
+        "invoice_number", "vendor_name", "invoice_date", "due_date",
+        "sub_total", "tax_total", "grand_total", "po_number", "gl_account",
+        "processing_status", "processing_time", "doc_type", "posted_to_tally_json",
+        "all_data_invoice", "file_location", "file_path", "tally_id",
+        "uploader_name", "vendor_id", "is_mapped", "vendor_gst", "validation_time",
+        "irn", "ack_no", "ack_date", "eway_bill_no"
+    ];
 
+    // 4. Update primary columns and merge others into rawPayload
+    const updateValues: Record<string, any> = {};
+    const ocrData = data.ocr_raw_data || data; // Accept both nested and flat structures
+
+    Object.keys(ocrData).forEach(key => {
+        let dbKey = key;
+        if (key === 'invoice_no') dbKey = 'invoice_number';
+        if (key === 'date') dbKey = 'invoice_date';
+        if (key === 'amount') dbKey = 'sub_total';
+        if (key === 'gst') dbKey = 'tax_total';
+        if (key === 'total') dbKey = 'grand_total';
+        if (key === 'status') dbKey = 'processing_status';
+
+        if (allowedCols.includes(dbKey) && !['file_path', 'file_location'].includes(dbKey)) {
+            updateValues[dbKey] = ocrData[key];
+        } else if (!allowedCols.includes(dbKey)) {
+            // Merge into ocr_raw_payload
+            rawPayload[key] = ocrData[key];
+        }
+    });
+
+    // 5. Fetch line items and re-evaluate status if n8n_val_json_data or mapping fields changed
+    let n8nVal = updateValues.n8n_val_json_data || current.n8n_val_json_data;
+    if (typeof n8nVal === 'string') {
+        try { n8nVal = JSON.parse(n8nVal); } catch (e) { n8nVal = {}; }
+    }
+    if (!n8nVal) n8nVal = {};
+
+    const vId = updateValues.vendor_id || current.vendor_id;
+    const invNo = updateValues.invoice_number || current.invoice_number;
+    const items = await getInvoiceItems(id);
+    const compId = updateValues.company_id || current.company_id;
+    const gTotal = updateValues.grand_total || current.grand_total;
+
+    // Always re-calculate status on save to ensure correct tab movement
+    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal);
+    updateValues.processing_status = finalStatus;
+
+    // Special handling for date strings to ensure PostgreSQL compatibility
+    const dateFields = ["invoice_date", "due_date", "ack_date"];
+    
+    const setClauses = Object.keys(updateValues).map((k, i) => {
+        if (dateFields.includes(k)) {
+            const val = updateValues[k];
+            return `${k} = CASE 
+                WHEN $${i + 2}::text ~ '^\\d{8}$' THEN to_date($${i + 2}::text, 'DDMMYYYY')
+                WHEN $${i + 2}::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN $${i + 2}::text::date
+                WHEN $${i + 2}::text ~ '^\\d{2}-\\d{2}-\\d{4}$' THEN to_date($${i + 2}::text, 'DD-MM-YYYY')
+                WHEN $${i + 2}::text ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date($${i + 2}::text, 'DD/MM/YYYY')
+                ELSE ${k}
+            END`;
+        }
+        return `${k} = COALESCE($${i + 2}, ${k})`;
+    });
+
+    // Add ocr_raw_payload update
+    const payloadIndex = setClauses.length + 2;
+    setClauses.push(`ocr_raw_payload = $${payloadIndex}::jsonb`);
+    setClauses.push(`updated_at = NOW()`);
+
+    const sql = `UPDATE ap_invoices SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`;
+    const params = [id, ...Object.values(updateValues), JSON.stringify(rawPayload)];
+
+    const result = await query(sql, params);
     return result.rows[0];
 }
 
@@ -265,6 +341,7 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
           is_posted_to_tally = true, 
           processing_status = 'Auto-Posted', 
           erp_sync_status = $4,
+          erp_sync_id = COALESCE($3, erp_sync_id),
           posted_to_tally_json = COALESCE($2::jsonb, posted_to_tally_json),
           tally_id = COALESCE($3, tally_id),
           updated_at = NOW() 
@@ -314,15 +391,24 @@ export async function getInvoiceStatusCounts(companyId?: string) {
 // ─────────────────────────────────────────────────────────────
 
 export async function getLedgerMasters(companyId?: string) {
-    let sql = `SELECT id, name, parent_group, account_type as ledger_type, erp_sync_id as tally_guid, is_active FROM ledger_master WHERE is_active = true`;
+    // We use DISTINCT ON (name) to ensure each ledger name appears only once.
+    // By ordering by name then (company_id IS NOT NULL) DESC, we prioritize 
+    // the company-specific record over the global NULL one for the same name.
+    let sql = `
+        SELECT DISTINCT ON (name) 
+            id, name, parent_group, account_type as ledger_type, erp_sync_id as tally_guid, is_active 
+        FROM ledger_master 
+        WHERE is_active = true
+    `;
     const params: any[] = [];
 
-    // Optional company filtering, though expense/tax ledgers might be global (NULL)
     if (companyId) {
         sql += ` AND (company_id = $1 OR company_id IS NULL)`;
         params.push(companyId);
     }
-    sql += ` ORDER BY account_type, name`;
+    
+    // DISTINCT ON requires the first ORDER BY column to match the DISTINCT ON column
+    sql += ` ORDER BY name, (company_id IS NOT NULL) DESC`;
 
     const { rows } = await query(sql, params);
     return rows;
@@ -382,6 +468,36 @@ export async function getActiveCompany() {
 export async function getAllCompanies() {
     const { rows } = await query(`SELECT id, name, gstin, is_active FROM companies ORDER BY name ASC`);
     return rows;
+}
+
+/**
+ * Fetch all synced companies, adhering to the REST endpoint shape.
+ * 
+ * @returns Object with companies (array), count, and last_synced_at
+ */
+export async function getSyncedCompanies() {
+    try {
+        const { rows } = await query(`
+            SELECT *
+            FROM companies 
+            ORDER BY created_at DESC
+        `);
+        
+        // Find the latest created_at from the returned rows (since they are ordered DESC, it's the first row)
+        let lastSyncedAt = null;
+        if (rows.length > 0 && rows[0].created_at) {
+            lastSyncedAt = rows[0].created_at;
+        }
+
+        return {
+            companies: rows,
+            count: rows.length,
+            last_synced_at: lastSyncedAt
+        };
+    } catch (err: any) {
+        console.error('[QUERIES] getSyncedCompanies failed:', err.message);
+        throw err;
+    }
 }
 
 
@@ -610,11 +726,11 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
 
         // Determine Final Status based on validation checks
         // Robustly extract validation flags from either a JSON string or top-level fields
-        let n8nVal = typeof invData.n8n_val_json_data === 'string' ? JSON.parse(invData.n8n_val_json_data) : (invData.n8n_val_json_data || {});
+        let n8nVal = (typeof invData.n8n_val_json_data === 'string' ? JSON.parse(invData.n8n_val_json_data) : invData.n8n_val_json_data) || {};
         
         // If n8nVal is empty but top-level fields exist, collect them
         const valKeys = [
-            'buyer_verification', 'gst_validation_status', 'invoice_ocr_data_valdiation', 
+            'buyer_verification', 'gst_validation_status', 'invoice_ocr_data_validation', 
             'vendor_verification', 'duplicate_check', 'line_item_match_status',
             'Company Verified', 'GST Validated', 'Data Validated', 'Vendor Verified', 'Document Duplicate Check', 'Stock Items Matched'
         ];
@@ -629,6 +745,7 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         invData.n8n_val_json_data = JSON.stringify(n8nVal);
 
         const getVal = (key: string) => {
+            if (!n8nVal) return false;
             const val = n8nVal[key] ?? n8nVal[key.toLowerCase().replace(/ /g, '_')];
             return val === true || String(val).toLowerCase() === 'true';
         };
@@ -636,59 +753,31 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         const checks = [
             getVal('buyer_verification'),
             getVal('gst_validation_status'),
-            getVal('invoice_ocr_data_valdiation'),
+            getVal('invoice_ocr_data_validation'),
             getVal('vendor_verification'),
             getVal('line_item_match_status')
         ];
         
-        const isDuplicate = getVal('duplicate_check');
+        console.log(`[DB] ingestN8nData Final Payload Source:`, invData.file_name);
 
-        console.log(`[DB] ingestN8nData Checks for ${invoiceId}:`, {
-            buyer: checks[0],
-            gst: checks[1],
-            ocr: checks[2],
-            vendor: checks[3],
-            lineItems: checks[4],
-            duplicate: isDuplicate,
-            vendorId: vendorId
+        // Pre-scan line items from payload for status evaluation
+        const tempLineItems = (payload.ap_invoice_lines || []).map((line: any) => {
+            const candidates = [line.mapped_ledger, line.gl_account_id, line.ledger, line.possible_gl_names, line.description].filter(v => v);
+            // This is a naive check; real resolution happens below, but for status we just need to know if one exists.
+            return { ledger_id: candidates.length > 0 ? 'exists' : null };
         });
 
-        const allPassed = checks.every(c => c === true);
-        
-        let finalStatus = 'Pending Approval';
-        // ─── CANONICAL READY-TO-POST RULE ───
-        if (allPassed && !isDuplicate && vendorId && (invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
-            finalStatus = 'Ready to Post';
-        } else if (isDuplicate || !allPassed || invData.n8n_validation_status === 'Failed' || !vendorId || !(invData.invoice_number || invData.invoice_no || invData.invoiceNo)) {
-            // Any failure or duplicate check is true must NOT be Ready to Post
-            // Directing to 'Handoff' for manual review as per user request
-            finalStatus = 'Handoff';
-        }
+        const finalStatus = await evaluateInvoiceStatus(
+            n8nVal, 
+            vendorId, 
+            invData.invoice_number || invData.invoice_no || invData.invoiceNo,
+            tempLineItems,
+            invData.n8n_validation_status,
+            invData.company_id,
+            invData.grand_total
+        );
 
-        // --- POSTING RULES EVALUATION ---
-        // implemented as per request: Case A & Case B
-        if (finalStatus === 'Ready to Post') {
-            try {
-                const rules = await getAppConfig('posting_rules', invData.company_id);
-                if (rules && rules.postingMode === 'auto') {
-                    const limit = rules.criteria?.enableValueLimit ? (rules.criteria.valueLimit || 0) : Infinity;
-                    const total = Number(invData.grand_total || 0);
-
-                    if (total <= limit) {
-                        console.log(`[DB] Auto-Posting Case A: Total ${total} <= Limit ${limit}. Triggering Tally Post.`);
-                        finalStatus = 'Auto-Posted';
-                    } else {
-                        console.log(`[DB] Auto-Posting Case B: Total ${total} > Limit ${limit}. Remaining in Ready to Post.`);
-                    }
-                } else if (rules && rules.postingMode === 'manual') {
-                    console.log(`[DB] Manual Post active. Remaining in Ready to Post.`);
-                }
-            } catch (ruleErr) {
-                console.error('[DB] Error evaluating posting rules:', ruleErr);
-            }
-        }
-
-        console.log(`[DB] ingestN8nData Final Status for ${invoiceId}: ${finalStatus} (allPassed: ${allPassed})`);
+        console.log(`[DB] ingestN8nData Final Status for ${invoiceId}: ${finalStatus}`);
 
         // --- DYNAMIC DATABASE SCHEMAS --- 
         const allowedApInvoicesCols = [
@@ -721,7 +810,13 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             if (invData.invoice_no !== undefined && invData.invoice_number === undefined) invData.invoice_number = invData.invoice_no;
             if (invData.invoiceNo !== undefined && invData.invoice_number === undefined) invData.invoice_number = invData.invoiceNo;
 
-            const invKeys = Object.keys(invData).filter(k => allowedApInvoicesCols.includes(k) && invData[k] !== undefined);
+            const invKeys = Object.keys(invData).filter(k => 
+                allowedApInvoicesCols.includes(k) && 
+                !['file_path', 'file_location'].includes(k) &&
+                invData[k] !== undefined && 
+                invData[k] !== null && 
+                invData[k] !== ""
+            );
             if (invKeys.length > 0) {
                 const setClause = invKeys.map((k, i) => `${k} = $${i + 2}`).join(', ');
                 const invParams = invKeys.map(k => {

@@ -25,7 +25,7 @@ function AppShell() {
   const getPageTitle = (path: string) => {
     if (path === '/') return 'Dashboard';
     if (path.startsWith('/ap-workspace')) return 'AP Workspace';
-    if (path.startsWith('/detail')) return 'Invoice Detail';
+    if (path.startsWith('/detail')) return 'Supplier Reference';
     if (path.startsWith('/audit')) return 'Audit Trail';
     if (path.startsWith('/vendors')) return 'Vendor Master';
     if (path.startsWith('/items')) return 'Item Master';
@@ -43,7 +43,7 @@ function AppShell() {
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         <Topbar
-          onOpenCmd={() => {}}
+          onOpenCmd={() => { }}
           onOpenNotif={() => setNotifOpen(!notifOpen)}
           pageTitle={getPageTitle(location.pathname)}
           theme={theme}

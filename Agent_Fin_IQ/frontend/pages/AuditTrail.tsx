@@ -6,6 +6,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { SectionHeader } from '../components/at/SectionHeader';
 import { getAuditLogs } from '../lib/api';
+import { RevalidationIcon } from '../components/at/RevalidationIcon';
 import type { AuditEvent } from '../lib/types';
 
 const eventTypeIcons: Record<AuditEvent['event_type'], React.ReactNode> = {
@@ -13,7 +14,7 @@ const eventTypeIcons: Record<AuditEvent['event_type'], React.ReactNode> = {
   Validated: <CheckCircle size={16} className="text-[#22C55E]" />,
   'Auto-Posted': <FileCheck size={16} className="text-[#22C55E]" />,
   Edited: <Edit3 size={16} className="text-[#F59E0B]" />,
-  Revalidated: <RefreshCw size={16} className="text-[#4A90D9]" />,
+  Revalidated: <RevalidationIcon size={16} className="text-[#4A90D9]" />,
   Rejected: <XCircle size={16} className="text-[#EF4444]" />,
   Approved: <CheckCircle size={16} className="text-[#22C55E]" />,
 };

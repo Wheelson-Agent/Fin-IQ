@@ -31,7 +31,7 @@ import UserProfile from './pages/UserProfile';
 import NotFound from './pages/NotFound';
 
 // Global styles
-import './index.css';
+import './styles/index.css';
 
 /**
  * Mount the React application to the DOM.
