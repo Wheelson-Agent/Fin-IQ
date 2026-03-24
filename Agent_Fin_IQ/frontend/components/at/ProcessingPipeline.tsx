@@ -345,71 +345,91 @@ export function ProcessingPipeline({
                 // Step 1: Uploading
                 updateStage('uploading', 'active');
 
-                const uploadedData = await runWithConcurrency(filePaths, 1, async (fp, i) => {
+                const uploadedData = await runWithConcurrency(filePaths, 3, async (fp, i) => {
                     const name = fileNames[i] || `file_${i}`;
                     setActiveFileName(name);
                     const fileData = fileDataArrays?.[i];
                     
-                    // @ts-ignore - added uploaderName last
-                    const res = await uploadInvoice(fp, name, batchName, fileData, uploaderName);
-                    
-                    if (res && res.id) {
-                        setConfirmedCount(prev => prev + 1);
+                    try {
+                        // @ts-ignore - added uploaderName last
+                        const res = await uploadInvoice(fp, name, batchName, fileData, uploaderName);
+                        if (res && res.id) {
+                            setConfirmedCount(prev => prev + 1);
+                        }
+                        setBatchCount(prev => prev + 1);
+                        return { fp, name, invoice: res };
+                    } catch (err) {
+                        console.error(`[Pipeline] Upload failed for ${name}:`, err);
+                        setBatchCount(prev => prev + 1);
+                        return { fp, name, invoice: null };
                     }
-                    
-                    setBatchCount(prev => prev + 1);
-                    return { fp, name, invoice: res };
                 });
 
-                const uploadFailed = uploadedData.some(d => !d.invoice);
-                if (uploadFailed) {
-                    console.error('[Pipeline] One or more uploads failed');
-                    updateStage('uploading', 'error', 'File storage failed', { sublabel: 'Could not store file in batch folder' });
+                const allUploadFailed = uploadedData.every(d => !d.invoice);
+                const someUploadFailed = uploadedData.some(d => !d.invoice);
+
+                if (allUploadFailed) {
+                    updateStage('uploading', 'error', 'All uploads failed', { sublabel: 'Could not store any files' });
                     onComplete();
                     return;
                 }
 
                 updateStage('uploading', 'done', undefined, {
                     label: 'Uploaded',
-                    sublabel: isBatch ? `${fileNames.length} files secured` : 'File secured'
+                    sublabel: someUploadFailed 
+                        ? `${uploadedData.filter(d => d.invoice).length}/${fileNames.length} secured` 
+                        : (isBatch ? `${fileNames.length} files secured` : 'File secured')
                 });
 
-                // Step 2 & 3: Run pipeline for all files in parallel (Pre-OCR -> OCR)
+                // Step 2 & 3: Run pipeline for successful files
                 updateStage('analyzing', 'active');
-
                 setBatchCount(0); 
-                const pipelineResults = await runWithConcurrency(uploadedData, 1, async (data) => {
+                const successfulUploads = uploadedData.filter(d => d.invoice);
+
+                const pipelineResults = await runWithConcurrency(successfulUploads, 3, async (data) => {
                     if (!data.invoice) return { success: false, error: 'No invoice record' };
                     setActiveFileName(data.name);
-                    const res = await runPipeline(data.invoice.id, data.invoice.file_path, data.name, batchName);
-                    
-                    setBatchCount(prev => prev + 1);
-                    return res;
+                    try {
+                        const res = await runPipeline(data.invoice.id, data.invoice.file_path, data.name, batchName);
+                        // Finalize immediately (Success or Failure)
+                        // @ts-ignore
+                        await window.api.invoke('invoices:finalize-batch-file', {
+                            id: data.invoice.id,
+                            batchId: batchName,
+                            fileName: data.name,
+                            isSuccess: res.success
+                        });
+                        setBatchCount(prev => prev + 1);
+                        return res;
+                    } catch (err: any) {
+                        console.error(`[Pipeline] runPipeline failed for ${data.name}:`, err);
+                        // Finalize as failure
+                        // @ts-ignore
+                        await window.api.invoke('invoices:finalize-batch-file', {
+                            id: data.invoice.id,
+                            batchId: batchName,
+                            fileName: data.name,
+                            isSuccess: false
+                        });
+                        setBatchCount(prev => prev + 1);
+                        return { success: false, error: err.message || 'Processing error' };
+                    }
                 });
 
-                const hasError = pipelineResults.some(r => !r.success);
+                const allPipelineFailed = pipelineResults.every(r => !r.success);
+                const somePipelineFailed = pipelineResults.some(r => !r.success);
 
-                if (hasError) {
-                    const errorMsgs = pipelineResults.filter(r => !r.success).map(r => r.error).join(' | ');
-                    updateStage('analyzing', 'error', undefined, { sublabel: `Error: ${errorMsgs || 'Extraction failed'}` });
-                    updateStage('processing', 'error', undefined, { sublabel: 'Halted due to prior step' });
-
-                    for (const data of uploadedData) {
-                        if (data.invoice) {
-                            // @ts-ignore
-                            await window.api.invoke('invoices:finalize-batch-file', {
-                                id: data.invoice.id,
-                                batchId: batchName,
-                                fileName: data.name,
-                                isSuccess: false
-                            });
-                        }
-                    }
+                if (allPipelineFailed) {
+                    updateStage('analyzing', 'error', 'Extraction failed', { sublabel: 'All files failed OCR/Analysis' });
                     onComplete();
                     return;
                 }
 
-                updateStage('analyzing', 'done', undefined, { sublabel: '100% confidence extracted' });
+                updateStage('analyzing', 'done', undefined, { 
+                    sublabel: somePipelineFailed 
+                        ? `${pipelineResults.filter(r => r.success).length}/${pipelineResults.length} extracted` 
+                        : '100% confidence extracted' 
+                });
 
                 // Step 3: agent_w Processing
                 updateStage('processing', 'active');
@@ -419,20 +439,7 @@ export function ProcessingPipeline({
                 // Step 4: Done
                 updateStage('done', 'active');
                 await new Promise(r => setTimeout(r, 1000));
-
-                // Finalize storage on disk (move to completed)
-                for (const data of uploadedData) {
-                    if (data.invoice) {
-                        // @ts-ignore
-                        await window.api.invoke('invoices:finalize-batch-file', {
-                            id: data.invoice.id,
-                            batchId: batchName,
-                            fileName: data.name,
-                            isSuccess: true
-                        });
-                    }
-                }
-                updateStage('done', 'done', undefined, { label: 'Success', sublabel: 'All operations finished' });
+                updateStage('done', 'done', undefined, { label: 'Success', sublabel: somePipelineFailed ? 'Completed with partial failures' : 'All operations finished' });
 
                 onComplete();
             } catch (err: any) {

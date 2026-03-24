@@ -47,8 +47,6 @@ export async function initializeBackend(): Promise<boolean> {
     console.log('  agent_ai_tally — Backend Initializing');
     console.log('═══════════════════════════════════════════');
 
-    // Step 0: Init folders
-    initBatchesDir();
 
     // Step 1: Test database connection
     console.log('\n[1/3] Testing database connection...');
@@ -57,6 +55,9 @@ export async function initializeBackend(): Promise<boolean> {
         console.error('[FATAL] Cannot connect to PostgreSQL. Check config/.env');
         return false;
     }
+
+    // Step 1.5: Init folders (Now that DB is up)
+    await initBatchesDir();
 
     // Step 2: Run schema migration
     console.log('\n[2/3] Running database migration...');

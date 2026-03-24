@@ -135,7 +135,7 @@ export async function sendToTallyPrime(payload: Record<string, any>): Promise<{
 }
 
 const N8N_VENDOR_CREATE_WEBHOOK =
-    process.env.N8N_VENDOR_CREATE_URL || process.env.N8N_MASTER_WEBHOOK_URL || 'https://wheelsonai.app.n8n.cloud/webhook/tally-master-creation';
+    process.env.N8N_VENDOR_CREATE_URL || process.env.N8N_MASTER_WEBHOOK_URL || process.env.N8N_TALLY_POST_URL;
 
 /**
  * Send vendor creation payload to the n8n vendor-creation webhook.

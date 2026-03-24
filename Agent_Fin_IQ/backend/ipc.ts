@@ -180,7 +180,7 @@ export function registerIpcHandlers() {
             const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '').substring(0, 4);
             currentBatch = `UNASSIGNED_${dateStr}_${timeStr}`;
         }
-        const folders = createBatchStructure(currentBatch);
+        const folders = await createBatchStructure(currentBatch);
         batchLogger.addLog(currentBatch, fileName, 'Upload', 'Started', `Initiating file secure for ${fileName}`);
 
         // Step 2: Physically move/copy file to the batch 'source' folder
@@ -228,7 +228,18 @@ export function registerIpcHandlers() {
     ipcMain.handle('invoices:finalize-batch-file', async (_event, { id, batchId, fileName, isSuccess }) => {
         const uploadDate = new Date().toISOString().split('T')[0];
         const newPath = await finalizeFileStorage(batchId, fileName, isSuccess, uploadDate);
-        return await queries.updateInvoiceWithOCR(id, { status: isSuccess ? 'Ready to Post' : 'Failed', file_path: newPath });
+
+        // RACECONDITION FIX: Do not reset status to 'Processing' if n8n already moved it to a terminal state
+        const current = await queries.getInvoiceById(id);
+        const currentStatus = current?.status || 'Processing';
+        
+        const terminalStatuses = ['Ready to Post', 'Awaiting Input', 'Handoff', 'Posted', 'Auto-Posted'];
+        const nextStatus = (isSuccess && !terminalStatuses.includes(currentStatus)) ? 'Processing' : (isSuccess ? currentStatus : 'Failed');
+
+        return await queries.updateInvoiceWithOCR(id, { 
+            status: nextStatus, 
+            file_path: newPath 
+        });
     });
 
     ipcMain.handle('invoices:revalidate', async (_event, { id }) => {
@@ -259,11 +270,10 @@ export function registerIpcHandlers() {
 
             const result = await n8n.sendToValidation(payload);
             if (result.success) {
-                await queries.updateInvoiceWithOCR(id, {
-                    all_data_invoice: result.response,
-                    status: result.response?.status || invoice.processing_status,
-                    validation_time: new Date().toISOString()
-                });
+                // Use ingestN8nData to ensure ALL frontend fields (ocr_raw_payload, n8n_val_json_data) 
+                // are updated correctly from the n8n response.
+                await queries.ingestN8nData(id, result.response);
+                
                 return { success: true, response: result.response };
             } else {
                 return { success: false, error: result.error };
@@ -663,9 +673,38 @@ export function registerIpcHandlers() {
     });
 
     // ─── DASHBOARD ──────────────────────────────────────────────
-    ipcMain.handle('dashboard:get-metrics', async (_event, { companyId } = {}) => {
-        return await queries.getDashboardMetrics(companyId);
+
+    // ─── CONFIGURATION ──────────────────────────────────────────
+    
+    ipcMain.handle('config:get-rules', async (_event, { companyId } = {}) => {
+        return await queries.getAppConfig('posting_rules', companyId);
     });
 
-    console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp');
+    ipcMain.handle('config:save-rules', async (_event, { rules, companyId }) => {
+        await queries.setAppConfig('posting_rules', rules, companyId);
+        return { success: true };
+    });
+
+    ipcMain.handle('config:get-extended-criteria', async (_event, { companyId }) => {
+        return await queries.getAppConfig('auto_post_criteria_extended', companyId);
+    });
+
+    ipcMain.handle('config:save-extended-criteria', async (_event, { criteria, companyId }) => {
+        await queries.setAppConfig('auto_post_criteria_extended', criteria, companyId);
+        return { success: true };
+    });
+
+    /**
+     * Handlers for Storage Configuration (Local, S3, etc.)
+     */
+    ipcMain.handle('config:get-storage-path', async () => {
+        return await queries.getAppConfig('storage_config');
+    });
+
+    ipcMain.handle('config:set-storage-path', async (_event, config) => {
+        await queries.setAppConfig('storage_config', config);
+        return { success: true };
+    });
+
+    console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp, config');
 }
