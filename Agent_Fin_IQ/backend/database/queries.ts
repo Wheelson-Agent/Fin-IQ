@@ -671,6 +671,118 @@ export async function saveInvoiceItems(invoiceId: string, items: any[]) {
     return results;
 }
 
+/**
+ * Save all invoice data (header + line items) in a single atomic transaction.
+ * Also logs a single audit entry for the entire operation.
+ */
+export async function saveAllInvoiceData(id: string, data: any, items: any[], userName: string = 'System') {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Fetch current for comparison and base payload
+        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        const current = currentRes.rows[0];
+        if (!current) throw new Error('Invoice not found');
+
+        let rawPayload = current.ocr_raw_payload || {};
+        if (typeof rawPayload === 'string') {
+            try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
+        }
+
+        const allowedCols = [
+            "invoice_number", "vendor_name", "invoice_date", "due_date",
+            "sub_total", "tax_total", "grand_total", "po_number", "gl_account",
+            "processing_status", "processing_time", "doc_type", "posted_to_tally_json",
+            "all_data_invoice", "file_location", "file_path", "tally_id",
+            "uploader_name", "vendor_id", "is_mapped", "vendor_gst", "validation_time",
+            "irn", "ack_no", "ack_date", "eway_bill_no"
+        ];
+
+        const updateValues: Record<string, any> = {};
+        const ocrData = data.ocr_raw_data || data;
+
+        Object.keys(ocrData).forEach(key => {
+            let dbKey = key;
+            if (key === 'invoice_no') dbKey = 'invoice_number';
+            if (key === 'date') dbKey = 'invoice_date';
+            if (key === 'amount') dbKey = 'sub_total';
+            if (key === 'gst') dbKey = 'tax_total';
+            if (key === 'total') dbKey = 'grand_total';
+            if (key === 'status') dbKey = 'processing_status';
+
+            if (allowedCols.includes(dbKey) && !['file_path', 'file_location'].includes(dbKey)) {
+                updateValues[dbKey] = ocrData[key];
+            } else if (!allowedCols.includes(dbKey)) {
+                rawPayload[key] = ocrData[key];
+            }
+        });
+
+        const dateFields = ["invoice_date", "due_date", "ack_date"];
+        const setClauses = Object.keys(updateValues).map((k, i) => {
+            if (dateFields.includes(k)) {
+                return `${k} = CASE 
+                    WHEN $${i + 2}::text ~ '^\\d{8}$' THEN to_date($${i + 2}::text, 'DDMMYYYY')
+                    WHEN $${i + 2}::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN $${i + 2}::text::date
+                    WHEN $${i + 2}::text ~ '^\\d{2}-\\d{2}-\\d{4}$' THEN to_date($${i + 2}::text, 'DD-MM-YYYY')
+                    WHEN $${i + 2}::text ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date($${i + 2}::text, 'DD/MM/YYYY')
+                    ELSE ${k}
+                END`;
+            }
+            return `${k} = COALESCE($${i + 2}, ${k})`;
+        });
+
+        const payloadIndex = setClauses.length + 2;
+        setClauses.push(`ocr_raw_payload = $${payloadIndex}::jsonb`);
+        setClauses.push(`updated_at = NOW()`);
+
+        const updateSql = `UPDATE ap_invoices SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`;
+        const updateParams = [id, ...Object.values(updateValues), JSON.stringify(rawPayload)];
+        const invoiceRes = await client.query(updateSql, updateParams);
+        const updatedInvoice = invoiceRes.rows[0];
+
+        // 2. Update Line Items
+        await client.query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [id]);
+        if (items && items.length > 0) {
+            for (const item of items) {
+                await client.query(
+                    `INSERT INTO ap_invoice_lines 
+                    (ap_invoice_id, item_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount, hsn_sac)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                    [
+                        id, item.item || null, item.description, item.ledger || null, item.tax,
+                        item.quantity || 1, item.rate || 0, item.discount || 0,
+                        item.amount || (Number(item.quantity || 1) * Number(item.rate || 0)),
+                        item.hsn_sac || null
+                    ]
+                );
+            }
+        }
+
+        // 3. Log Audit Entry
+        await client.query(
+            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+            [
+                id, updatedInvoice.invoice_number, updatedInvoice.vendor_name,
+                'Edited', userName,
+                `Manual edit: updated header and ${items.length} line items`,
+                JSON.stringify({ status: current.processing_status }),
+                JSON.stringify({ status: updatedInvoice.processing_status })
+            ]
+        );
+
+        await client.query('COMMIT');
+        return updatedInvoice;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[DB] saveAllInvoiceData failed:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
 // ─────────────────────────────────────────────────────────────
 // N8N INGESTION
 // ─────────────────────────────────────────────────────────────

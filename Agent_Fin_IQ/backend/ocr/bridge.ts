@@ -91,8 +91,8 @@ export function runOCR(filePath: string, mimeType: string): Promise<OCRResult> {
         proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
         proc.on('close', (code) => {
-            // Write to debug_ocr.log
-            const logPath = path.resolve(__dirname, '../../debug_ocr.log');
+            // Write to logs/debug_ocr.log
+            const logPath = path.resolve(__dirname, '../../logs/debug_ocr.log');
             const logEntry = `\n--- OCR RUN ${new Date().toISOString()} ---\nCode: ${code}\nStdout: ${stdout}\nStderr: ${stderr}\n--------------------------\n`;
             try { fs.appendFileSync(logPath, logEntry); } catch (e) { }
 

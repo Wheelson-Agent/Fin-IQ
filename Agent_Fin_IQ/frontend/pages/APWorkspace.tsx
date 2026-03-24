@@ -21,7 +21,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFo
 import { Progress } from '../components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
 import { useDateFilter } from '../context/DateContext';
-import { getInvoices, uploadInvoice, runPipeline, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus } from '../lib/api';
+import { getInvoices, uploadInvoice, runPipeline, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice } from '../lib/api';
 import { toast } from 'sonner';
 import { ProcessingPipeline, PipelineStage } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
@@ -447,6 +447,26 @@ export default function APWorkspace() {
       }
     } catch (err) {
       console.error("Failed to delete invoice", err);
+    }
+  };
+
+  const handleBulkRevalidate = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    setLoading(true);
+    try {
+      for (const id of ids) {
+        await revalidateInvoice(id);
+      }
+      toast.success(`Revalidation started for ${ids.length} invoices`);
+      setSelectedIds(new Set());
+      fetchData(true);
+    } catch (err) {
+      console.error('Bulk revalidate failed:', err);
+      toast.error('Failed to trigger revalidation for some invoices');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1549,15 +1569,26 @@ export default function APWorkspace() {
                       </Select>
                     </div>
                     {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          title={`Revalidate Selected (${selectedIds.size})`}
+                          onClick={handleBulkRevalidate}
+                        >
+                          <RefreshCw className="w-5 h-5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                          title={`Delete Selected (${selectedIds.size})`}
+                          onClick={handleDeleteSelected}
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </div>
