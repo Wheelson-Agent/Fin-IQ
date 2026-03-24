@@ -167,6 +167,15 @@ export function registerIpcHandlers() {
     });
 
     /**
+     * Atomic save for both invoice fields and line items.
+     * Includes automated audit logging.
+     * Input: { id: string, data: object, items: object[], userName?: string }
+     */
+    ipcMain.handle('invoices:save-all', async (_event, { id, data, items, userName }) => {
+        return await queries.saveAllInvoiceData(id, data, items, userName);
+    });
+
+    /**
      * Handle file upload — creates invoice record and triggers pipeline.
      * Input: { filePath: string, fileName: string, batchId?: string, fileData?: number[] }
      * Output: Created invoice row
