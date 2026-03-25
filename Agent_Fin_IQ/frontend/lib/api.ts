@@ -284,6 +284,14 @@ export async function saveInvoiceItems(invoiceId: string, items: Partial<Invoice
 }
 
 /**
+ * Atomic save for both invoice fields and line items.
+ * Recommended for production use to ensure data integrity.
+ */
+export async function saveAllInvoiceData(id: string, data: any, items: any[], userName?: string): Promise<Invoice> {
+    return invoke<Invoice>('invoices:save-all', { id, data, items, userName });
+}
+
+/**
  * Run the processing pipeline for an invoice.
  * @param invoiceId - Invoice UUID
  * @param filePath  - Storage path

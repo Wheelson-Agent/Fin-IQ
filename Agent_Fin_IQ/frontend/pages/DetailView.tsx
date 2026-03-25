@@ -17,7 +17,7 @@ import { Button } from '../components/ui/button';
 import * as Popover from '@radix-ui/react-popover';
 import { Command } from 'cmdk';
 
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getItems, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally, createLedgerMaster, revalidateInvoice, deleteInvoice } from '../lib/api';
+import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getItems, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally, createLedgerMaster, revalidateInvoice, deleteInvoice, saveAllInvoiceData } from '../lib/api';
 import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
@@ -131,7 +131,7 @@ export default function DetailView() {
       const result = await revalidateInvoice(id);
       if (result.success) {
         toast.success('Re-validation completed');
-        await loadData(id); // Reload to reflect updated validation flags
+        await loadData(); // Reload to reflect updated validation flags
       } else {
         toast.error(result.error || 'Re-validation failed');
       }
@@ -177,13 +177,11 @@ export default function DetailView() {
     const savePromise = (async () => {
       const payloadToSave = {
         ...docFields,
-        line_items: lineItems // Include line items in the OCR payload update
+        line_items: lineItems
       };
 
-      // Update line items table in DB for relational consistency
-      await saveInvoiceItems(id, lineItems);
-      // Update the main OCR payload (which is the source of truth for detail view)
-      await updateInvoiceOCR(id, payloadToSave);
+      // Atomic save for everything (metadata + lines + audit log)
+      await saveAllInvoiceData(id, payloadToSave, lineItems, 'Admin');
 
       // Reset originals using deep copy to break all references
       setOriginalDocFields(JSON.parse(JSON.stringify(docFields)));
@@ -661,7 +659,7 @@ export default function DetailView() {
               </Button>
             )}
 
-            {!readOnly && (fromTab === 'input' || fromTab === 'handoff') && isDirty && (
+            {!readOnly && (fromTab === 'input' || fromTab === 'handoff' || fromTab === 'received' || fromTab === 'ready' || fromTab === 'processing') && isDirty && (
               <Button
                 variant="default"
                 className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
@@ -1019,6 +1017,14 @@ export default function DetailView() {
                                       setShowLedgerSlideout(true);
                                     }}
                                   />
+                                  {(!docFields.doc_type_label?.toLowerCase().includes('goods') && rawPayload?.line_items?.[index]?.mapped_ledger) && (
+                                    <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
+                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">OCR Suggested Ledger</span>
+                                      <span className="text-[11px] text-slate-700 font-medium truncate max-w-[200px]" title={rawPayload.line_items[index].mapped_ledger}>
+                                        {rawPayload.line_items[index].mapped_ledger}
+                                      </span>
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="p-3 align-top">
                                   <input
