@@ -16,8 +16,28 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import * as Popover from '@radix-ui/react-popover';
 import { Command } from 'cmdk';
-
-import { getInvoiceById, getInvoiceItems, saveInvoiceItems, saveVendor, mapVendorToInvoice, updateInvoiceStatus, getVendorById, getLedgerMasters, getItems, getTdsSections, getActiveCompany, updateInvoiceOCR, runPipeline, syncVendorWithTally, createLedgerMaster, revalidateInvoice, deleteInvoice, saveAllInvoiceData } from '../lib/api';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
+import {
+  createLedgerMaster,
+  createItemMaster,
+  getInvoiceById,
+  getInvoiceItems,
+  saveInvoiceItems,
+  saveVendor,
+  mapVendorToInvoice,
+  updateInvoiceStatus,
+  getVendorById,
+  getLedgerMasters,
+  getItems,
+  getTdsSections,
+  getActiveCompany,
+  updateInvoiceOCR,
+  runPipeline,
+  syncVendorWithTally,
+  revalidateInvoice,
+  deleteInvoice,
+  saveAllInvoiceData
+} from '../lib/api';
 import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
@@ -33,6 +53,29 @@ const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
 };
 
 
+
+const getCanonicalKey = (key: string): string => {
+  const normalized = key.toLowerCase().replace(/ /g, '_');
+  if (normalized === 'invoice_no' || normalized === 'inv_no' || normalized === 'bill_no') return 'invoice_no';
+  if (normalized === 'date' || normalized === 'inv_date' || normalized === 'bill_date' || normalized === 'invoice_date') return 'date';
+  if (normalized === 'amount' || normalized === 'taxable_value' || normalized === 'taxable_amount' || normalized === 'sub_total') return 'sub_total';
+  if (normalized === 'gst' || normalized === 'tax' || normalized === 'tax_amount' || normalized === 'tax_total') return 'tax_total';
+  if (normalized === 'total' || normalized === 'grand_total' || normalized === 'total_amount' || normalized === 'total_invoice_amount') return 'grand_total';
+  if (normalized === 'status' || normalized === 'processing_status') return 'status';
+  if (normalized === 'remarks' || normalized === 'fail_reason' || normalized === 'failure_reason') return 'remarks';
+  if (normalized === 'supplier_gst' || normalized === 'gstin' || normalized === 'vendor_gst') return 'vendor_gst';
+  if (normalized === 'supplier_name' || normalized === 'vendor_name') return 'vendor_name';
+  if (normalized === 'supplier_address' || normalized === 'address') return 'supplier_address';
+  if (normalized === 'supplier_pan' || normalized === 'pan') return 'supplier_pan';
+  if (normalized === 'round_off') return 'round_off';
+  if (normalized === 'cgst' || normalized === 'cgst_amount') return 'cgst';
+  if (normalized === 'sgst' || normalized === 'sgst_amount') return 'sgst';
+  if (normalized === 'igst' || normalized === 'igst_amount') return 'igst';
+  if (normalized === 'cgst_pct' || normalized === 'cgst_%' || normalized === 'cgst_percentage') return 'cgst_pct';
+  if (normalized === 'sgst_pct' || normalized === 'sgst_%' || normalized === 'sgst_percentage') return 'sgst_pct';
+  if (normalized === 'igst_pct' || normalized === 'igst_%' || normalized === 'igst_percentage') return 'igst_pct';
+  return normalized;
+};
 
 const GST_STATE_MAP: Record<string, string> = {
   "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
@@ -105,6 +148,8 @@ export default function DetailView() {
     bank_name: '', bank_account_no: '', bank_ifsc: '', buyerErpName: ''
   });
   const [newLedger, setNewLedger] = useState({ name: '', buyerName: '', underGroup: 'Indirect Expenses', gstApplicable: 'Yes', hsn: '' });
+  const [creationMode, setCreationMode] = useState<'STOCK_ITEM' | 'LEDGER'>('STOCK_ITEM');
+  const [newStockItem, setNewStockItem] = useState({ name: '', uom: 'PCS', hsn: '', tax_rate: '18', buyerName: '' });
   const [billingAddress, setBillingAddress] = useState('Karnataka, India');
 
   const [docFields, setDocFields] = useState<Record<string, any>>({});
@@ -193,7 +238,7 @@ export default function DetailView() {
 
     toast.promise(savePromise, {
       loading: 'Saving changes...',
-      success: 'Changes persisted successfully',
+      success: 'Edited fields are saved',
       error: 'Failed to save changes'
     });
 
@@ -289,41 +334,17 @@ export default function DetailView() {
           } catch (e) { console.warn('[DetailView] Failed to prefill vendor data:', e); }
         }
 
+        // 1. Start with the OCR raw payload (the "noisy" baseline)
         const fields: Record<string, any> = {
-          irn: invoiceRecord.irn || '',
-          ack_no: invoiceRecord.ack_no || '',
-          ack_date: formatDateToDDMMYYYY(invoiceRecord.ack_date),
-          eway_bill_no: invoiceRecord.eway_bill_no || '',
-          file_name: invoiceRecord.file_name || '',
-          invoice_no: invoiceRecord.invoice_no || invoiceRecord.invoice_number || '',
-          date: formatDateToDDMMYYYY(invoiceRecord.date || invoiceRecord.invoice_date),
-          vendor_name: invoiceRecord.vendor_name || '',
-          vendor_gst: invoiceRecord.vendor_gst || '',
-          supplier_pan: '',
-          supplier_address: '',
-          buyer_name: '',
-          buyer_gst: '',
-          bank_name: '',
-          account_no: '',
-          ifsc_code: '',
-          total_in_words: invoiceRecord.total_in_words || '',
-          sub_total: invoiceRecord.sub_total || 0,
-          round_off: invoiceRecord.round_off || 0,
-          grand_total: invoiceRecord.grand_total || 0,
-          cgst: invoiceRecord.cgst || 0,
-          sgst: invoiceRecord.sgst || 0,
-          igst: invoiceRecord.igst || 0,
-          tax_total: invoiceRecord.tax_total || 0,
-          cgst_pct: 0,
-          sgst_pct: 0,
-          igst_pct: 0,
-          doc_type: invoiceRecord.doc_type || 'Services',
-          buyer_verification: false,
-          gst_validation_status: false,
-          invoice_ocr_data_validation: false,
-          vendor_verification: false,
-          duplicate_check: true,
-          line_item_match_status: false,
+          irn: '', ack_no: '', ack_date: '', eway_bill_no: '',
+          invoice_no: '', date: '', vendor_name: '', vendor_gst: '',
+          supplier_pan: '', supplier_address: '',
+          sub_total: 0, tax_total: 0, grand_total: 0,
+          cgst: 0, sgst: 0, igst: 0, cgst_pct: 0, sgst_pct: 0, igst_pct: 0,
+          doc_type: 'Services', remarks: '',
+          buyer_verification: false, gst_validation_status: false,
+          invoice_ocr_data_validation: false, vendor_verification: false,
+          duplicate_check: true, line_item_match_status: false,
         };
 
         if (invoiceRecord.ocr_raw_payload) {
@@ -334,37 +355,47 @@ export default function DetailView() {
             setRawPayload(raw);
             Object.keys(raw).forEach(key => {
               const val = raw[key];
-              let normalizedKey = key.toLowerCase().replace(/ /g, '_');
-              if (normalizedKey === 'invoice_ocr_data_valdiation') normalizedKey = 'invoice_ocr_data_validation';
-              if (normalizedKey === 'taxable_value' || normalizedKey === 'taxable_amount') fields.sub_total = val;
-              if (normalizedKey === 'total_invoice_amount' || normalizedKey === 'total_amount') fields.grand_total = val;
-              if (normalizedKey === 'cgst') fields.cgst = val;
-              if (normalizedKey === 'sgst') fields.sgst = val;
-              if (normalizedKey === 'igst') fields.igst = val;
-              if (normalizedKey === 'sum_of_gst_amount' || normalizedKey === 'gst_total') fields.tax_total = val;
-              if (normalizedKey === 'cgst_pct') fields.cgst_pct = val;
-              if (normalizedKey === 'sgst_pct') fields.sgst_pct = val;
-              if (normalizedKey === 'igst_pct') fields.igst_pct = val;
-              if (fields[normalizedKey] !== undefined) fields[normalizedKey] = val;
-              else fields[normalizedKey] = val;
+              const normalizedKey = getCanonicalKey(key);
+              
+              if (fields[normalizedKey] !== undefined || normalizedKey === 'invoice_ocr_data_validation') {
+                fields[normalizedKey] = val;
+              }
             });
           } catch (e) { console.warn('[DetailView] Failed to parse ocr_raw_payload'); }
         }
 
+        // 2. OVERWRITE with Database Columns (The "Verified" Source of Truth)
+        fields.irn = invoiceRecord.irn || fields.irn || '';
+        fields.ack_no = invoiceRecord.ack_no || fields.ack_no || '';
+        fields.ack_date = formatDateToDDMMYYYY(invoiceRecord.ack_date) || fields.ack_date || '';
+        fields.eway_bill_no = invoiceRecord.eway_bill_no || fields.eway_bill_no || '';
+        fields.invoice_no = invoiceRecord.invoice_number || invoiceRecord.invoice_no || fields.invoice_no || '';
+        fields.date = formatDateToDDMMYYYY(invoiceRecord.invoice_date || invoiceRecord.date) || fields.date || '';
+        fields.vendor_name = invoiceRecord.vendor_name || fields.vendor_name || '';
+        fields.vendor_gst = invoiceRecord.vendor_gst || fields.vendor_gst || '';
+        fields.supplier_pan = invoiceRecord.supplier_pan || fields.supplier_pan || '';
+        fields.supplier_address = invoiceRecord.supplier_address || fields.supplier_address || '';
+        fields.sub_total = invoiceRecord.sub_total ?? fields.sub_total;
+        fields.tax_total = invoiceRecord.tax_total ?? fields.tax_total;
+        fields.grand_total = invoiceRecord.grand_total ?? fields.grand_total;
+        fields.doc_type = invoiceRecord.doc_type || fields.doc_type || 'Services';
+        fields.remarks = invoiceRecord.failure_reason || fields.remarks || '';
+        fields.file_name = invoiceRecord.file_name || '';
+
+        // 3. Final overrides from N8N validation state
         if (invoiceRecord.n8n_val_json_data) {
           try {
             const n8nData = typeof invoiceRecord.n8n_val_json_data === 'string'
               ? JSON.parse(invoiceRecord.n8n_val_json_data)
               : invoiceRecord.n8n_val_json_data;
             Object.keys(n8nData).forEach(key => {
-              let normalizedKey = key.toLowerCase().replace(/ /g, '_');
-              if (normalizedKey === 'invoice_ocr_data_valdiation') normalizedKey = 'invoice_ocr_data_validation';
+              const normalizedKey = getCanonicalKey(key);
               if (fields[normalizedKey] !== undefined) fields[normalizedKey] = n8nData[key];
             });
           } catch (e) { console.warn('[DetailView] Failed to parse n8n_val_json_data mapping'); }
         }
 
-        const dt = (fields.doc_type || invoiceRecord.doc_type || '').toLowerCase();
+        const dt = (fields.doc_type || '').toLowerCase();
         if (dt.includes('goods')) fields.doc_type_label = 'Invoice (Goods)';
         else fields.doc_type_label = 'Invoice (Service)';
 
@@ -971,7 +1002,7 @@ export default function DetailView() {
                                 <td className="p-3 align-top">
                                   <CustomTableSelect
                                     value={(docFields.doc_type_label?.toLowerCase().includes('goods'))
-                                      ? item.description
+                                      ? (item.matched_stock_item || item.description)
                                       : (ledgerIdToName[String(item.ledger || '')] || item.ledger)}
                                     onChange={(val: string) => {
                                       const key = String(val || '').toLowerCase();
@@ -1011,9 +1042,24 @@ export default function DetailView() {
                                     disabled={readOnly}
                                     highlight
                                     showCreate={!readOnly}
+                                    createLabel={docFields.doc_type_label?.toLowerCase().includes('goods') ? 'Create Ledger / Stock Item' : 'Create New Ledger'}
                                     onCreateClick={() => {
                                       setActiveLedgerIndex(index);
-                                      setNewLedger(prev => ({ ...prev, name: '', buyerName: docFields.buyer_name || '' }));
+                                      const isGoods = docFields.doc_type_label?.toLowerCase().includes('goods');
+                                      const suggestedBuyer = rawPayload?.['Name as per Tally'] || '';
+                                      if (isGoods) {
+                                        setCreationMode('STOCK_ITEM');
+                                        setNewStockItem({ 
+                                          name: (item.description || '').trim(), 
+                                          uom: (item.uom || 'PCS').trim(), 
+                                          hsn: (item.hsn_sac || '').trim(), 
+                                          tax_rate: (item.tax_rate || '18').trim(),
+                                          buyerName: suggestedBuyer
+                                        });
+                                      } else {
+                                        setCreationMode('LEDGER');
+                                      }
+                                      setNewLedger(prev => ({ ...prev, name: '', buyerName: suggestedBuyer }));
                                       setShowLedgerSlideout(true);
                                     }}
                                   />
@@ -1283,104 +1329,158 @@ export default function DetailView() {
                 </Button>
               </div>
             </div>
-
-            {/* Create Ledger Slide-out */}
+                     {/* Create Ledger / Stock Item Slide-out */}
             <div className={`absolute top-0 right-0 h-full w-[460px] bg-white border-l border-slate-200 shadow-[-20px_0_50px_rgba(0,0,0,0.15)] transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-50 flex flex-col ${showLedgerSlideout ? 'translate-x-0' : 'translate-x-full'}`}>
               <div className="p-7 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                 <div className="flex items-center gap-4">
-                  <div className="bg-emerald-600 text-white p-2.5 rounded-2xl shadow-lg shadow-emerald-500/30 font-black text-[12px] -rotate-3">L</div>
+                  <div className="bg-emerald-600 text-white p-2.5 rounded-2xl shadow-lg shadow-emerald-500/30 font-black text-[12px] -rotate-3">
+                    {creationMode === 'STOCK_ITEM' ? 'S' : 'L'}
+                  </div>
                   <div>
-                    <h3 className="text-[18px] font-black text-slate-900 tracking-tight">Expense Ledger</h3>
-                    <p className="text-[11px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Register Accounting Head</p>
+                    <h3 className="text-[18px] font-black text-slate-900 tracking-tight">
+                      {docFields.doc_type_label?.toLowerCase().includes('goods') ? 'Create Ledger / Stock Item' : 'Expense Ledger'}
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
+                      {creationMode === 'STOCK_ITEM' ? 'Register Stock Inventory' : 'Register Accounting Head'}
+                    </p>
                   </div>
                 </div>
                 <button onClick={() => setShowLedgerSlideout(false)} className="text-slate-400 hover:text-slate-900 hover:bg-slate-100 p-2.5 rounded-2xl transition-all">
                   <X size={20} strokeWidth={3} />
                 </button>
               </div>
+
+              {docFields.doc_type_label?.toLowerCase().includes('goods') && (
+                <div className="px-10 pt-6">
+                  <Tabs value={creationMode} onValueChange={(val: any) => setCreationMode(val)} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2 p-1 bg-slate-100 rounded-xl h-12">
+                      <TabsTrigger value="STOCK_ITEM" className="rounded-lg font-black text-[12px] uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Stock Item</TabsTrigger>
+                      <TabsTrigger value="LEDGER" className="rounded-lg font-black text-[12px] uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Ledger</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+              )}
+
               <div className="p-10 flex-1 overflow-y-auto space-y-10">
-                <InputField label="Ledger Name" value={newLedger.name} required onChange={(val: string) => setNewLedger({ ...newLedger, name: val })} />
-                <InputField label="Buyer Name" value={newLedger.buyerName} onChange={(val: string) => setNewLedger({ ...newLedger, buyerName: val })} />
-                <InputField label="Under Group" value={newLedger.underGroup} required onChange={(val: string) => setNewLedger({ ...newLedger, underGroup: val })} Icon={ChevronDown} selectOptions={['Indirect Expenses', 'Direct Expenses', 'Fixed Assets']} />
-                <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} />
+                {creationMode === 'STOCK_ITEM' ? (
+                  <>
+                    <InputField label="Stock Item Name" value={newStockItem.name} required onChange={(val: string) => setNewStockItem({ ...newStockItem, name: val })} />
+                    <InputField label="Buyer Name" value={newStockItem.buyerName} onChange={(val: string) => setNewStockItem({ ...newStockItem, buyerName: val })} />
+                    <InputField label="Unit of Measure (UOM)" value={newStockItem.uom} required onChange={(val: string) => setNewStockItem({ ...newStockItem, uom: val })} Icon={ChevronDown} selectOptions={['PCS', 'NOS', 'KGS', 'BOX', 'SET']} />
+                    <InputField label="HSN/SAC Code" value={newStockItem.hsn} required onChange={(val: string) => setNewStockItem({ ...newStockItem, hsn: val })} />
+                    <InputField label="GST Tax Rate (%)" value={newStockItem.tax_rate} required onChange={(val: string) => setNewStockItem({ ...newStockItem, tax_rate: val })} Icon={ChevronDown} selectOptions={['0', '5', '12', '18', '28']} />
+                  </>
+                ) : (
+                  <>
+                    <InputField label="Ledger Name" value={newLedger.name} required onChange={(val: string) => setNewLedger({ ...newLedger, name: val })} />
+                    <InputField label="Buyer Name" value={newLedger.buyerName} onChange={(val: string) => setNewLedger({ ...newLedger, buyerName: val })} />
+                    <InputField label="Under Group" value={newLedger.underGroup} required onChange={(val: string) => setNewLedger({ ...newLedger, underGroup: val })} Icon={ChevronDown} selectOptions={['Indirect Expenses', 'Direct Expenses', 'Fixed Assets', 'Direct Incomes', 'Indirect Incomes']} />
+                    <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} />
+                  </>
+                )}
               </div>
+
               <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor || saving}>Cancel</Button>
+                <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={saving}>Cancel</Button>
                 <Button
                   disabled={saving}
                   onClick={async () => {
-                    if (readOnly) return;
-                    if (activeLedgerIndex === null) return;
-                    const name = (newLedger.name || '').trim();
-                    const parentGroup = (newLedger.underGroup || '').trim();
-                    const gstApplicable = (newLedger.gstApplicable || 'Yes').trim();
-
-                    if (!name) {
-                      toast.error('Ledger name is required');
+                    console.log('[MasterCreation] Button clicked. CreationMode:', creationMode);
+                    if (readOnly) {
+                      console.warn('[MasterCreation] Blocked: View is read-only');
                       return;
                     }
-                    if (!parentGroup) {
-                      toast.error('Under Group is required');
+                    if (activeLedgerIndex === null) {
+                      console.warn('[MasterCreation] Blocked: No active ledger index');
                       return;
                     }
-
+                    
+                    const label = docFields?.doc_type_label || '';
+                    const isGoods = label.toLowerCase().includes('goods');
+                    
                     setSaving(true);
-                    toast.info('Ledger creation started');
-
                     try {
-                      const result = await createLedgerMaster({
-                        name,
-                        parent_group: parentGroup,
-                        account_type: 'expense',
-                        company_id: (invoice as any)?.company_id ?? null,
-                        // @ts-ignore - passing extra meta for n8n
-                        meta: {
-                          gst_applicable: gstApplicable,
-                          buyer_name: newLedger.buyerName || '',
-                          hsn: newLedger.hsn || '',
-                          invoice_id: invoice.id || '',
-                          invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
-                          file_name: (invoice.file_name || '').trim() || ''
-                        }
-                      });
+                      if (creationMode === 'STOCK_ITEM') {
+                        const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
+                        console.log('[MasterCreation] Creating Stock Item:', { name, uom, hsn, tax_rate, buyerName });
+                        if (!name.trim()) throw new Error('Item name is required');
+                        
+                        toast.info('Item creation started');
+                        const result = await createItemMaster({
+                          name: name.trim(),
+                          uom: uom.trim(),
+                          hsn: hsn.trim(),
+                          tax_rate: tax_rate,
+                          company_id: (invoice as any)?.company_id ?? null,
+                          meta: {
+                            buyer_name: buyerName,
+                            invoice_id: id,
+                            invoice_no: (invoice?.invoice_no || '').trim(),
+                            file_name: (invoice?.file_name || '').trim()
+                          }
+                        });
+                        console.log('[MasterCreation] API Result:', result);
 
-                      if (!result.success || !result.ledger) {
-                        throw new Error(result.message || 'Failed to create ledger');
+                        if (!result.success || !result.item) throw new Error(result.message || 'Failed to create item');
+
+                        const createdName = result.item.item_name || name;
+                        setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
+                        
+                        setLineItems(prev => {
+                          const next = [...prev];
+                          if (next[activeLedgerIndex]) {
+                            next[activeLedgerIndex] = { ...next[activeLedgerIndex], description: createdName, ledger: createdName };
+                          }
+                          return next;
+                        });
+                        toast.success('Stock item created and synced');
+                      } else {
+                        const { name, underGroup, buyerName, gstApplicable } = newLedger;
+                        if (!name.trim()) throw new Error('Ledger name is required');
+                        
+                        toast.info('Ledger creation started');
+                        const result = await createLedgerMaster({
+                          name, parent_group: underGroup, account_type: 'expense',
+                          company_id: (invoice as any)?.company_id ?? null,
+                          meta: {
+                            gst_applicable: gstApplicable,
+                            buyer_name: buyerName,
+                            invoice_id: id
+                          }
+                        });
+
+                        if (!result.success || !result.ledger) throw new Error(result.message || 'Failed to create ledger');
+
+                        const createdId = String(result.ledger.id);
+                        const createdName = String(result.ledger.name || name);
+
+                        setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
+                        setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
+                        setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
+
+                        setLineItems(prev => {
+                          const next = [...prev];
+                          if (next[activeLedgerIndex]) {
+                            next[activeLedgerIndex] = { ...next[activeLedgerIndex], ledger: createdId };
+                            if (isGoods) {
+                               next[activeLedgerIndex].description = createdName;
+                            }
+                          }
+                          return next;
+                        });
+                        toast.success('Ledger created and synced');
                       }
-
-                      const createdId = String((result.ledger as any).id);
-                      const createdName = String((result.ledger as any).name || name);
-
-                      setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
-                      setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
-                      setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
-
-                      setLineItems(prev => {
-                        const next = [...prev];
-                        if (!next[activeLedgerIndex]) return next;
-                        next[activeLedgerIndex] = { ...next[activeLedgerIndex], ledger: createdId };
-                        return next;
-                      });
-
-                      toast.success(result.message || 'Ledger created and synced with Tally');
                       setShowLedgerSlideout(false);
-                    } catch (err) {
-                      const msg = err instanceof Error ? err.message : 'Failed to create ledger';
-                      toast.error(msg);
+                    } catch (err: any) {
+                      toast.error(err.message || 'Creation failed');
                     } finally {
                       setSaving(false);
                     }
                   }}
-                  className="h-12 px-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/20 transition-all active:scale-95"
+                  className="h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95"
                 >
-                  {saving ? (
-                    <>
-                      <RefreshCw size={16} className="animate-spin mr-2" />
-                      Syncing with Tally...
-                    </>
-                  ) : (
-                    'Create Ledger'
-                  )}
+                  {saving ? <RefreshCw size={16} className="animate-spin mr-2" /> : null}
+                  {creationMode === 'STOCK_ITEM' ? 'Create Stock Item' : 'Create Ledger'}
                 </Button>
               </div>
             </div>
@@ -1487,7 +1587,7 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
   );
 }
 
-function CustomTableSelect({ value, onChange, options, disabled, highlight, showCreate, onCreateClick }: any) {
+function CustomTableSelect({ value, onChange, options, disabled, highlight, showCreate, onCreateClick, createLabel = 'Create New Ledger' }: any) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
 
@@ -1583,7 +1683,7 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
                   className="w-full h-11 px-4 flex items-center justify-center gap-2 text-[13px] font-black text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-[0.98]"
                 >
                   <Plus size={16} strokeWidth={3} />
-                  Create New Ledger
+                  {createLabel}
                 </button>
               </div>
             )}

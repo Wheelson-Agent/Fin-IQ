@@ -622,14 +622,16 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('masters:create-ledger', async (_event, { name, parent_group, account_type, company_id, meta } = {}) => {
         try {
-            console.log('[IPC] masters:create-ledger: Routing via n8n first');
+            console.log('[IPC] masters:create-ledger: Received:', { name, parent_group, company_id, meta });
+            console.log('[IPC] Routing via n8n first');
             
-            // 1. Send to n8n Webhook
-            const n8nResult = await n8n.sendLedgerCreationToN8n({
+            // 1. Send to n8n Webhook (Unified)
+            const n8nResult = await n8n.sendMasterCreationToN8n({
                 process: { ledger_creation: true },
                 ledger: {
                     name,
                     parent_group,
+                    buyer_name: meta?.buyer_name || '',
                     gst_applicable: meta?.gst_applicable || 'Yes',
                     company_id: company_id ?? null,
                     meta: meta || {}
@@ -661,6 +663,56 @@ export function registerIpcHandlers() {
         } catch (err: any) {
             console.error('[IPC] masters:create-ledger error:', err.message);
             return { success: false, ledger: null, message: err?.message || 'Failed to create ledger' };
+        }
+    });
+
+    ipcMain.handle('masters:create-item', async (_event, { name, uom, hsn, tax_rate, company_id, meta } = {}) => {
+        try {
+            console.log('[IPC] masters:create-item: Received:', { name, uom, hsn, tax_rate, company_id, meta });
+            console.log('[IPC] Routing via n8n first');
+            
+            // 1. Send to n8n Webhook (Unified)
+            const n8nResult = await n8n.sendMasterCreationToN8n({
+                process: { line_items_creation: true },
+                stock_item: {
+                    name,
+                    uom,
+                    hsn_sac: hsn,
+                    tax_rate,
+                    buyer_name: meta?.buyer_name || '',
+                    company_id: company_id ?? null,
+                    meta: meta || {}
+                }
+            });
+
+            if (!n8nResult.success) {
+                console.error('[IPC] n8n item creation failed:', n8nResult.message);
+                return { 
+                    success: false, 
+                    item: null, 
+                    message: n8nResult.message || 'Failed to create stock item in Tally' 
+                };
+            }
+
+            // 2. If n8n success, persist to local DB
+            const item = await queries.saveItem({
+                item_name: name,
+                item_code: name, // Defaulting code to name if not provided separately
+                uom,
+                hsn_sac: hsn,
+                tax_rate: Number(tax_rate || 0),
+                company_id: company_id ?? null,
+                is_active: true
+            });
+
+            return { 
+                success: true, 
+                item, 
+                message: n8nResult.message || 'Stock item created successfully in Tally' 
+            };
+        } catch (err: any) {
+            console.error('[IPC] masters:create-item error:', err.message);
+            return { success: false, item: null, message: err?.message || 'Failed to create stock item' };
         }
     });
 

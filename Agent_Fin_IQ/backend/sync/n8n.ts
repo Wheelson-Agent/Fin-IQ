@@ -156,7 +156,7 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
     try {
         const body = JSON.stringify(payload);
         console.log('[N8N] Vendor creation: POST body length:', body.length);
-        const response = await fetch(url, {
+        const response = await fetch(url!, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body,
@@ -194,19 +194,23 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
 }
 
 /**
- * Send ledger creation payload to the n8n ledger-creation webhook.
- * Success only when response.success === true.
- *
- * @param payload - Full payload per n8n workflow contract
- * @returns Normalized { success, message, data }
+ * Generic master creation sender for n8n (Ledgers, Stock Items, etc.)
+ * Routes to N8N_TALLY_POST_URL which handles Tally Prime XML envelopes.
+ * 
+ * @param payload - Must contain process: { ledger_creation: true } or { line_items_creation: true }
  */
-export async function sendLedgerCreationToN8n(payload: Record<string, any>): Promise<{
+export async function sendMasterCreationToN8n(payload: Record<string, any>): Promise<{
     success: boolean;
     message: string;
     data?: any;
 }> {
-    const url = process.env.N8N_MASTER_WEBHOOK_URL || 'https://wheelsonai.app.n8n.cloud/webhook/tally-master-creation';
-    console.log('[N8N] Ledger creation: outgoing webhook URL:', url);
+    const url = process.env.N8N_TALLY_POST_URL;
+    if (!url) {
+        console.error('[N8N] ❌ N8N_TALLY_POST_URL not configured');
+        return { success: false, message: 'N8N_TALLY_POST_URL not configured' };
+    }
+
+    console.log('[N8N] Master creation: Routing to Tally Post URL:', url);
 
     try {
         const body = JSON.stringify(payload);
@@ -214,39 +218,35 @@ export async function sendLedgerCreationToN8n(payload: Record<string, any>): Pro
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body,
-            signal: AbortSignal.timeout(30000), // 30s timeout
+            signal: AbortSignal.timeout(30000),
         });
 
-        const rawText = await response.text();
-        let data: any = {};
-        try {
-            data = rawText ? JSON.parse(rawText) : {};
-        } catch {
-            console.warn('[N8N] Ledger creation: response not JSON:', rawText?.slice(0, 200));
-        }
-
-        console.log('[N8N] Ledger creation: response status:', response.status, 'body:', JSON.stringify(data).slice(0, 300));
+        const data = await response.json().catch(() => ({}));
+        console.log('[N8N] Master creation response:', response.status, JSON.stringify(data).slice(0, 200));
 
         if (!response.ok) {
-            const errMsg = (data && (data.message || data.error)) || `HTTP ${response.status}`;
-            console.error('[N8N] Ledger creation webhook returned', response.status, errMsg);
-            return { success: false, message: errMsg, data };
+            return { success: false, message: data.message || `HTTP ${response.status}`, data };
         }
 
-        const success = data && (data.success === true || data.status === 'success');
-        const message = (data && (data.message || data.error)) || (success ? 'Ledger created successfully in Tally' : 'Ledger creation failed');
-
-        if (success) {
-            console.log('[N8N] ✅ Ledger creation webhook success');
-        } else {
-            console.warn('[N8N] Ledger creation webhook returned success=false');
-        }
-
-        return { success, message, data };
+        const success = data.success === true || data.status === 'success';
+        return { 
+            success, 
+            message: data.message || (success ? 'Master created successfully' : 'Master creation rejected by n8n/Tally'),
+            data 
+        };
     } catch (error: any) {
-        console.error('[N8N] ❌ Ledger creation webhook failed:', error.message);
+        console.error('[N8N] ❌ Master creation failed:', error.message);
         return { success: false, message: error.message || 'Network error' };
     }
+}
+
+/**
+ * Send ledger creation payload to the n8n ledger-creation webhook.
+ * DEPRECATED: Use sendMasterCreationToN8n for new flows.
+ */
+export async function sendLedgerCreationToN8n(payload: Record<string, any>) {
+    // Keep for backward compatibility if needed, but route to the new generic one if appropriate
+    return sendMasterCreationToN8n(payload);
 }
 
 /**

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, Filter, FilterX, MoreVertical,
   Calendar as CalendarIcon, Layers, FileText, ArrowRight, Download, Eye, Clock, ShieldCheck, Mail, Info, Trash2, X, RefreshCw,
-  FileSearch, Archive, Check, Percent, ReceiptText, Upload
+  FileSearch, Archive, Check, Percent, ReceiptText, Upload, UploadCloud
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -771,11 +771,12 @@ export default function APWorkspace() {
               }
             }}
           />
-          <Button variant="outline" size="icon" className="bg-white hover:bg-slate-50" title="Upload Document" onClick={() => document.getElementById('ap-workspace-upload')?.click()}>
-            <Upload className="w-4 h-4 text-slate-600" />
-          </Button>
-          <Button variant="outline" size="icon" className="bg-white">
-            <Download className="w-4 h-4 text-slate-600" />
+          <Button 
+            className="bg-[#1E6FD9] hover:bg-[#165HBA] text-white flex items-center gap-2 px-4 py-2 h-9 rounded-lg shadow-[0_2px_10px_rgba(30,111,217,0.2)] transition-all border-none font-bold"
+            onClick={() => document.getElementById('ap-workspace-upload')?.click()}
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span className="text-[13px] tracking-tight">Upload Invoices</span>
           </Button>
         </div>
       </div>

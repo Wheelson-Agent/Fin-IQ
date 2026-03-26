@@ -237,10 +237,25 @@ export async function getCompanies(): Promise<Company[]> {
     return invoke<Company[]>('companies:get-all');
 }
 
-// ─── ITEMS ─────────────────────────────────────────────
+export interface CreateItemMasterResult {
+    success: boolean;
+    item: ItemMaster | null;
+    message: string;
+}
+
+export async function createItemMaster(input: {
+    name: string;
+    uom: string;
+    hsn: string;
+    tax_rate: number | string;
+    company_id?: string | null;
+    meta?: Record<string, any>;
+}): Promise<CreateItemMasterResult> {
+    return invoke<CreateItemMasterResult>('masters:create-item', input);
+}
 
 /**
- * Fetch all stock items/services.
+ * Sync vendor to Tally via n8n vendor-creation webhook.
  * @param companyId - Optional filter
  */
 export async function getItems(companyId?: string): Promise<ItemMaster[]> {
