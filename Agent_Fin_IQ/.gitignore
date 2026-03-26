@@ -5,6 +5,8 @@ release/
 
 # Config secrets
 config/.env
+config/app.config.json
+config/google-service-account.json
 
 # Data and Artifacts
 data/
