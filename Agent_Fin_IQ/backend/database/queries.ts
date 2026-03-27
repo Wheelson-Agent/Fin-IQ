@@ -861,7 +861,29 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             const val = n8nVal[key] ?? n8nVal[key.toLowerCase().replace(/ /g, '_')];
             return val === true || String(val).toLowerCase() === 'true';
         };
-        
+
+        // --- RACE-CONDITION-PROOF DUPLICATE CHECK ---
+        // n8n's duplicate check uses a stale DB snapshot taken before parallel invoices write.
+        // Two invoices with the same number can both pass n8n's check simultaneously.
+        // This re-checks inside the open transaction against live DB state, overriding n8n's result.
+        const rtInvoiceNo = invData.invoice_number || invData.invoice_no || invData.invoiceNo;
+        const rtVendorGst = invData.vendor_gst;
+        if (rtInvoiceNo && rtVendorGst) {
+            const dupResult = await client.query(
+                `SELECT id FROM ap_invoices
+                 WHERE LOWER(invoice_number) = LOWER($1)
+                   AND LOWER(vendor_gst) = LOWER($2)
+                   AND id != $3`,
+                [rtInvoiceNo, rtVendorGst, invoiceId]
+            );
+            if (dupResult.rows.length > 0) {
+                console.warn(`[DB] ingestN8nData: Real-time duplicate detected for invoice "${rtInvoiceNo}" (${rtVendorGst}). Overriding n8n result. Conflicting id: ${dupResult.rows[0].id}`);
+                n8nVal['duplicate_check'] = false;
+                invData.n8n_val_json_data = JSON.stringify(n8nVal);
+            }
+        }
+        // --- END RACE-CONDITION CHECK ---
+
         const checks = [
             getVal('buyer_verification'),
             getVal('gst_validation_status'),
@@ -1058,8 +1080,24 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
 
         await client.query('COMMIT');
         return { success: true, id: invoiceId };
-    } catch (error) {
+    } catch (error: any) {
         await client.query('ROLLBACK');
+        // 23505 = PostgreSQL unique constraint violation
+        // Happens when two invoices with the same number/GST hit the DB at the exact same millisecond
+        // and both pass the application-level re-check before either commits.
+        // Treat this as a duplicate — flag the invoice as Handoff instead of crashing.
+        if (error.code === '23505') {
+            console.warn(`[DB] ingestN8nData: Unique constraint caught exact-millisecond duplicate for invoice ${invoiceId}. Flagging as Handoff.`);
+            try {
+                await pool.query(
+                    `UPDATE ap_invoices SET processing_status = 'Handoff', n8n_validation_status = 'Duplicate' WHERE id = $1`,
+                    [invoiceId]
+                );
+            } catch (updateErr) {
+                console.error(`[DB] ingestN8nData: Failed to flag duplicate invoice ${invoiceId}:`, updateErr);
+            }
+            return { success: true, id: invoiceId, duplicate: true };
+        }
         console.error(`[DB] ingestN8nData Error for ${invoiceId}:`, error);
         throw error;
     } finally {
