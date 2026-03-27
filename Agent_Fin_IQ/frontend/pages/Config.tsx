@@ -4,7 +4,7 @@ import {
     Plus, Trash2, MapPin, Phone, IndianRupee, Calendar, FileCheck, Hash, Shield, Edit2, ChevronRight, XCircle, RefreshCw,
     Brain, TrendingUp, Sparkles, Filter, Users, Search, X, Check, Eye, EyeOff, Settings, CheckCircle, ChevronDown,
     Globe, Target, Database, Server, BarChart2, Building2, Download, Folder, Mail, HardDrive, Share2, Link, Key,
-    UserCheck, Cloud, Layers, Receipt, Zap, AlertCircle, Save, AlertTriangle
+    UserCheck, Cloud, Layers, Receipt, Zap, AlertCircle, Save, AlertTriangle, Briefcase
 } from 'lucide-react';
 import { useEffect } from 'react';
 import { toast } from 'sonner';
