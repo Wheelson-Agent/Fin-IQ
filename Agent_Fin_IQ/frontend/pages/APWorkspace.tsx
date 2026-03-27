@@ -211,7 +211,9 @@ export default function APWorkspace() {
           const lMatch = getVal('Stock Items Matched', 'line_item_match_status');
           const bVerif = getVal('Company Verified', 'buyer_verification');
           const gValid = getVal('GST Validated', 'gst_validation_status');
-          const dValid = getVal('Data Validated', 'invoice_ocr_data_validation') || getVal('Data Validation', 'invoice_ocr_data_valdiation');
+          const dValid = getVal('Data Validated', 'invoice_ocr_data_validation') || 
+                         getVal('Data Validation', 'invoice_ocr_data_valdiation') ||
+                         getVal('invoice_ocr_data_valdiation');
           // Note: isDupPassed === true means NO duplicate was found (success state)
           const isDupPassed = getVal('Document Duplicate Check', 'duplicate_check');
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle, XCircle, Loader2, Upload, FileSearch, Cpu, Zap, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { uploadInvoice, runPipeline, getBatchLogs, getWorkerStatus, getAllLogsDebug } from '../../lib/api';
@@ -55,6 +55,66 @@ async function runWithConcurrency<T, R>(
     }
     await Promise.all(executing);
     return results;
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
+}
+
+function getHardwareBudget(): number {
+    if (typeof navigator !== 'undefined' && Number.isFinite(navigator.hardwareConcurrency)) {
+        return navigator.hardwareConcurrency;
+    }
+    return 4;
+}
+
+function getFileComplexityScore(filePath: string, fileName: string, fileData?: number[]): number {
+    const candidate = `${fileName || ''} ${filePath || ''}`.toLowerCase();
+    const isPdf = candidate.endsWith('.pdf');
+    const sizeBytes = Array.isArray(fileData) ? fileData.length : 0;
+
+    if (isPdf && sizeBytes >= 15 * 1024 * 1024) return 3;
+    if (isPdf && sizeBytes >= 5 * 1024 * 1024) return 2.5;
+    if (isPdf) return 2;
+    if (sizeBytes >= 12 * 1024 * 1024) return 2;
+    if (sizeBytes >= 4 * 1024 * 1024) return 1.5;
+    return 1;
+}
+
+function getDynamicConcurrencyPlan(
+    filePaths: string[],
+    fileNames: string[],
+    fileDataArrays?: number[][]
+): { upload: number; pipeline: number } {
+    const totalFiles = Math.max(filePaths.length, 1);
+    const hardwareBudget = getHardwareBudget();
+    const complexityScores = filePaths.map((fp, index) =>
+        getFileComplexityScore(fp, fileNames[index] || `file_${index}`, fileDataArrays?.[index])
+    );
+    const highestComplexity = complexityScores.length > 0 ? Math.max(...complexityScores) : 1;
+    const pdfCount = filePaths.filter((fp, index) => {
+        const candidate = `${fileNames[index] || ''} ${fp || ''}`.toLowerCase();
+        return candidate.endsWith('.pdf');
+    }).length;
+
+    let pipeline = hardwareBudget >= 12 ? 3 : hardwareBudget >= 8 ? 3 : hardwareBudget >= 4 ? 2 : 1;
+
+    if (highestComplexity >= 3) {
+        pipeline = 1;
+    } else if (highestComplexity >= 2.5 || pdfCount >= Math.max(2, Math.ceil(totalFiles / 2))) {
+        pipeline = Math.min(pipeline, 2);
+    }
+
+    pipeline = clamp(Math.min(pipeline, totalFiles), 1, 3);
+
+    let upload = hardwareBudget >= 12 ? 4 : hardwareBudget >= 8 ? 4 : hardwareBudget >= 4 ? 3 : 2;
+    if (highestComplexity >= 3) {
+        upload = Math.min(upload, 2);
+    }
+
+    upload = clamp(Math.min(Math.max(upload, pipeline), totalFiles), 1, 4);
+
+    return { upload, pipeline };
 }
 
 /* ─────────────────────── Particle component ─────────────────── */
@@ -264,6 +324,10 @@ export function ProcessingPipeline({
     const [activeFileName, setActiveFileName] = useState<string>('');
     const timers = useRef<ReturnType<typeof setTimeout>[] | ReturnType<typeof setInterval>[]>([]);
     const logScrollRef = useRef<HTMLDivElement>(null);
+    const concurrencyPlan = useMemo(
+        () => getDynamicConcurrencyPlan(filePaths, fileNames, fileDataArrays),
+        [fileDataArrays, fileNames, filePaths]
+    );
 
     // Periodic log and worker status fetching
     useEffect(() => {
@@ -342,10 +406,11 @@ export function ProcessingPipeline({
 
         const processFiles = async () => {
             try {
+                console.log(`[Pipeline] Dynamic concurrency selected for ${batchName || 'single-run'}: upload=${concurrencyPlan.upload}, pipeline=${concurrencyPlan.pipeline}`);
                 // Step 1: Uploading
                 updateStage('uploading', 'active');
 
-                const uploadedData = await runWithConcurrency(filePaths, 3, async (fp, i) => {
+                const uploadedData = await runWithConcurrency(filePaths, concurrencyPlan.upload, async (fp, i) => {
                     const name = fileNames[i] || `file_${i}`;
                     setActiveFileName(name);
                     const fileData = fileDataArrays?.[i];
@@ -386,7 +451,7 @@ export function ProcessingPipeline({
                 setBatchCount(0); 
                 const successfulUploads = uploadedData.filter(d => d.invoice);
 
-                const pipelineResults = await runWithConcurrency(successfulUploads, 3, async (data) => {
+                const pipelineResults = await runWithConcurrency(successfulUploads, concurrencyPlan.pipeline, async (data) => {
                     if (!data.invoice) return { success: false, error: 'No invoice record' };
                     setActiveFileName(data.name);
                     try {

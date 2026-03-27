@@ -389,10 +389,15 @@ export function registerIpcHandlers() {
      * Payload must match n8n workflow contract. Returns { success, message?, data? }.
      */
     ipcMain.handle('vendors:sync-tally', async (_event, { payload }) => {
-        console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
-        const result = await n8n.sendVendorCreationToN8n(payload || {});
-        console.log('[IPC] vendors:sync-tally result:', result.success, result.message?.slice(0, 80));
-        return { success: result.success, message: result.message, data: result.data };
+        try {
+            console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
+            const result = await n8n.sendVendorCreationToN8n(payload || {});
+            console.log('[IPC] vendors:sync-tally result:', result.success, result.message?.slice(0, 80));
+            return { success: result.success, message: result.message, data: result.data };
+        } catch (err: any) {
+            console.error('[IPC] vendors:sync-tally error:', err.message);
+            return { success: false, message: err.message };
+        }
     });
 
 
@@ -625,16 +630,19 @@ export function registerIpcHandlers() {
             console.log('[IPC] masters:create-ledger: Received:', { name, parent_group, company_id, meta });
             console.log('[IPC] Routing via n8n first');
             
-            // 1. Send to n8n Webhook (Unified)
+            // 1. Send to n8n Webhook (raw body for FC_tally_module wrapper)
             const n8nResult = await n8n.sendMasterCreationToN8n({
                 process: { ledger_creation: true },
-                ledger: {
-                    name,
-                    parent_group,
-                    buyer_name: meta?.buyer_name || '',
-                    gst_applicable: meta?.gst_applicable || 'Yes',
-                    company_id: company_id ?? null,
-                    meta: meta || {}
+                invoice: {
+                    payload: {
+                        name,
+                        parent_group,
+                        ledger_creation: true,
+                        buyer_name: meta?.buyer_name || '',
+                        gst_applicable: meta?.gst_applicable || 'Yes',
+                        company_id: company_id ?? null,
+                        meta: meta || {}
+                    }
                 }
             });
 
@@ -671,17 +679,24 @@ export function registerIpcHandlers() {
             console.log('[IPC] masters:create-item: Received:', { name, uom, hsn, tax_rate, company_id, meta });
             console.log('[IPC] Routing via n8n first');
             
-            // 1. Send to n8n Webhook (Unified)
+            // 1. Send to n8n Webhook (raw body for FC_tally_module wrapper)
             const n8nResult = await n8n.sendMasterCreationToN8n({
-                process: { line_items_creation: true },
-                stock_item: {
-                    name,
-                    uom,
-                    hsn_sac: hsn,
-                    tax_rate,
-                    buyer_name: meta?.buyer_name || '',
-                    company_id: company_id ?? null,
-                    meta: meta || {}
+                process: {
+                    stock_item_creation: true,
+                    line_items_creation: true,
+                },
+                invoice: {
+                    payload: {
+                        name,
+                        uom,
+                        hsn_sac: hsn,
+                        tax_rate,
+                        stock_item_creation: true,
+                        line_items_creation: true,
+                        buyer_name: meta?.buyer_name || '',
+                        company_id: company_id ?? null,
+                        meta: meta || {}
+                    }
                 }
             });
 

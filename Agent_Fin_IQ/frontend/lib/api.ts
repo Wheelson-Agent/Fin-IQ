@@ -77,6 +77,15 @@ export async function getInvoiceById(id: string): Promise<Invoice | null> {
     return invoke<Invoice | null>('invoices:get-by-id', { id });
 }
 
+export interface InvoiceDocumentView {
+    path: string | null;
+    source: 'preocr' | 'original' | 'missing';
+}
+
+export async function getInvoiceDocumentView(id: string): Promise<InvoiceDocumentView> {
+    return invoke<InvoiceDocumentView>('invoices:get-document-view', { id });
+}
+
 /**
  * Upload a new invoice file for processing.
  * @param filePath - Original path (may be empty in modern Electron)

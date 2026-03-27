@@ -43,6 +43,9 @@ function getCanonicalKey(key: string): string {
     if (normalized === 'cgst_pct' || normalized === 'cgst_%' || normalized === 'cgst_percentage') return 'cgst_pct';
     if (normalized === 'sgst_pct' || normalized === 'sgst_%' || normalized === 'sgst_percentage') return 'sgst_pct';
     if (normalized === 'igst_pct' || normalized === 'igst_%' || normalized === 'igst_percentage') return 'igst_pct';
+    if (normalized === 'buyer_name' || normalized === 'buyer') return 'buyer_name';
+    if (normalized === 'buyer_gst' || normalized === 'customer_gst') return 'buyer_gst';
+    if (normalized === 'round_off') return 'round_off';
     return normalized;
 }
 
@@ -742,7 +745,8 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             "uploader_name", "vendor_id", "is_mapped", "vendor_gst", "validation_time",
             "irn", "ack_no", "ack_date", "eway_bill_no", "failure_reason",
             "supplier_pan", "supplier_address", "round_off",
-            "cgst", "sgst", "igst", "cgst_pct", "sgst_pct", "igst_pct"
+            "cgst", "sgst", "igst", "cgst_pct", "sgst_pct", "igst_pct",
+            "buyer_name", "buyer_gst"
         ];
 
         const updateValues: Record<string, any> = {};

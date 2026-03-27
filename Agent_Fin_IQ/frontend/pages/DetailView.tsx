@@ -21,6 +21,7 @@ import {
   createLedgerMaster,
   createItemMaster,
   getInvoiceById,
+  getInvoiceDocumentView,
   getInvoiceItems,
   saveInvoiceItems,
   saveVendor,
@@ -74,6 +75,10 @@ const getCanonicalKey = (key: string): string => {
   if (normalized === 'cgst_pct' || normalized === 'cgst_%' || normalized === 'cgst_percentage') return 'cgst_pct';
   if (normalized === 'sgst_pct' || normalized === 'sgst_%' || normalized === 'sgst_percentage') return 'sgst_pct';
   if (normalized === 'igst_pct' || normalized === 'igst_%' || normalized === 'igst_percentage') return 'igst_pct';
+  if (normalized === 'buyer_name' || normalized === 'buyer') return 'buyer_name';
+  if (normalized === 'buyer_gst' || normalized === 'customer_gst') return 'buyer_gst';
+  if (normalized === 'round_off') return 'round_off';
+  if (normalized === 'invoice_ocr_data_valdiation') return 'invoice_ocr_data_validation';
   return normalized;
 };
 
@@ -120,6 +125,7 @@ export default function DetailView() {
   const [searchParams] = useSearchParams();
   const isFromReceived = searchParams.get('from') === 'received';
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [documentView, setDocumentView] = useState<{ path: string | null; source: 'preocr' | 'original' | 'missing' } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [zoom, setZoom] = useState(100);
@@ -133,7 +139,8 @@ export default function DetailView() {
     posted: 'Posted'
   };
   const backLabel = tabNames[fromTab] || 'AP Workspace';
-  const isPdf = invoice?.file_path?.toLowerCase().endsWith('.pdf');
+  const documentPath = documentView?.path || invoice?.file_path || '';
+  const isPdf = documentPath.toLowerCase().endsWith('.pdf');
   const totalPages = isPdf ? 1 : 1; // Images are always 1 page; PDFs default to 1 (no page count data available)
 
   // New states for real-time creation
@@ -260,9 +267,14 @@ export default function DetailView() {
   const [ledgerIdToName, setLedgerIdToName] = useState<Record<string, string>>({});
   const [rawPayload, setRawPayload] = useState<any>(null);
 
+  useEffect(() => {
+    setPage(1);
+  }, [documentPath]);
+
   const loadData = async () => {
     console.log('[DetailView] Loading data for ID:', id);
     setLoading(true);
+    setDocumentView(null);
     try {
       let invoiceRecord: any = null;
       let itemsRecord: any[] = [];
@@ -272,6 +284,14 @@ export default function DetailView() {
       try {
         invoiceRecord = await getInvoiceById(id || '');
       } catch (e) { console.error('[DetailView] Error fetching invoice:', e); }
+
+      try {
+        const previewRecord = await getInvoiceDocumentView(id || '');
+        setDocumentView(previewRecord);
+      } catch (e) {
+        console.error('[DetailView] Error fetching document view:', e);
+        setDocumentView(null);
+      }
 
       try {
         itemsRecord = await getInvoiceItems(id || '') || [];
@@ -289,6 +309,10 @@ export default function DetailView() {
 
       if (invoiceRecord) {
         setInvoice(invoiceRecord);
+        setDocumentView(prev => prev?.path ? prev : {
+          path: invoiceRecord.file_path || null,
+          source: invoiceRecord.file_path ? 'original' : 'missing'
+        });
 
         let vendorVerified = invoiceRecord.is_mapped || false;
         if (invoiceRecord.n8n_val_json_data) {
@@ -339,6 +363,7 @@ export default function DetailView() {
           irn: '', ack_no: '', ack_date: '', eway_bill_no: '',
           invoice_no: '', date: '', vendor_name: '', vendor_gst: '',
           supplier_pan: '', supplier_address: '',
+          buyer_name: '', buyer_gst: '', round_off: '0',
           sub_total: 0, tax_total: 0, grand_total: 0,
           cgst: 0, sgst: 0, igst: 0, cgst_pct: 0, sgst_pct: 0, igst_pct: 0,
           doc_type: 'Services', remarks: '',
@@ -752,11 +777,11 @@ export default function DetailView() {
 
             {/* Document Viewer */}
             <div className="flex-1 overflow-auto flex items-start justify-center p-0 bg-[#323639]">
-              {invoice.file_path ? (
+              {documentPath ? (
                 <div className="w-full h-full flex flex-col">
-                  {invoice.file_path.toLowerCase().endsWith('.pdf') ? (
+                  {documentPath.toLowerCase().endsWith('.pdf') ? (
                     <iframe
-                      src={`local-file:///${invoice.file_path.replace(/\\/g, '/')}#page=${page}&zoom=${zoom}`}
+                      src={`local-file:///${documentPath.replace(/\\/g, '/')}#page=${page}&zoom=${zoom}`}
                       className="w-full h-full border-none invert-[0.05] contrast-125"
                       title="Invoice Document"
                     />
@@ -764,7 +789,7 @@ export default function DetailView() {
                     <div className="flex-1 overflow-auto p-8 flex justify-center">
                       <div className="relative group">
                         <img
-                          src={`local-file:///${invoice.file_path.replace(/\\/g, '/')}`}
+                          src={`local-file:///${documentPath.replace(/\\/g, '/')}`}
                           style={{
                             display: 'block',
                             width: `${zoom}%`,
@@ -1281,7 +1306,7 @@ export default function DetailView() {
                           },
                           tax: {
                             pan: (newVendor.pan || '').trim() || '',
-                            gstRegistrationType: gstin ? 'Regular' : '',
+                            gstRegistrationType: 'Regular',
                             gstin: gstin || '',
                           },
                           meta: {
