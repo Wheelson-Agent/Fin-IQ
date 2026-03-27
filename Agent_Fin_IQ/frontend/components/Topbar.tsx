@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Bell, ChevronDown, Palette, Circle, Check, Wifi, WifiOff, RefreshCw, Building2 } from 'lucide-react';
+import { Search, Bell, ChevronDown, Palette, Circle, Check, Wifi, WifiOff, RefreshCw, Building2, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DateRangeValue } from '../context/DateContext';
 import { Calendar } from '../components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { format, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, isSameDay, startOfDay, endOfDay } from 'date-fns';
+import { toast } from 'sonner';
 
 type Theme = 'color' | 'mono';
 
@@ -162,6 +163,7 @@ export function Topbar({
     const [themeOpen, setThemeOpen] = useState(false);
     const [companyOpen, setCompanyOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isErpSyncing, setIsErpSyncing] = useState(false);
     const dropRef = useRef<HTMLDivElement>(null);
     const companyDropRef = useRef<HTMLDivElement>(null);
     const active = themes.find(t => t.id === theme)!;
@@ -174,6 +176,30 @@ export function Topbar({
         if (onRefresh) onRefresh();
         else window.dispatchEvent(new CustomEvent('app:refresh'));
         setTimeout(() => setIsRefreshing(false), 1500);
+    };
+
+    const handleErpSync = async () => {
+        if (isErpSyncing) return;
+        setIsErpSyncing(true);
+        const syncPromise = (async () => {
+            const api = (window as any).api;
+            if (!api?.invoke) throw new Error('API bridge not available');
+            const res = await api.invoke('erp:sync');
+            if (!res?.success) throw new Error(res?.error || 'ERP sync failed');
+            return res;
+        })();
+
+        toast.promise(syncPromise, {
+            loading: 'Syncing with ERP...',
+            success: 'ERP sync started',
+            error: (e) => (e instanceof Error ? e.message : 'ERP sync failed'),
+        });
+
+        try {
+            await syncPromise;
+        } finally {
+            setIsErpSyncing(false);
+        }
     };
 
     useEffect(() => {
@@ -348,6 +374,17 @@ export function Topbar({
                 <button onClick={handleRefresh} title="Refresh data" className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all">
                     <motion.div animate={{ rotate: isRefreshing ? 360 : 0 }} transition={{ duration: 1, repeat: isRefreshing ? Infinity : 0, ease: 'linear' }}>
                         <RefreshCw size={14} />
+                    </motion.div>
+                </button>
+
+                <button
+                    onClick={handleErpSync}
+                    title="Sync ERP"
+                    className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all"
+                    disabled={isErpSyncing}
+                >
+                    <motion.div animate={{ rotate: isErpSyncing ? 360 : 0 }} transition={{ duration: 1, repeat: isErpSyncing ? Infinity : 0, ease: 'linear' }}>
+                        <Database size={14} />
                     </motion.div>
                 </button>
 

@@ -737,6 +737,50 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
         }
 
+        // Workspace-only save path: update ONLY `ap_invoices.ocr_raw_payload` (no column mapping, no line table writes).
+        if (data && data.__workspace_only === true) {
+            let patch: any = data.ocr_raw_payload ?? {};
+            if (typeof patch === 'string') {
+                try { patch = JSON.parse(patch); } catch (e) { patch = {}; }
+            }
+
+            const mergeObjects = (base: any, next: any) => {
+                if (!base || typeof base !== 'object') return next;
+                if (!next || typeof next !== 'object') return base;
+                const merged: any = { ...base, ...next };
+                if (base.__ap_workspace && next.__ap_workspace && typeof base.__ap_workspace === 'object' && typeof next.__ap_workspace === 'object') {
+                    merged.__ap_workspace = { ...base.__ap_workspace, ...next.__ap_workspace };
+                    if (base.__ap_workspace.validation && next.__ap_workspace.validation) {
+                        merged.__ap_workspace.validation = { ...base.__ap_workspace.validation, ...next.__ap_workspace.validation };
+                    }
+                }
+                return merged;
+            };
+
+            const mergedPayload = mergeObjects(rawPayload, patch);
+
+            const invoiceRes = await client.query(
+                'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *',
+                [id, JSON.stringify(mergedPayload)]
+            );
+            const updatedInvoice = invoiceRes.rows[0];
+
+            await client.query(
+                `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+                [
+                    id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
+                    'Edited', userName,
+                    'Workspace save: updated ocr_raw_payload only',
+                    JSON.stringify({}),
+                    JSON.stringify({}),
+                ]
+            );
+
+            await client.query('COMMIT');
+            return updatedInvoice;
+        }
+
         const allowedCols = [
             "invoice_number", "vendor_name", "invoice_date", "due_date",
             "sub_total", "tax_total", "grand_total", "po_number", "gl_account",

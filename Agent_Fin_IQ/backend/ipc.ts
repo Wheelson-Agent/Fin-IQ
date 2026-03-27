@@ -279,11 +279,40 @@ export function registerIpcHandlers() {
 
             const result = await n8n.sendToValidation(payload);
             if (result.success) {
-                // Use ingestN8nData to ensure ALL frontend fields (ocr_raw_payload, n8n_val_json_data) 
-                // are updated correctly from the n8n response.
-                await queries.ingestN8nData(id, result.response);
-                
-                return { success: true, response: result.response };
+                // IMPORTANT: Do not overwrite user's edited fields.
+                // Only store validation flags back into `ocr_raw_payload`.
+                const r = result.response || {};
+
+                const readBool = (...keys: string[]) => {
+                    for (const k of keys) {
+                        if (r?.[k] !== undefined) return r[k] === true || String(r[k]).toLowerCase() === 'true';
+                    }
+                    return undefined;
+                };
+
+                const validationFlags: Record<string, any> = {
+                    buyer_verification: readBool('Buyer Verification', 'buyer_verification'),
+                    gst_validation_status: readBool('GST Validation Status', 'gst_validation_status', 'gst_validation'),
+                    invoice_ocr_data_validation: readBool('Invoice OCR Data Validation', 'invoice_ocr_data_validation', 'invoice_ocr_data_valdiation'),
+                    vendor_verification: readBool('Vendor Verification', 'vendor_verification'),
+                    duplicate_check: readBool('Duplication', 'duplicate_check', 'duplication'),
+                    line_item_match_status: readBool('Line Item Match Status', 'line_item_match_status', 'line_items_match_status', 'ledger_match_status'),
+                };
+
+                // Remove undefineds to keep payload clean
+                Object.keys(validationFlags).forEach((k) => validationFlags[k] === undefined && delete validationFlags[k]);
+
+                const patch = {
+                    ...validationFlags,
+                    __ap_workspace: {
+                        validation: validationFlags,
+                        last_revalidated_at: new Date().toISOString(),
+                    },
+                };
+
+                await queries.saveAllInvoiceData(id, { __workspace_only: true, ocr_raw_payload: patch }, [], 'System');
+
+                return { success: true, response: result.response, validation: validationFlags };
             } else {
                 return { success: false, error: result.error };
             }
@@ -780,6 +809,40 @@ export function registerIpcHandlers() {
     ipcMain.handle('config:set-storage-path', async (_event, config) => {
         await queries.setAppConfig('storage_config', config);
         return { success: true };
+    });
+
+    // ─── ERP SYNC ──────────────────────────────────────────────
+    ipcMain.handle('erp:sync', async () => {
+        const syncUrl = process.env.N8N_ERP_sync_URL;
+        console.log(`[IPC] ERP Sync requested. Target: ${syncUrl}`);
+
+        if (!syncUrl) {
+            console.error('[IPC] ERP Sync failed: N8N_ERP_sync_URL not defined in .env');
+            return { success: false, error: 'Sync URL not configured' };
+        }
+
+        try {
+            const response = await fetch(syncUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    action: 'manual_sync',
+                    source: 'Agent_Fin_IQ_Desktop'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('[IPC] ERP Sync successful:', data);
+            return { success: true, data };
+        } catch (err: any) {
+            console.error('[IPC] ERP Sync failed:', err.message);
+            return { success: false, error: err.message };
+        }
     });
 
     console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp, config');
