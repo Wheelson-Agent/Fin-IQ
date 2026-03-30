@@ -259,9 +259,20 @@ export default function APWorkspace() {
 
           // Construct Failure Reasons (remarks) dynamically with DetailView matching labels
           const reasons: string[] = [];
-          if ((inv.pre_ocr_status || '').toLowerCase() === 'failed' || bStatus === 'failed' || bStatus === 'ocr_failed') {
+          // ── PRE-OCR REJECTION REASONS [added: mapped labels per pre_ocr_status code] ──
+          const preOcrCode = (inv.pre_ocr_status || '').toUpperCase();
+          if (preOcrCode === 'BLUR') {
+            reasons.push('Invalid doc- blur');
+          } else if (preOcrCode === 'FILE_TOO_LARGE') {
+            reasons.push('Invalid doc- file too large');
+          } else if (preOcrCode === 'EMPTY_DOC') {
+            reasons.push('Invalid doc- empty-doc');
+          } else if (preOcrCode === 'ENCRYPTED') {
+            reasons.push('Invalid doc- encrypted');
+          } else if (preOcrCode === 'FAILED' || bStatus === 'failed' || bStatus === 'ocr_failed') {
             reasons.push('Doc Failed');
           }
+          // ── END PRE-OCR REJECTION REASONS ────────────────────────────────────
           if (isUnknownFile || isUnknownInv) {
             reasons.push('Missing invoice field');
           }

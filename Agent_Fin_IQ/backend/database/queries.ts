@@ -361,6 +361,60 @@ export async function updateInvoiceFailureReason(id: string, failure_reason: str
     return result.rows[0];
 }
 
+// ── PRE-OCR STATUS HELPERS [added: blur rejection + pass tracking] ────────────
+
+/**
+ * Mark an invoice as rejected due to blur.
+ * Routes to Handoff (not Failed) so the user can review and re-upload.
+ * Writes: processing_status='Handoff', failure_reason='Invalid doc- blur', pre_ocr_status='BLUR'
+ */
+export async function markInvoiceBlur(id: string) {
+    const result = await query(
+        `UPDATE ap_invoices
+         SET processing_status = 'Handoff',
+             failure_reason    = 'Invalid doc- blur',
+             pre_ocr_status    = 'BLUR',
+             updated_at        = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id]
+    );
+    return result.rows[0];
+}
+
+/**
+ * Update only pre_ocr_status — used to record PASSED when pre-OCR succeeds.
+ * Does not touch processing_status or failure_reason.
+ */
+export async function updatePreOcrStatus(id: string, status: string) {
+    const result = await query(
+        `UPDATE ap_invoices SET pre_ocr_status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        [id, status]
+    );
+    return result.rows[0];
+}
+
+/**
+ * Generic pre-OCR rejection — used for FILE_TOO_LARGE, EMPTY_DOC, ENCRYPTED, etc.
+ * Routes to Handoff with a user-facing failure reason and a machine-readable pre_ocr_status code.
+ * Writes: processing_status='Handoff', failure_reason=<label>, pre_ocr_status=<code>
+ */
+export async function markInvoicePreOcrRejection(id: string, failureReason: string, preOcrStatus: string) {
+    const result = await query(
+        `UPDATE ap_invoices
+         SET processing_status = 'Handoff',
+             failure_reason    = $2,
+             pre_ocr_status    = $3,
+             updated_at        = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id, failureReason, preOcrStatus]
+    );
+    return result.rows[0];
+}
+
+// ── END PRE-OCR STATUS HELPERS ─────────────────────────────────────────────────
+
 /**
  * Update the failure_reason (Remarks) of an invoice.
  * @param id - Invoice UUID

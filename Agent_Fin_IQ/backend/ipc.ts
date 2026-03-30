@@ -457,14 +457,57 @@ export function registerIpcHandlers() {
             const result = await runFullPipeline(fileBuffer, fileName);
             console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
-            // If the decision is to fail, return an error back to the frontend
-            if (result.decision.route === 'FAILED') {
-                const errorMessage = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Pre-OCR failed: ${errorMessage}`);
-                // Mark database invoice as failed with reason
-                await queries.updateInvoiceFailureReason(invoiceId, errorMessage, 'FAILED');
-                return { success: false, error: errorMessage };
+            // ── PRE-OCR REJECTION HANDLER [added: mapped labels for all rejection routes] ──
+            // Reads actual reason codes from job stages (not the vague decision.reasons strings)
+            // and maps them to user-facing labels + machine-readable pre_ocr_status codes.
+            // All rejections route to Handoff so the user can review and re-upload.
+
+            // Flatten all reason codes across every stage for easy lookup
+            const allStageCodes: string[] = Object.values(result.job.stages)
+                .flatMap((s: any) => s.reasonCodes as string[]);
+
+            // MANUAL_REVIEW — encrypted PDF, engine never routes this to FAILED
+            if (result.decision.route === 'MANUAL_REVIEW') {
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: encrypted PDF`);
+                await queries.markInvoicePreOcrRejection(invoiceId, 'Invalid doc- encrypted', 'ENCRYPTED');
+                return { success: false, error: 'Invalid doc- encrypted' };
             }
+
+            // FAILED — map specific reason codes to proper labels; fall back to generic for unmapped ones
+            if (result.decision.route === 'FAILED') {
+                let failureReason: string;
+                let preOcrStatus: string;
+
+                if (allStageCodes.includes('FILE_TOO_LARGE')) {
+                    failureReason = 'Invalid doc- file too large';
+                    preOcrStatus  = 'FILE_TOO_LARGE';
+                } else if (allStageCodes.includes('EMPTY_PDF') || allStageCodes.includes('ALL_BLANK_PAGES')) {
+                    failureReason = 'Invalid doc- empty-doc';
+                    preOcrStatus  = 'EMPTY_DOC';
+                } else {
+                    // Other failures (CORRUPT, RASTERIZATION_FAILED, etc.) — generic for now
+                    failureReason = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
+                    preOcrStatus  = 'FAILED';
+                }
+
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Pre-OCR failed: ${failureReason}`);
+                await queries.markInvoicePreOcrRejection(invoiceId, failureReason, preOcrStatus);
+                return { success: false, error: failureReason };
+            }
+
+            // ENHANCE_REQUIRED — blur rejection
+            // >50% of pages failed the blur quality check
+            if (result.decision.route === 'ENHANCE_REQUIRED') {
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: image too blurry for OCR`);
+                await queries.markInvoiceBlur(invoiceId);
+                return { success: false, error: 'Invalid doc- blur' };
+            }
+            // ── END PRE-OCR REJECTION HANDLER ────────────────────────────────────
+
+            // ── PRE-OCR PASS STATUS [added: track pre_ocr_status in DB] ───────
+            // Record that pre-OCR passed so the column is never left as null on success.
+            await queries.updatePreOcrStatus(invoiceId, 'PASSED');
+            // ── END PRE-OCR PASS STATUS ────────────────────────────────────────
 
             batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
             batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine`);
