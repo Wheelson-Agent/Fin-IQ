@@ -154,7 +154,8 @@ export interface RasterizeResult {
  */
 export function rasterizeWithMutool(
     inputPdf: string, outDir: string, dpi: number,
-    logWrite?: (msg: string) => void
+    logWrite?: (msg: string) => void,
+    options?: { timeoutMs?: number },
 ): Promise<RasterizeResult> {
     return new Promise((resolve) => {
         const mutool = getMutoolPath();
@@ -167,29 +168,50 @@ export function rasterizeWithMutool(
         const jobDir = path.dirname(inputPdf);
         logWrite?.(`[rasterizer] mutool ${args.join(' ')} (cwd=${jobDir})`);
 
-        const proc = spawn(mutool, args, {
-            cwd: jobDir,
-            env: { ...process.env, PATH: path.dirname(mutool) + path.delimiter + (process.env.PATH ?? '') },
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        const timeoutMs = options?.timeoutMs ?? 0;
+        let proc;
+        try {
+            proc = spawn(mutool, args, {
+                cwd: jobDir,
+                env: { ...process.env, PATH: path.dirname(mutool) + path.delimiter + (process.env.PATH ?? '') },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+        } catch (e: any) {
+            resolve({ success: false, pageCount: 0, files: [], exitCode: null, error: String(e?.message || e) });
+            return;
+        }
 
         let stdout = '';
         let stderr = '';
         proc.stdout?.on('data', (c) => { stdout += c.toString(); });
         proc.stderr?.on('data', (c) => { stderr += c.toString(); });
 
+        let settled = false;
+        const finish = (r: RasterizeResult) => {
+            if (settled) return;
+            settled = true;
+            try { if (timer) clearTimeout(timer); } catch { /* ignore */ }
+            resolve(r);
+        };
+
+        const timer = timeoutMs > 0 ? setTimeout(() => {
+            try { stderr += `\n[rasterizer] mutool timeout after ${timeoutMs}ms`; } catch { /* ignore */ }
+            try { proc.kill(); } catch { /* ignore */ }
+            finish({ success: false, pageCount: 0, files: [], exitCode: null, stderr, stdout, error: `mutool timeout after ${timeoutMs}ms` });
+        }, timeoutMs) : null;
+
         proc.on('close', (code) => {
             if (code !== 0) {
-                resolve({ success: false, pageCount: 0, files: [], exitCode: code ?? undefined, stderr, stdout, error: `mutool exited ${code}` });
+                finish({ success: false, pageCount: 0, files: [], exitCode: code ?? undefined, stderr, stdout, error: `mutool exited ${code}` });
                 return;
             }
             const files = fs.readdirSync(outDir).filter(f => f.match(/^page_\d+\.png$/)).sort();
             const entries = files.map(f => ({ file: f, sizeBytes: fs.statSync(path.join(outDir, f)).size }));
-            resolve({ success: true, pageCount: entries.length, files: entries, exitCode: 0, stderr, stdout });
+            finish({ success: true, pageCount: entries.length, files: entries, exitCode: 0, stderr, stdout });
         });
 
         proc.on('error', (err) => {
-            resolve({ success: false, pageCount: 0, files: [], exitCode: undefined, error: err.message });
+            finish({ success: false, pageCount: 0, files: [], exitCode: undefined, stderr, stdout, error: err.message });
         });
     });
 }
@@ -209,7 +231,8 @@ export function rasterizeWithMutool(
  */
 export function rasterizeWithPdftoppm(
     inputPdf: string, outDir: string, dpi: number,
-    _pageCount: number, logWrite?: (msg: string) => void
+    _pageCount: number, logWrite?: (msg: string) => void,
+    options?: { timeoutMs?: number },
 ): Promise<RasterizeResult> {
     return new Promise((resolve) => {
         const pdftoppm = getPdftoppmPath();
@@ -224,20 +247,41 @@ export function rasterizeWithPdftoppm(
         const pathEnv = `${popplerBinDir}${pathSep}${process.env.PATH ?? ''}`;
         logWrite?.(`[rasterizer] pdftoppm ${args.join(' ')} (cwd=${popplerBinDir})`);
 
-        const proc = spawn(pdftoppm, args, {
-            cwd: popplerBinDir,
-            env: { ...process.env, PATH: pathEnv },
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        const timeoutMs = options?.timeoutMs ?? 0;
+        let proc;
+        try {
+            proc = spawn(pdftoppm, args, {
+                cwd: popplerBinDir,
+                env: { ...process.env, PATH: pathEnv },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+        } catch (e: any) {
+            resolve({ success: false, pageCount: 0, files: [], exitCode: null, error: String(e?.message || e) });
+            return;
+        }
 
         let stdout = '';
         let stderr = '';
         proc.stdout?.on('data', (c) => { stdout += c.toString(); });
         proc.stderr?.on('data', (c) => { stderr += c.toString(); });
 
+        let settled = false;
+        const finish = (r: RasterizeResult) => {
+            if (settled) return;
+            settled = true;
+            try { if (timer) clearTimeout(timer); } catch { /* ignore */ }
+            resolve(r);
+        };
+
+        const timer = timeoutMs > 0 ? setTimeout(() => {
+            try { stderr += `\n[rasterizer] pdftoppm timeout after ${timeoutMs}ms`; } catch { /* ignore */ }
+            try { proc.kill(); } catch { /* ignore */ }
+            finish({ success: false, pageCount: 0, files: [], exitCode: null, stderr, stdout, error: `pdftoppm timeout after ${timeoutMs}ms` });
+        }, timeoutMs) : null;
+
         proc.on('close', (code) => {
             if (code !== 0) {
-                resolve({ success: false, pageCount: 0, files: [], exitCode: code ?? undefined, stderr, stdout, error: `pdftoppm exited ${code}` });
+                finish({ success: false, pageCount: 0, files: [], exitCode: code ?? undefined, stderr, stdout, error: `pdftoppm exited ${code}` });
                 return;
             }
             const files = fs.readdirSync(outDir).filter(f => f.match(/^page-\d+\.png$/i)).sort((a, b) => {
@@ -252,11 +296,11 @@ export function rasterizeWithPdftoppm(
                 fs.renameSync(path.join(outDir, oldName), path.join(outDir, newName));
                 entries.push({ file: newName, sizeBytes: fs.statSync(path.join(outDir, newName)).size });
             }
-            resolve({ success: true, pageCount: entries.length, files: entries, exitCode: 0, stderr, stdout });
+            finish({ success: true, pageCount: entries.length, files: entries, exitCode: 0, stderr, stdout });
         });
 
         proc.on('error', (err) => {
-            resolve({ success: false, pageCount: 0, files: [], exitCode: undefined, error: err.message });
+            finish({ success: false, pageCount: 0, files: [], exitCode: undefined, stderr, stdout, error: err.message });
         });
     });
 }

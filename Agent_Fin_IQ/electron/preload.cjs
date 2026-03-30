@@ -51,6 +51,7 @@ const ALLOWED_CHANNELS = [
     'ses:get-all',
     'masters:get-ledgers',
     'masters:create-ledger',
+    'masters:create-item',
     'masters:get-tds-sections',
     // Companies & Dashboard
     'companies:get-active',

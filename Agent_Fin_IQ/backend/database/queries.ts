@@ -20,6 +20,54 @@
 import { query, pool } from './connection';
 import { sendInvoiceToTally } from '../sync/tally_posting';
 
+/**
+ * Standardizes inconsistent OCR field names to their canonical database column names.
+ */
+function getCanonicalKey(key: string): string {
+    const normalized = key.toLowerCase().replace(/ /g, '_');
+    if (normalized === 'invoice_no' || normalized === 'inv_no' || normalized === 'bill_no') return 'invoice_number';
+    if (normalized === 'date' || normalized === 'inv_date' || normalized === 'bill_date' || normalized === 'invoice_date') return 'invoice_date';
+    if (normalized === 'amount' || normalized === 'taxable_value' || normalized === 'taxable_amount' || normalized === 'sub_total') return 'sub_total';
+    if (normalized === 'gst' || normalized === 'tax' || normalized === 'tax_amount' || normalized === 'tax_total') return 'tax_total';
+    if (normalized === 'total' || normalized === 'grand_total' || normalized === 'total_amount' || normalized === 'total_invoice_amount') return 'grand_total';
+    if (normalized === 'status' || normalized === 'processing_status') return 'processing_status';
+    if (normalized === 'remarks' || normalized === 'fail_reason' || normalized === 'failure_reason') return 'failure_reason';
+    if (normalized === 'supplier_gst' || normalized === 'gstin' || normalized === 'vendor_gst') return 'vendor_gst';
+    if (normalized === 'supplier_name' || normalized === 'vendor_name') return 'vendor_name';
+    if (normalized === 'supplier_address' || normalized === 'address') return 'supplier_address';
+    if (normalized === 'supplier_pan' || normalized === 'pan') return 'supplier_pan';
+    if (normalized === 'round_off') return 'round_off';
+    if (normalized === 'cgst' || normalized === 'cgst_amount') return 'cgst';
+    if (normalized === 'sgst' || normalized === 'sgst_amount') return 'sgst';
+    if (normalized === 'igst' || normalized === 'igst_amount') return 'igst';
+    if (normalized === 'cgst_pct' || normalized === 'cgst_%' || normalized === 'cgst_percentage') return 'cgst_pct';
+    if (normalized === 'sgst_pct' || normalized === 'sgst_%' || normalized === 'sgst_percentage') return 'sgst_pct';
+    if (normalized === 'igst_pct' || normalized === 'igst_%' || normalized === 'igst_percentage') return 'igst_pct';
+    if (normalized === 'buyer_name' || normalized === 'buyer') return 'buyer_name';
+    if (normalized === 'buyer_gst' || normalized === 'customer_gst') return 'buyer_gst';
+    if (normalized === 'round_off') return 'round_off';
+    return normalized;
+}
+
+/**
+ * Smartly updates a JSONB payload by prioritizing existing keys that map to the same field.
+ */
+function smartUpdatePayload(payload: any, targetKey: string, value: any) {
+    if (!payload) return;
+    const normalizedTarget = getCanonicalKey(targetKey);
+    const existingKeys = Object.keys(payload);
+    
+    // Find the first key that normalizes to our target canonical key
+    const foundKey = existingKeys.find(k => getCanonicalKey(k) === normalizedTarget);
+
+    if (foundKey) {
+        payload[foundKey] = value;
+    } else {
+        payload[targetKey] = value;
+    }
+}
+
+
 // ─────────────────────────────────────────────────────────────
 // AP INVOICES
 // ─────────────────────────────────────────────────────────────
@@ -211,7 +259,9 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
         "processing_status", "processing_time", "doc_type", "posted_to_tally_json",
         "all_data_invoice", "file_location", "file_path", "tally_id",
         "uploader_name", "vendor_id", "is_mapped", "vendor_gst", "validation_time",
-        "irn", "ack_no", "ack_date", "eway_bill_no"
+        "irn", "ack_no", "ack_date", "eway_bill_no", "failure_reason",
+        "supplier_pan", "supplier_address", "round_off",
+        "cgst", "sgst", "igst", "cgst_pct", "sgst_pct", "igst_pct"
     ];
 
     // 4. Update primary columns and merge others into rawPayload
@@ -219,20 +269,17 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
     const ocrData = data.ocr_raw_data || data; // Accept both nested and flat structures
 
     Object.keys(ocrData).forEach(key => {
-        let dbKey = key;
-        if (key === 'invoice_no') dbKey = 'invoice_number';
-        if (key === 'date') dbKey = 'invoice_date';
-        if (key === 'amount') dbKey = 'sub_total';
-        if (key === 'gst') dbKey = 'tax_total';
-        if (key === 'total') dbKey = 'grand_total';
-        if (key === 'status') dbKey = 'processing_status';
+        const dbKey = getCanonicalKey(key);
 
         if (allowedCols.includes(dbKey) && !['file_path', 'file_location'].includes(dbKey)) {
-            updateValues[dbKey] = ocrData[key];
-        } else if (!allowedCols.includes(dbKey)) {
-            // Merge into ocr_raw_payload
-            rawPayload[key] = ocrData[key];
-        }
+            // Only update if the value is not already set by a canonical key (to prevent stale aliases from overwriting)
+            if (!updateValues[dbKey] || key === dbKey) {
+                updateValues[dbKey] = ocrData[key];
+            }
+        } 
+        
+        // Use smart update to prevent key duplication in the JSON payload during OCR sync
+        smartUpdatePayload(rawPayload, key, ocrData[key]);
     });
 
     // 5. Fetch line items and re-evaluate status if n8n_val_json_data or mapping fields changed
@@ -696,26 +743,24 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             "processing_status", "processing_time", "doc_type", "posted_to_tally_json",
             "all_data_invoice", "file_location", "file_path", "tally_id",
             "uploader_name", "vendor_id", "is_mapped", "vendor_gst", "validation_time",
-            "irn", "ack_no", "ack_date", "eway_bill_no"
+            "irn", "ack_no", "ack_date", "eway_bill_no", "failure_reason",
+            "supplier_pan", "supplier_address", "round_off",
+            "cgst", "sgst", "igst", "cgst_pct", "sgst_pct", "igst_pct",
+            "buyer_name", "buyer_gst"
         ];
 
         const updateValues: Record<string, any> = {};
         const ocrData = data.ocr_raw_data || data;
 
         Object.keys(ocrData).forEach(key => {
-            let dbKey = key;
-            if (key === 'invoice_no') dbKey = 'invoice_number';
-            if (key === 'date') dbKey = 'invoice_date';
-            if (key === 'amount') dbKey = 'sub_total';
-            if (key === 'gst') dbKey = 'tax_total';
-            if (key === 'total') dbKey = 'grand_total';
-            if (key === 'status') dbKey = 'processing_status';
+            const dbKey = getCanonicalKey(key);
 
             if (allowedCols.includes(dbKey) && !['file_path', 'file_location'].includes(dbKey)) {
                 updateValues[dbKey] = ocrData[key];
-            } else if (!allowedCols.includes(dbKey)) {
-                rawPayload[key] = ocrData[key];
             }
+            
+            // Use smart update to prevent key duplication in the JSON payload
+            smartUpdatePayload(rawPayload, key, ocrData[key]);
         });
 
         const dateFields = ["invoice_date", "due_date", "ack_date"];
@@ -861,7 +906,29 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             const val = n8nVal[key] ?? n8nVal[key.toLowerCase().replace(/ /g, '_')];
             return val === true || String(val).toLowerCase() === 'true';
         };
-        
+
+        // --- RACE-CONDITION-PROOF DUPLICATE CHECK ---
+        // n8n's duplicate check uses a stale DB snapshot taken before parallel invoices write.
+        // Two invoices with the same number can both pass n8n's check simultaneously.
+        // This re-checks inside the open transaction against live DB state, overriding n8n's result.
+        const rtInvoiceNo = invData.invoice_number || invData.invoice_no || invData.invoiceNo;
+        const rtVendorGst = invData.vendor_gst;
+        if (rtInvoiceNo && rtVendorGst) {
+            const dupResult = await client.query(
+                `SELECT id FROM ap_invoices
+                 WHERE LOWER(invoice_number) = LOWER($1)
+                   AND LOWER(vendor_gst) = LOWER($2)
+                   AND id != $3`,
+                [rtInvoiceNo, rtVendorGst, invoiceId]
+            );
+            if (dupResult.rows.length > 0) {
+                console.warn(`[DB] ingestN8nData: Real-time duplicate detected for invoice "${rtInvoiceNo}" (${rtVendorGst}). Overriding n8n result. Conflicting id: ${dupResult.rows[0].id}`);
+                n8nVal['duplicate_check'] = false;
+                invData.n8n_val_json_data = JSON.stringify(n8nVal);
+            }
+        }
+        // --- END RACE-CONDITION CHECK ---
+
         const checks = [
             getVal('buyer_verification'),
             getVal('gst_validation_status'),
@@ -1058,8 +1125,24 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
 
         await client.query('COMMIT');
         return { success: true, id: invoiceId };
-    } catch (error) {
+    } catch (error: any) {
         await client.query('ROLLBACK');
+        // 23505 = PostgreSQL unique constraint violation
+        // Happens when two invoices with the same number/GST hit the DB at the exact same millisecond
+        // and both pass the application-level re-check before either commits.
+        // Treat this as a duplicate — flag the invoice as Handoff instead of crashing.
+        if (error.code === '23505') {
+            console.warn(`[DB] ingestN8nData: Unique constraint caught exact-millisecond duplicate for invoice ${invoiceId}. Flagging as Handoff.`);
+            try {
+                await pool.query(
+                    `UPDATE ap_invoices SET processing_status = 'Handoff', n8n_validation_status = 'Duplicate' WHERE id = $1`,
+                    [invoiceId]
+                );
+            } catch (updateErr) {
+                console.error(`[DB] ingestN8nData: Failed to flag duplicate invoice ${invoiceId}:`, updateErr);
+            }
+            return { success: true, id: invoiceId, duplicate: true };
+        }
         console.error(`[DB] ingestN8nData Error for ${invoiceId}:`, error);
         throw error;
     } finally {
