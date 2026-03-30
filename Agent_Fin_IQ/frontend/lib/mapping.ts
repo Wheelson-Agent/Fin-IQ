@@ -12,7 +12,8 @@
 export const CANONICAL_MAP: Record<string, string[]> = {
     invoice_number: ["Invoice No", "Bill No", "Invoice Number", "InvoiceNo"],
     invoice_date: ["Invoice Date", "Order Date", "Date", "InvoiceDate"],
-    buyer_name: ["Buyer Name", "Seller Name", "Vendor Name", "Supplier Name", "Name"],
+    buyer_name: ["Buyer Name"],
+    vendor_name: ["Seller Name", "Vendor Name", "Supplier Name", "Name"],
     buyer_gst: ["Buyer GST", "GSTIN", "Supplier GST", "Vendor GST", "GST No"],
     sub_total: ["Sub Total", "Taxable Value", "Taxable Amount", "Subtotal"],
     tax_total: ["Tax Total", "Total Tax", "GST Amount", "GSTTotal"],
