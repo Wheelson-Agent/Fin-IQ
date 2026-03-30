@@ -63,7 +63,7 @@ const getCanonicalKey = (key: string): string => {
   if (normalized === 'status' || normalized === 'processing_status') return 'status';
   if (normalized === 'remarks' || normalized === 'fail_reason' || normalized === 'failure_reason') return 'remarks';
   if (normalized === 'supplier_gst' || normalized === 'gstin' || normalized === 'vendor_gst') return 'vendor_gst';
-  if (normalized === 'supplier_name' || normalized === 'vendor_name') return 'vendor_name';
+  if (normalized === 'seller_name' || normalized === 'supplier_name' || normalized === 'vendor_name') return 'vendor_name';
   if (normalized === 'supplier_address' || normalized === 'address') return 'supplier_address';
   if (normalized === 'supplier_pan' || normalized === 'pan') return 'supplier_pan';
   if (normalized === 'round_off') return 'round_off';
@@ -365,6 +365,10 @@ export default function DetailView() {
             n8nValidation = {};
           }
         }
+        const companyVerifiedFromN8n =
+          n8nValidation?.buyer_verification === true ||
+          String(n8nValidation?.buyer_verification).toLowerCase() === 'true';
+
         setRawPayload(raw);
 
         const vendorVerified =
@@ -382,7 +386,10 @@ export default function DetailView() {
 
           setNewVendor(prev => ({
             ...prev,
-            name: raw?.['Seller Name'] || raw?.vendor_name || prev.name,
+            name:
+              raw?.['Seller Name'] ||
+              raw?.vendor_name ||
+              (companyVerifiedFromN8n ? (raw?.vendor_name_as_per_tally || prev.name) : prev.name),
             buyerErpName: raw?.['Name as per Tally'] || raw?.buyer_name || prev.buyerErpName,
             gstin: gstin || prev.gstin,
             pan: raw?.['Supplier PAN'] || raw?.supplier_pan || prev.pan,
@@ -438,6 +445,19 @@ export default function DetailView() {
             fields[normalizedKey] = n8nValidation[key];
           }
         });
+
+        const companyVerified =
+          fields.buyer_verification === true ||
+          String(fields.buyer_verification).toLowerCase() === 'true';
+        const isBlankField = (value: any) =>
+          value === null || value === undefined || String(value).trim() === '';
+
+        if (companyVerified && isBlankField(fields.vendor_name)) {
+          fields.vendor_name = raw?.vendor_name_as_per_tally || fields.vendor_name;
+        }
+        if (companyVerified && isBlankField(fields.buyer_name)) {
+          fields.buyer_name = raw?.['Name as per Tally'] || fields.buyer_name;
+        }
 
         // Always keep a display file name for UI use (non-edit)
         fields.file_name = invoiceRecord.file_name || raw?.file_name || fields.file_name || '';

@@ -33,7 +33,7 @@ function getCanonicalKey(key: string): string {
     if (normalized === 'status' || normalized === 'processing_status') return 'processing_status';
     if (normalized === 'remarks' || normalized === 'fail_reason' || normalized === 'failure_reason') return 'failure_reason';
     if (normalized === 'supplier_gst' || normalized === 'gstin' || normalized === 'vendor_gst') return 'vendor_gst';
-    if (normalized === 'supplier_name' || normalized === 'vendor_name') return 'vendor_name';
+    if (normalized === 'seller_name' || normalized === 'supplier_name' || normalized === 'vendor_name') return 'vendor_name';
     if (normalized === 'supplier_address' || normalized === 'address') return 'supplier_address';
     if (normalized === 'supplier_pan' || normalized === 'pan') return 'supplier_pan';
     if (normalized === 'round_off') return 'round_off';
