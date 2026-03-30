@@ -22,8 +22,6 @@ import {
   createItemMaster,
   getInvoiceById,
   getInvoiceDocumentView,
-  getInvoiceItems,
-  saveInvoiceItems,
   saveVendor,
   mapVendorToInvoice,
   updateInvoiceStatus,
@@ -81,6 +79,15 @@ const getCanonicalKey = (key: string): string => {
   if (normalized === 'invoice_ocr_data_valdiation') return 'invoice_ocr_data_validation';
   return normalized;
 };
+
+const DETAIL_VALIDATION_KEYS = new Set([
+  'buyer_verification',
+  'gst_validation_status',
+  'invoice_ocr_data_validation',
+  'vendor_verification',
+  'duplicate_check',
+  'line_item_match_status',
+]);
 
 const GST_STATE_MAP: Record<string, string> = {
   "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
@@ -141,7 +148,8 @@ export default function DetailView() {
   const backLabel = tabNames[fromTab] || 'AP Workspace';
   const documentPath = documentView?.path || invoice?.file_path || '';
   const isPdf = documentPath.toLowerCase().endsWith('.pdf');
-  const totalPages = isPdf ? 1 : 1; // Images are always 1 page; PDFs default to 1 (no page count data available)
+  const totalPages = documentView?.totalPages || 1;
+ // Images are always 1 page; PDFs default to 1 (no page count data available)
 
   // New states for real-time creation
   const [isVendorMapped, setIsVendorMapped] = useState(true);
@@ -227,13 +235,38 @@ export default function DetailView() {
     setChangedFieldsList(diff);
 
     const savePromise = (async () => {
-      const payloadToSave = {
+      const normalizedLineItems = (lineItems || []).map((li: any, idx: number) => {
+        const qty = Number(li?.qty ?? li?.quantity ?? 1);
+        const rate = Number(li?.rate ?? li?.unit_price ?? 0);
+        const discountPct = Number(li?.discount ?? 0);
+        const amount = qty * rate * (1 - discountPct / 100);
+        return {
+          id: li?.id ?? `${Date.now()}_${idx}`,
+          description: li?.description ?? '',
+          ledger: li?.ledger ?? '',
+          hsn_sac: li?.hsn_sac ?? '',
+          tax: li?.tax ?? '',
+          qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
+          rate: Number.isFinite(rate) ? rate : 0,
+          discount: Number.isFinite(discountPct) ? discountPct : 0,
+          amount: Number.isFinite(amount) ? amount : 0,
+        };
+      });
+
+      const payloadPatch: Record<string, any> = {
         ...docFields,
-        line_items: lineItems
+        line_items: normalizedLineItems,
+        __ap_workspace: {
+          ...(rawPayload?.__ap_workspace || {}),
+          line_items: normalizedLineItems,
+          last_saved_at: new Date().toISOString(),
+        },
       };
 
-      // Atomic save for everything (metadata + lines + audit log)
-      await saveAllInvoiceData(id, payloadToSave, lineItems, 'Admin');
+      delete payloadPatch.doc_type_label;
+
+      // Workspace-only save: update ONLY `ap_invoices.ocr_raw_payload`
+      await saveAllInvoiceData(id, { __workspace_only: true, ocr_raw_payload: payloadPatch }, [], 'Admin');
 
       // Reset originals using deep copy to break all references
       setOriginalDocFields(JSON.parse(JSON.stringify(docFields)));
@@ -277,7 +310,6 @@ export default function DetailView() {
     setDocumentView(null);
     try {
       let invoiceRecord: any = null;
-      let itemsRecord: any[] = [];
       let ledgersRecord: any[] = [];
       let itemsMasterRecord: any[] = [];
 
@@ -292,10 +324,6 @@ export default function DetailView() {
         console.error('[DetailView] Error fetching document view:', e);
         setDocumentView(null);
       }
-
-      try {
-        itemsRecord = await getInvoiceItems(id || '') || [];
-      } catch (e) { console.error('[DetailView] Error fetching items:', e); }
 
       try {
         const compId = invoiceRecord?.company_id;
@@ -314,48 +342,63 @@ export default function DetailView() {
           source: invoiceRecord.file_path ? 'original' : 'missing'
         });
 
-        let vendorVerified = invoiceRecord.is_mapped || false;
-        if (invoiceRecord.n8n_val_json_data) {
-          try {
-            const valData = typeof invoiceRecord.n8n_val_json_data === 'string'
-              ? JSON.parse(invoiceRecord.n8n_val_json_data)
-              : invoiceRecord.n8n_val_json_data;
-            if (valData['Vendor Verification'] !== undefined) {
-              vendorVerified = valData['Vendor Verification'] === true || valData['Vendor Verification'] === 'True';
-            } else if (valData['vendor_verification'] !== undefined) {
-              vendorVerified = valData['vendor_verification'] === true || valData['vendor_verification'] === 'True';
-            }
-          } catch (e) { console.warn('[DetailView] Failed to parse n8n_val_json_data'); }
-        }
-        setIsVendorMapped(vendorVerified);
-
+        // Single source-of-truth for editable fields: `ap_invoices.ocr_raw_payload`
+        let raw: any = {};
         if (invoiceRecord.ocr_raw_payload) {
           try {
-            const raw = typeof invoiceRecord.ocr_raw_payload === 'string'
+            raw = typeof invoiceRecord.ocr_raw_payload === 'string'
               ? JSON.parse(invoiceRecord.ocr_raw_payload)
               : invoiceRecord.ocr_raw_payload;
-            const addr = parseAddress(raw?.['Supplier Address'] || '');
-            const gstin = raw?.['Supplier GST'] || '';
-            const gstinStateCode = gstin ? gstin.substring(0, 2) : '';
-            const derivedState = GST_STATE_MAP[gstinStateCode] || addr.state || 'Karnataka';
+          } catch (e) {
+            console.warn('[DetailView] Failed to parse ocr_raw_payload');
+            raw = {};
+          }
+        }
+        let n8nValidation: any = {};
+        if (invoiceRecord.n8n_val_json_data) {
+          try {
+            n8nValidation = typeof invoiceRecord.n8n_val_json_data === 'string'
+              ? JSON.parse(invoiceRecord.n8n_val_json_data)
+              : invoiceRecord.n8n_val_json_data;
+          } catch (e) {
+            console.warn('[DetailView] Failed to parse n8n_val_json_data');
+            n8nValidation = {};
+          }
+        }
+        setRawPayload(raw);
 
-            setNewVendor(prev => ({
-              ...prev,
-              name: raw?.['Seller Name'] || prev.name,
-              buyerErpName: raw?.['Name as per Tally'] || prev.buyerErpName,
-              gstin: gstin || prev.gstin,
-              pan: raw?.['Supplier PAN'] || prev.pan,
-              bank_name: raw?.['Bank Name'] || prev.bank_name,
-              bank_account_no: raw?.['Account No'] || prev.bank_account_no,
-              bank_ifsc: raw?.['IFSC Code'] || prev.bank_ifsc,
-              state: derivedState,
-              city: addr.city || prev.city,
-              pincode: addr.pincode || prev.pincode,
-              email: raw?.['Email'] || prev.email,
-              phone: raw?.['Phone'] || prev.phone,
-            }));
-            if (raw?.['Supplier Address']) setBillingAddress(raw['Supplier Address']);
-          } catch (e) { console.warn('[DetailView] Failed to prefill vendor data:', e); }
+        const vendorVerified =
+          Boolean(raw?.__ap_workspace?.validation?.vendor_verification) ||
+          Boolean(raw?.vendor_verification) ||
+          Boolean(invoiceRecord.is_mapped);
+        setIsVendorMapped(vendorVerified);
+
+        // Prefill vendor slideout fields from raw payload (best-effort)
+        try {
+          const addr = parseAddress(raw?.['Supplier Address'] || raw?.supplier_address || '');
+          const gstin = raw?.['Supplier GST'] || raw?.vendor_gst || raw?.gstin || '';
+          const gstinStateCode = gstin ? String(gstin).substring(0, 2) : '';
+          const derivedState = GST_STATE_MAP[gstinStateCode] || addr.state || 'Karnataka';
+
+          setNewVendor(prev => ({
+            ...prev,
+            name: raw?.['Seller Name'] || raw?.vendor_name || prev.name,
+            buyerErpName: raw?.['Name as per Tally'] || raw?.buyer_name || prev.buyerErpName,
+            gstin: gstin || prev.gstin,
+            pan: raw?.['Supplier PAN'] || raw?.supplier_pan || prev.pan,
+            bank_name: raw?.['Bank Name'] || prev.bank_name,
+            bank_account_no: raw?.['Account No'] || prev.bank_account_no,
+            bank_ifsc: raw?.['IFSC Code'] || prev.bank_ifsc,
+            state: derivedState,
+            city: addr.city || prev.city,
+            pincode: addr.pincode || prev.pincode,
+            email: raw?.['Email'] || prev.email,
+            phone: raw?.['Phone'] || prev.phone,
+          }));
+          if (raw?.['Supplier Address']) setBillingAddress(raw['Supplier Address']);
+          if (raw?.supplier_address) setBillingAddress(raw.supplier_address);
+        } catch (e) {
+          console.warn('[DetailView] Failed to prefill vendor data:', e);
         }
 
         // 1. Start with the OCR raw payload (the "noisy" baseline)
@@ -372,53 +415,32 @@ export default function DetailView() {
           duplicate_check: true, line_item_match_status: false,
         };
 
-        if (invoiceRecord.ocr_raw_payload) {
-          try {
-            const raw = typeof invoiceRecord.ocr_raw_payload === 'string'
-              ? JSON.parse(invoiceRecord.ocr_raw_payload)
-              : invoiceRecord.ocr_raw_payload;
-            setRawPayload(raw);
-            Object.keys(raw).forEach(key => {
-              const val = raw[key];
-              const normalizedKey = getCanonicalKey(key);
-              
-              if (fields[normalizedKey] !== undefined || normalizedKey === 'invoice_ocr_data_validation') {
-                fields[normalizedKey] = val;
-              }
-            });
-          } catch (e) { console.warn('[DetailView] Failed to parse ocr_raw_payload'); }
-        }
+        // Prefer canonical keys first (your saved UI shape), then fall back to older OCR keys.
+        const seen = new Set<string>();
+        Object.keys(fields).forEach((k) => {
+          if (DETAIL_VALIDATION_KEYS.has(k)) return;
+          if (raw?.[k] !== undefined) {
+            fields[k] = raw[k];
+            seen.add(k);
+          }
+        });
+        Object.keys(raw || {}).forEach((key) => {
+          const normalizedKey = getCanonicalKey(key);
+          if (DETAIL_VALIDATION_KEYS.has(normalizedKey)) return;
+          if ((fields[normalizedKey] !== undefined || normalizedKey === 'invoice_ocr_data_validation') && !seen.has(normalizedKey)) {
+            fields[normalizedKey] = (raw as any)[key];
+          }
+        });
 
-        // 2. OVERWRITE with Database Columns (The "Verified" Source of Truth)
-        fields.irn = invoiceRecord.irn || fields.irn || '';
-        fields.ack_no = invoiceRecord.ack_no || fields.ack_no || '';
-        fields.ack_date = formatDateToDDMMYYYY(invoiceRecord.ack_date) || fields.ack_date || '';
-        fields.eway_bill_no = invoiceRecord.eway_bill_no || fields.eway_bill_no || '';
-        fields.invoice_no = invoiceRecord.invoice_number || invoiceRecord.invoice_no || fields.invoice_no || '';
-        fields.date = formatDateToDDMMYYYY(invoiceRecord.invoice_date || invoiceRecord.date) || fields.date || '';
-        fields.vendor_name = invoiceRecord.vendor_name || fields.vendor_name || '';
-        fields.vendor_gst = invoiceRecord.vendor_gst || fields.vendor_gst || '';
-        fields.supplier_pan = invoiceRecord.supplier_pan || fields.supplier_pan || '';
-        fields.supplier_address = invoiceRecord.supplier_address || fields.supplier_address || '';
-        fields.sub_total = invoiceRecord.sub_total ?? fields.sub_total;
-        fields.tax_total = invoiceRecord.tax_total ?? fields.tax_total;
-        fields.grand_total = invoiceRecord.grand_total ?? fields.grand_total;
-        fields.doc_type = invoiceRecord.doc_type || fields.doc_type || 'Services';
-        fields.remarks = invoiceRecord.failure_reason || fields.remarks || '';
-        fields.file_name = invoiceRecord.file_name || '';
+        Object.keys(n8nValidation || {}).forEach((key) => {
+          const normalizedKey = getCanonicalKey(key);
+          if (DETAIL_VALIDATION_KEYS.has(normalizedKey)) {
+            fields[normalizedKey] = n8nValidation[key];
+          }
+        });
 
-        // 3. Final overrides from N8N validation state
-        if (invoiceRecord.n8n_val_json_data) {
-          try {
-            const n8nData = typeof invoiceRecord.n8n_val_json_data === 'string'
-              ? JSON.parse(invoiceRecord.n8n_val_json_data)
-              : invoiceRecord.n8n_val_json_data;
-            Object.keys(n8nData).forEach(key => {
-              const normalizedKey = getCanonicalKey(key);
-              if (fields[normalizedKey] !== undefined) fields[normalizedKey] = n8nData[key];
-            });
-          } catch (e) { console.warn('[DetailView] Failed to parse n8n_val_json_data mapping'); }
-        }
+        // Always keep a display file name for UI use (non-edit)
+        fields.file_name = invoiceRecord.file_name || raw?.file_name || fields.file_name || '';
 
         const dt = (fields.doc_type || '').toLowerCase();
         if (dt.includes('goods')) fields.doc_type_label = 'Invoice (Goods)';
@@ -446,38 +468,25 @@ export default function DetailView() {
           setItemOptions(Array.from(new Set(itemsMasterRecord.filter(i => i.is_active !== false).map(i => i.item_name))));
         }
 
-        if (itemsRecord && itemsRecord.length > 0) {
-          const mappedItems = itemsRecord.map(item => {
-            const qty = Number(item.quantity || 1);
-            const totalAmount = Number(item.line_amount || 0);
-            let rate = Number(item.rate || item.unit_price || 0);
-            if (rate === 0 && totalAmount > 0) rate = totalAmount / qty;
-            let ledger = item.ledger || '';
-            const raw = typeof invoiceRecord.ocr_raw_payload === 'string'
-              ? JSON.parse(invoiceRecord.ocr_raw_payload)
-              : invoiceRecord.ocr_raw_payload;
-            if (raw?.line_items && Array.isArray(raw.line_items)) {
-              const ocrItem = raw.line_items[itemsRecord.indexOf(item)];
-              if (ocrItem) {
-                const mappedVal = ocrItem.gl_mapped || ocrItem.mapped_ledger;
-                if (mappedVal) {
-                  const found = ledgersRecord.find(l => l.name.toLowerCase() === mappedVal.toLowerCase());
-                  if (found) ledger = found.id;
-                  else if (dt.includes('goods')) ledger = mappedVal;
-                } else if (dt.includes('goods') && ocrItem.description) {
-                  ledger = ocrItem.description;
-                }
-              }
-            }
+        const rawLineItems: any[] =
+          (Array.isArray(raw?.line_items) && raw.line_items) ||
+          (Array.isArray(raw?.__ap_workspace?.line_items) && raw.__ap_workspace.line_items) ||
+          [];
+
+        if (rawLineItems.length > 0) {
+          const mappedItems = rawLineItems.map((item, idx) => {
+            const qty = Number(item?.qty ?? item?.quantity ?? 1);
+            const rate = Number(item?.rate ?? item?.unit_price ?? item?.unitPrice ?? 0);
+            const discount = Number(item?.discount ?? 0);
             return {
-              id: item.id || Math.random(),
-              description: item.description || '',
-              ledger: ledger,
-              hsn_sac: item.hsn_sac || '',
-              tax: item.tax || '',
-              qty: qty,
-              rate: rate,
-              discount: Number(item.discount || 0)
+              id: item?.id ?? `${Date.now()}_${idx}`,
+              description: item?.description ?? item?.item_description ?? '',
+              ledger: item?.ledger ?? item?.gl_account_id ?? item?.gl_mapped ?? item?.mapped_ledger ?? '',
+              hsn_sac: item?.hsn_sac ?? item?.hsn ?? '',
+              tax: item?.tax ?? item?.tax_rate ?? '',
+              qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
+              rate: Number.isFinite(rate) ? rate : 0,
+              discount: Number.isFinite(discount) ? discount : 0,
             };
           });
           setLineItems(mappedItems);

@@ -345,6 +345,29 @@ export async function updateInvoiceStatus(id: string, status: string) {
 }
 
 /**
+ * Update the stored file path/location for an invoice and optionally its status.
+ * Used by: batch finalization after the source file is moved on disk.
+ *
+ * @param id       - Invoice UUID
+ * @param filePath - Final on-disk path
+ * @param status   - Optional status to persist as-is
+ * @returns Updated invoice row
+ */
+export async function updateInvoiceStorageLocation(id: string, filePath: string, status?: string) {
+    const result = await query(
+        `UPDATE ap_invoices
+         SET file_path = $2,
+             file_location = $2,
+             processing_status = COALESCE($3, processing_status),
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id, filePath, status || null]
+    );
+    return result.rows[0];
+}
+
+/**
  * Update an invoice as failed with a corresponding failure reason and category.
  * Used by: pre-ocr pipeline when an validation or rasterization fails.
  *
@@ -414,6 +437,28 @@ export async function markInvoicePreOcrRejection(id: string, failureReason: stri
 }
 
 // ── END PRE-OCR STATUS HELPERS ─────────────────────────────────────────────────
+
+/**
+ * Persist a reviewable Pre-OCR route without touching the manual save flow.
+ *
+ * @param id             - Invoice UUID
+ * @param pre_ocr_status - Exact Pre-OCR route (e.g. MANUAL_REVIEW, ENHANCE_REQUIRED)
+ * @param failure_reason - Human-readable reason from the decision engine
+ * @returns Updated invoice row
+ */
+export async function updateInvoicePreOcrReviewRoute(id: string, pre_ocr_status: string, failure_reason: string) {
+    const result = await query(
+        `UPDATE ap_invoices
+         SET processing_status = 'Manual Review',
+             failure_reason = $2,
+             pre_ocr_status = $3,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id, failure_reason, pre_ocr_status]
+    );
+    return result.rows[0];
+}
 
 /**
  * Update the failure_reason (Remarks) of an invoice.
@@ -791,6 +836,50 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
         }
 
+        // Workspace-only save path: update ONLY `ap_invoices.ocr_raw_payload` (no column mapping, no line table writes).
+        if (data && data.__workspace_only === true) {
+            let patch: any = data.ocr_raw_payload ?? {};
+            if (typeof patch === 'string') {
+                try { patch = JSON.parse(patch); } catch (e) { patch = {}; }
+            }
+
+            const mergeObjects = (base: any, next: any) => {
+                if (!base || typeof base !== 'object') return next;
+                if (!next || typeof next !== 'object') return base;
+                const merged: any = { ...base, ...next };
+                if (base.__ap_workspace && next.__ap_workspace && typeof base.__ap_workspace === 'object' && typeof next.__ap_workspace === 'object') {
+                    merged.__ap_workspace = { ...base.__ap_workspace, ...next.__ap_workspace };
+                    if (base.__ap_workspace.validation && next.__ap_workspace.validation) {
+                        merged.__ap_workspace.validation = { ...base.__ap_workspace.validation, ...next.__ap_workspace.validation };
+                    }
+                }
+                return merged;
+            };
+
+            const mergedPayload = mergeObjects(rawPayload, patch);
+
+            const invoiceRes = await client.query(
+                'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *',
+                [id, JSON.stringify(mergedPayload)]
+            );
+            const updatedInvoice = invoiceRes.rows[0];
+
+            await client.query(
+                `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+                [
+                    id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
+                    'Edited', userName,
+                    'Workspace save: updated ocr_raw_payload only',
+                    JSON.stringify({}),
+                    JSON.stringify({}),
+                ]
+            );
+
+            await client.query('COMMIT');
+            return updatedInvoice;
+        }
+
         const allowedCols = [
             "invoice_number", "vendor_name", "invoice_date", "due_date",
             "sub_total", "tax_total", "grand_total", "po_number", "gl_account",
@@ -885,6 +974,128 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
 // ─────────────────────────────────────────────────────────────
 // N8N INGESTION
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Persist re-validation outcomes without touching manual edit/save flow.
+ * Updates:
+ * - ocr_raw_payload (validation flags + workspace metadata)
+ * - n8n_val_json_data (canonical validation map)
+ * - processing_status (recomputed via evaluateInvoiceStatus)
+ */
+export async function applyRevalidationOutcome(
+    id: string,
+    validationFlags: Record<string, any>,
+    userName: string = 'System'
+) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        const current = currentRes.rows[0];
+        if (!current) throw new Error('Invoice not found');
+
+        let rawPayload: any = current.ocr_raw_payload || {};
+        if (typeof rawPayload === 'string') {
+            try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
+        }
+        if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+            rawPayload = {};
+        }
+
+        let n8nVal: any = current.n8n_val_json_data || {};
+        if (typeof n8nVal === 'string') {
+            try { n8nVal = JSON.parse(n8nVal); } catch (e) { n8nVal = {}; }
+        }
+        if (!n8nVal || typeof n8nVal !== 'object' || Array.isArray(n8nVal)) {
+            n8nVal = {};
+        }
+
+        const cleanFlags: Record<string, any> = {};
+        Object.keys(validationFlags || {}).forEach((k) => {
+            if (validationFlags[k] !== undefined) cleanFlags[k] = validationFlags[k];
+        });
+
+        const baseWorkspace = (rawPayload.__ap_workspace && typeof rawPayload.__ap_workspace === 'object' && !Array.isArray(rawPayload.__ap_workspace))
+            ? rawPayload.__ap_workspace
+            : {};
+        const baseWorkspaceValidation = (baseWorkspace.validation && typeof baseWorkspace.validation === 'object' && !Array.isArray(baseWorkspace.validation))
+            ? baseWorkspace.validation
+            : {};
+
+        const mergedN8nVal = { ...n8nVal, ...cleanFlags };
+        const mergedRawPayload = {
+            ...rawPayload,
+            ...cleanFlags,
+            __ap_workspace: {
+                ...baseWorkspace,
+                validation: {
+                    ...baseWorkspaceValidation,
+                    ...cleanFlags
+                },
+                last_revalidated_at: new Date().toISOString(),
+            },
+        };
+
+        const lineItemsRes = await client.query(
+            'SELECT ledger_id, gl_account_id FROM ap_invoice_lines WHERE ap_invoice_id = $1',
+            [id]
+        );
+
+        const finalStatus = await evaluateInvoiceStatus(
+            mergedN8nVal,
+            current.vendor_id || null,
+            current.invoice_number || null,
+            lineItemsRes.rows || [],
+            current.n8n_validation_status,
+            current.company_id,
+            current.grand_total
+        );
+
+        const updateRes = await client.query(
+            `UPDATE ap_invoices
+             SET ocr_raw_payload = $2::jsonb,
+                 n8n_val_json_data = $3,
+                 processing_status = $4,
+                 validation_time = NOW(),
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING *`,
+            [id, JSON.stringify(mergedRawPayload), JSON.stringify(mergedN8nVal), finalStatus]
+        );
+        const updatedInvoice = updateRes.rows[0];
+
+        await client.query(
+            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+            [
+                id,
+                updatedInvoice?.invoice_number || current.invoice_number,
+                updatedInvoice?.vendor_name || current.vendor_name,
+                'Edited',
+                userName,
+                'Revalidation: updated n8n validation data and recomputed status',
+                JSON.stringify({
+                    processing_status: current.processing_status,
+                    n8n_val_json_data: current.n8n_val_json_data || null
+                }),
+                JSON.stringify({
+                    processing_status: updatedInvoice?.processing_status,
+                    n8n_val_json_data: updatedInvoice?.n8n_val_json_data || null
+                }),
+            ]
+        );
+
+        await client.query('COMMIT');
+        return updatedInvoice;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[DB] applyRevalidationOutcome failed:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
 
 /**
  * Ingest the entire JSON payload from the n8n validation webhook.
@@ -1518,6 +1729,208 @@ export async function getDashboardMetrics(companyId?: string) {
         totalAmount: Number(totalAmount.rows[0].total || 0),
         pendingApproval: pendingApproval.rows[0].count,
         statusCounts
+    };
+}
+
+// ─────────────────────────────────────────────────────────────
+// TALLY SYNC DASHBOARD STATS
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Aggregate Tally sync stats for the AP dashboard TallySyncWidget.
+ *
+ * posted   — invoices with erp_sync_id set (confirmed Tally receipt)
+ * pending  — invoices in 'Ready to Post' waiting for Tally push
+ * handoff  — invoices that failed validation (failure_reason set or failed status)
+ * recent   — last 5 tally_sync_logs events joined with invoice for vendor + amount
+ * blocked  — breakdown of handoff invoices by failure reason category
+ */
+export async function getTallySyncStats(companyId?: string) {
+    const hasCompany = companyId && companyId !== 'ALL';
+    const invoices = await getAllInvoices(companyId);
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const parseJSON = (data: any) => {
+        if (!data) return {};
+        try {
+            return typeof data === 'string' ? JSON.parse(data) : data;
+        } catch {
+            return {};
+        }
+    };
+
+    const getBool = (obj: Record<string, any>, inv: Record<string, any>, key: string, oldKey?: string) => {
+        const candidates = [
+            key,
+            key.toLowerCase().replace(/ /g, '_'),
+            ...(oldKey ? [oldKey] : []),
+        ];
+
+        for (const candidate of candidates) {
+            const val = obj[candidate] ?? inv[candidate] ?? inv[key];
+            if (val === true || String(val).toLowerCase() === 'true') return true;
+            if (val === false || String(val).toLowerCase() === 'false') return false;
+        }
+
+        return false;
+    };
+
+    const evaluateInvoice = (inv: any) => {
+        const bStatus = String(inv.processing_status || '').toLowerCase();
+        const raw = parseJSON(inv.ocr_raw_payload);
+        const n8nData = parseJSON(inv.n8n_val_json_data);
+        const valData: Record<string, any> = {};
+
+        for (const source of [raw, n8nData]) {
+            Object.keys(source).forEach(key => {
+                const normalized = key.toLowerCase().replace(/ /g, '_');
+                valData[key] = source[key];
+                valData[normalized] = source[key];
+            });
+        }
+
+        const docType = String(inv.doc_type || '').toLowerCase();
+        const isGoods = docType.includes('goods');
+        const vendorVerified = getBool(valData, inv, 'Vendor Verified', 'vendor_verification');
+        const lineItemsMatched = getBool(valData, inv, 'Stock Items Matched', 'line_item_match_status');
+        const buyerVerified = getBool(valData, inv, 'Company Verified', 'buyer_verification');
+        const gstValidated = getBool(valData, inv, 'GST Validated', 'gst_validation_status');
+        const dataValidated = getBool(
+            valData,
+            inv,
+            'Data Validated',
+            'invoice_ocr_data_validation'
+        ) || getBool(
+            valData,
+            inv,
+            'Data Validation',
+            'invoice_ocr_data_valdiation'
+        );
+        const duplicatePassed = getBool(valData, inv, 'Document Duplicate Check', 'duplicate_check');
+
+        const isUnknownFile = !inv.file_name || String(inv.file_name).toLowerCase() === 'unknown' || inv.file_name === 'N/A';
+        const invoiceNumber = inv.invoice_number || inv.invoice_no;
+        const isUnknownInv = !invoiceNumber
+            || String(invoiceNumber).toLowerCase() === 'unknown'
+            || invoiceNumber === 'N/A';
+        const hasFailureReason = !!(inv.failure_reason && String(inv.failure_reason).trim() !== '');
+
+        const mandatoryChecksPassed =
+            buyerVerified && gstValidated && dataValidated && vendorVerified && (!isGoods || lineItemsMatched);
+        const n8nAllPassed = mandatoryChecksPassed && duplicatePassed;
+        const handoffReasons: Array<
+            'duplicate' |
+            'gst_validation' |
+            'buyer_validation' |
+            'data_validation' |
+            'vendor_mapping' |
+            'line_item_match' |
+            'missing_invoice_field' |
+            'processing_failed' |
+            'has_failure_reason'
+        > = [];
+
+        if (bStatus === 'failed' || bStatus === 'ocr_failed') handoffReasons.push('processing_failed');
+        if (hasFailureReason) handoffReasons.push('has_failure_reason');
+        if (!duplicatePassed) handoffReasons.push('duplicate');
+        if (!buyerVerified) handoffReasons.push('buyer_validation');
+        if (!gstValidated) handoffReasons.push('gst_validation');
+        if (!dataValidated) handoffReasons.push('data_validation');
+        if (!vendorVerified) handoffReasons.push('vendor_mapping');
+        if (isGoods && !lineItemsMatched) handoffReasons.push('line_item_match');
+        if (isUnknownFile || isUnknownInv) handoffReasons.push('missing_invoice_field');
+
+        let workflowStatus: 'posted' | 'pending' | 'handoff' | 'other' = 'other';
+        if (inv.erp_sync_id) workflowStatus = 'posted';
+        else if (bStatus === 'failed' || bStatus === 'ocr_failed' || hasFailureReason) workflowStatus = 'handoff';
+        else if (!duplicatePassed) workflowStatus = 'handoff';
+        else if (n8nAllPassed || bStatus === 'ready to post' || bStatus === 'ready' || bStatus === 'verified') workflowStatus = 'pending';
+        else if (!buyerVerified || !gstValidated || !dataValidated || isUnknownFile || isUnknownInv) workflowStatus = 'handoff';
+        else if (bStatus === 'handoff') workflowStatus = 'handoff';
+
+        return {
+            workflowStatus,
+            duplicatePassed,
+            handoffReasons,
+            createdAt: inv.created_at ? new Date(inv.created_at) : null,
+        };
+    };
+
+    let posted = 0;
+    let pending = 0;
+    let handoff = 0;
+    let totalThisMonth = 0;
+    let duplicateThisMonth = 0;
+    const handoffReasonCounts = {
+        duplicate: 0,
+        gst_validation: 0,
+        buyer_validation: 0,
+        data_validation: 0,
+        vendor_mapping: 0,
+        line_item_match: 0,
+        missing_invoice_field: 0,
+    };
+
+    for (const inv of invoices) {
+        const evaluated = evaluateInvoice(inv);
+        if (evaluated.workflowStatus === 'posted') posted += 1;
+        if (evaluated.workflowStatus === 'pending') pending += 1;
+        if (evaluated.workflowStatus === 'handoff') {
+            handoff += 1;
+            if (evaluated.handoffReasons.includes('duplicate')) handoffReasonCounts.duplicate += 1;
+            if (evaluated.handoffReasons.includes('gst_validation')) handoffReasonCounts.gst_validation += 1;
+            if (evaluated.handoffReasons.includes('buyer_validation')) handoffReasonCounts.buyer_validation += 1;
+            if (evaluated.handoffReasons.includes('data_validation')) handoffReasonCounts.data_validation += 1;
+            if (evaluated.handoffReasons.includes('vendor_mapping')) handoffReasonCounts.vendor_mapping += 1;
+            if (evaluated.handoffReasons.includes('line_item_match')) handoffReasonCounts.line_item_match += 1;
+            if (evaluated.handoffReasons.includes('missing_invoice_field')) handoffReasonCounts.missing_invoice_field += 1;
+        }
+
+        if (evaluated.createdAt && evaluated.createdAt >= monthStart) {
+            totalThisMonth += 1;
+            if (!evaluated.duplicatePassed) duplicateThisMonth += 1;
+        }
+    }
+
+    // handoff: failed validation — matches AP tab Handoff tab logic
+    // recent 5 Tally sync events joined with invoice for vendor + amount
+    const recentParams = hasCompany ? [companyId] : [];
+    const recentWhere  = hasCompany ? 'AND tsl.company_id = $1' : '';
+    const recentRes = await query(
+        `SELECT tsl.status, tsl.created_at, ai.vendor_name, ai.grand_total
+         FROM tally_sync_logs tsl
+         JOIN ap_invoices ai ON ai.id = tsl.entity_id::uuid
+         WHERE tsl.entity_type = 'invoice' ${recentWhere}
+         ORDER BY tsl.created_at DESC LIMIT 5`,
+        recentParams
+    );
+
+    const duplicate_rate_pct = totalThisMonth > 0
+        ? Math.round((duplicateThisMonth / totalThisMonth) * 1000) / 10
+        : 0;
+
+    return {
+        posted,
+        pending,
+        handoff,
+        recent:  recentRes.rows.map((r: any) => ({
+            vendor: r.vendor_name || 'Unknown',
+            status: r.status === 'Success' ? 'posted' : 'handoff',
+            amount: Number(r.grand_total || 0),
+            ts:     r.created_at,
+        })),
+        handoff_reasons: {
+            duplicate:             handoffReasonCounts.duplicate,
+            gst_validation:        handoffReasonCounts.gst_validation,
+            buyer_validation:      handoffReasonCounts.buyer_validation,
+            data_validation:       handoffReasonCounts.data_validation,
+            vendor_mapping:        handoffReasonCounts.vendor_mapping,
+            line_item_match:       handoffReasonCounts.line_item_match,
+            missing_invoice_field: handoffReasonCounts.missing_invoice_field,
+        },
+        duplicate_rate_pct,
     };
 }
 
