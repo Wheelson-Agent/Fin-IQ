@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ============================================================
  * pre-ocr/engine.ts â€” Consolidated Pre-OCR Pipeline Engine
  * ============================================================
@@ -256,7 +256,7 @@ function skipStages(
  * @returns Initial job state
  */
 export async function runStage1(
-    jobId: string, fileBuffer: Buffer, fileName: string
+    jobId: string, fileBuffer: Buffer, fileName: string, invoiceId?: string
 ): Promise<JobState> {
     const dir = ensureJobDir(jobId);
     const ext = path.extname(fileName).toLowerCase();
@@ -266,7 +266,7 @@ export async function runStage1(
     fs.writeFileSync(inputPath, fileBuffer);
 
     const job: JobState = {
-        jobId, fileName, createdAt: now(),
+        jobId, invoiceId, fileName, createdAt: now(),
         status: 'processing', currentStage: PRE_OCR_STAGES[0],
         stages: createInitialStages(), decisionOutput: null, events: [],
         inputKind: isImage ? 'image' : 'pdf',
@@ -1753,16 +1753,29 @@ async function buildOcrReadyOutput(jobId: string, job: JobState): Promise<string
 
     // Image input: use enhanced input.* or original input.*
     if (job.inputKind === 'image') {
-        const candidates = fs.existsSync(sourceDir)
-            ? fs.readdirSync(sourceDir).filter(f => f.startsWith('input.') || f.startsWith('page_'))
-            : [];
-        const file = candidates[0];
+        let file: string | undefined;
+        
+        // 1. Try sourceDir (enhanced or pages)
+        if (fs.existsSync(sourceDir)) {
+            const candidates = fs.readdirSync(sourceDir).filter(f => f.startsWith('input.') || f.startsWith('page_'));
+            file = candidates[0];
+        }
+        
+        // 2. Fallback to job root if not found in sourceDir
+        if (!file) {
+            const rootCandidates = fs.readdirSync(dir).filter(f => f.startsWith('input.'));
+            file = rootCandidates[0];
+            sourceDir = dir; // Switch source to root
+        }
+
         if (!file) return null;
+        
         const src = path.join(sourceDir, file);
         const outPath = path.join(outputDir, 'ocr_ready.png');
         fs.copyFileSync(src, outPath);
         return outPath;
     }
+
 
     // PDF: stitch page_###.png files into a PDF (or emit a single PNG)
     const pageFiles = fs.existsSync(sourceDir)
@@ -1838,16 +1851,16 @@ async function safeBuildOcrReadyOutput(jobId: string, job: JobState, decision: D
 export async function runFullPipeline(
     fileBuffer: Buffer,
     fileName: string,
-    options?: { onProgress?: PreOcrProgressHook },
+    options?: { onProgress?: PreOcrProgressHook, invoiceId?: string },
 ): Promise<{ jobId: string; decision: DecisionOutput; job: JobState; outputArtifactPath: string | null }> {
     const jobId = generateJobId();
-    console.log(`[Pre-OCR] Starting pipeline for "${fileName}" (job: ${jobId})`);
+    console.log(`[Pre-OCR] Starting pipeline for "${fileName}" (job: ${jobId}, invoice: ${options?.invoiceId || 'N/A'})`);
 
     try {
         if (options?.onProgress) PROGRESS_HOOKS.set(jobId, options.onProgress);
 
         // Stage 1: Ingestion
-        await runStage1(jobId, fileBuffer, fileName);
+        await runStage1(jobId, fileBuffer, fileName, options?.invoiceId);
 
         // Stage 2: Validation
         const stageTimeouts = (CONFIG.preOcr as any)?.stageTimeoutMs || {};

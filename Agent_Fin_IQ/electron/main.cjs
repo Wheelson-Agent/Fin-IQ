@@ -117,43 +117,105 @@ app.whenReady().then(() => {
         const { net } = require('electron');
         const fs = require('fs');
         const path = require('path');
+        const { pathToFileURL } = require('url');
 
         let filePath = decodeURIComponent(request.url.replace('local-file:///', ''));
+        // Normalize separators for filesystem access immediately
+        let normalizedPath = path.normalize(filePath);
         // Standardize drive letter case for Windows
-        let normalizedPath = filePath.replace(/^[a-zA-Z]:/, (match) => match.toUpperCase());
+        normalizedPath = normalizedPath.replace(/^[a-zA-Z]:/, (match) => match.toUpperCase());
 
-        console.log(`[local-file] Request: ${request.url}`);
+        console.log(`[local-file] Request: ${request.url} -> Normalized: ${normalizedPath}`);
 
-        // Robust path resolution: if file not found in 'source', try 'completed' or 'exceptions'
-        if (!fs.existsSync(normalizedPath)) {
-            console.log(`[local-file] Not found at: ${normalizedPath}, checking alternatives...`);
-            if (normalizedPath.includes(path.sep + 'source' + path.sep)) {
-                const completedPath = normalizedPath.replace(path.sep + 'source' + path.sep, path.sep + 'completed' + path.sep);
-                if (fs.existsSync(completedPath)) {
-                    console.log(`[local-file] Found in completed: ${completedPath}`);
-                    normalizedPath = completedPath;
-                } else {
-                    const exceptionsPath = normalizedPath.replace(path.sep + 'source' + path.sep, path.sep + 'exceptions' + path.sep);
-                    if (fs.existsSync(exceptionsPath)) {
-                        console.log(`[local-file] Found in exceptions: ${exceptionsPath}`);
-                        normalizedPath = exceptionsPath;
-                    }
-                }
-            } else if (normalizedPath.includes('/source/')) {
-                // Handle forward slashes too just in case
-                const completedPath = normalizedPath.replace('/source/', '/completed/');
-                if (fs.existsSync(completedPath)) {
-                    normalizedPath = completedPath;
-                } else {
-                    const exceptionsPath = normalizedPath.replace('/source/', '/exceptions/');
-                    if (fs.existsSync(exceptionsPath)) {
-                        normalizedPath = exceptionsPath;
-                    }
+        const tryResolve = (p) => (p && fs.existsSync(p) ? p : null);
+
+        // Robust path resolution:
+        // 1) Use requested path if it exists.
+        // 2) If it was moved from source -> completed/exceptions, swap the folder name.
+        let resolvedPath = tryResolve(normalizedPath);
+
+        if (!resolvedPath) {
+            // Check if it's in completed or exceptions
+            const sourceToken = `${path.sep}source${path.sep}`;
+            if (normalizedPath.includes(sourceToken)) {
+                const completedPath = normalizedPath.replace(sourceToken, `${path.sep}completed${path.sep}`);
+                resolvedPath = tryResolve(completedPath);
+                if (resolvedPath) console.log(`[local-file] Found in completed: ${resolvedPath}`);
+
+                if (!resolvedPath) {
+                    const exceptionsPath = normalizedPath.replace(sourceToken, `${path.sep}exceptions${path.sep}`);
+                    resolvedPath = tryResolve(exceptionsPath);
+                    if (resolvedPath) console.log(`[local-file] Found in exceptions: ${resolvedPath}`);
                 }
             }
         }
 
-        const fileUrl = 'file:///' + normalizedPath;
+
+        if (!resolvedPath) {
+            // Heuristic search across Fin_core date folders for same batch + filename
+            try {
+                const parts = normalizedPath.split(path.sep).filter(Boolean);
+                const finIdx = parts.findIndex((p) => String(p).toLowerCase() === 'fin_core');
+                const fileName = path.basename(normalizedPath);
+
+                if (finIdx >= 0 && parts.length > finIdx + 3) {
+                    const baseRoot = parts.slice(0, finIdx).join(path.sep);
+                    const datePart = parts[finIdx + 1];
+                    const batchPart = parts[finIdx + 2];
+                    const requestedFinCoreDir = path.join(baseRoot, 'Fin_core');
+
+                    const candidateFinCoreDirs = [];
+                    if (fs.existsSync(requestedFinCoreDir)) candidateFinCoreDirs.push(requestedFinCoreDir);
+
+                    // Fallbacks if storage base path changed (best-effort, no DB access here)
+                    const fallback1 = path.resolve(process.cwd(), 'data', 'batches', 'Fin_core');
+                    if (!candidateFinCoreDirs.includes(fallback1) && fs.existsSync(fallback1)) candidateFinCoreDirs.push(fallback1);
+                    const fallback2 = path.resolve(process.cwd(), '..', 'data', 'batches', 'Fin_core');
+                    if (!candidateFinCoreDirs.includes(fallback2) && fs.existsSync(fallback2)) candidateFinCoreDirs.push(fallback2);
+
+                    const checkInDate = (finCoreDirToUse, dateDirName) => {
+                        for (const folder of ['completed', 'exceptions', 'source']) {
+                            const candidate = path.join(finCoreDirToUse, dateDirName, batchPart, folder, fileName);
+                            const hit = tryResolve(candidate);
+                            if (hit) return hit;
+                        }
+                        return null;
+                    };
+
+                    // Check same date first (fast path)
+                    for (const finCoreDirToUse of candidateFinCoreDirs) {
+                        resolvedPath = checkInDate(finCoreDirToUse, datePart);
+                        if (resolvedPath) break;
+                    }
+
+                    // If still not found, scan other dates (slow path, but only on missing files)
+                    if (!resolvedPath) {
+                        for (const finCoreDirToUse of candidateFinCoreDirs) {
+                            const dateDirs = fs
+                                .readdirSync(finCoreDirToUse, { withFileTypes: true })
+                                .filter((d) => d.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d.name))
+                                .map((d) => d.name)
+                                .sort((a, b) => b.localeCompare(a)); // newest first
+
+                            for (const d of dateDirs) {
+                                resolvedPath = checkInDate(finCoreDirToUse, d);
+                                if (resolvedPath) {
+                                    console.log(`[local-file] Found in other date folder (${d}): ${resolvedPath}`);
+                                    break;
+                                }
+                            }
+                            if (resolvedPath) break;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('[local-file] Fin_core search failed:', e);
+            }
+        }
+
+        if (resolvedPath) normalizedPath = resolvedPath;
+
+        const fileUrl = pathToFileURL(normalizedPath).toString();
         console.log(`[local-file] Final Fetch: ${fileUrl}`);
 
         try {

@@ -80,6 +80,15 @@ const getCanonicalKey = (key: string): string => {
   return normalized;
 };
 
+const DETAIL_VALIDATION_KEYS = new Set([
+  'buyer_verification',
+  'gst_validation_status',
+  'invoice_ocr_data_validation',
+  'vendor_verification',
+  'duplicate_check',
+  'line_item_match_status',
+]);
+
 const GST_STATE_MAP: Record<string, string> = {
   "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
   "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar",
@@ -139,7 +148,8 @@ export default function DetailView() {
   const backLabel = tabNames[fromTab] || 'AP Workspace';
   const documentPath = documentView?.path || invoice?.file_path || '';
   const isPdf = documentPath.toLowerCase().endsWith('.pdf');
-  const totalPages = isPdf ? 1 : 1; // Images are always 1 page; PDFs default to 1 (no page count data available)
+  const totalPages = documentView?.totalPages || 1;
+ // Images are always 1 page; PDFs default to 1 (no page count data available)
 
   // New states for real-time creation
   const [isVendorMapped, setIsVendorMapped] = useState(true);
@@ -344,6 +354,17 @@ export default function DetailView() {
             raw = {};
           }
         }
+        let n8nValidation: any = {};
+        if (invoiceRecord.n8n_val_json_data) {
+          try {
+            n8nValidation = typeof invoiceRecord.n8n_val_json_data === 'string'
+              ? JSON.parse(invoiceRecord.n8n_val_json_data)
+              : invoiceRecord.n8n_val_json_data;
+          } catch (e) {
+            console.warn('[DetailView] Failed to parse n8n_val_json_data');
+            n8nValidation = {};
+          }
+        }
         setRawPayload(raw);
 
         const vendorVerified =
@@ -397,6 +418,7 @@ export default function DetailView() {
         // Prefer canonical keys first (your saved UI shape), then fall back to older OCR keys.
         const seen = new Set<string>();
         Object.keys(fields).forEach((k) => {
+          if (DETAIL_VALIDATION_KEYS.has(k)) return;
           if (raw?.[k] !== undefined) {
             fields[k] = raw[k];
             seen.add(k);
@@ -404,8 +426,16 @@ export default function DetailView() {
         });
         Object.keys(raw || {}).forEach((key) => {
           const normalizedKey = getCanonicalKey(key);
+          if (DETAIL_VALIDATION_KEYS.has(normalizedKey)) return;
           if ((fields[normalizedKey] !== undefined || normalizedKey === 'invoice_ocr_data_validation') && !seen.has(normalizedKey)) {
             fields[normalizedKey] = (raw as any)[key];
+          }
+        });
+
+        Object.keys(n8nValidation || {}).forEach((key) => {
+          const normalizedKey = getCanonicalKey(key);
+          if (DETAIL_VALIDATION_KEYS.has(normalizedKey)) {
+            fields[normalizedKey] = n8nValidation[key];
           }
         });
 

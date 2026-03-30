@@ -141,10 +141,20 @@ def main():
     socket.setdefaulttimeout(600)
     
     # Initialize credentials
+    if service_account_path.startswith('./') or not os.path.isabs(service_account_path):
+        # Resolve relative to the .env file's directory
+        env_dir = os.path.dirname(os.path.abspath(args.env))
+        # If env is in Agent_Fin_IQ/config/.env, env_dir is Agent_Fin_IQ/config
+        # If path is ./config/json, we need to be careful. 
+        # Usually it's relative to project root.
+        project_root = os.path.dirname(env_dir)
+        service_account_path = os.path.join(project_root, service_account_path.lstrip('./'))
+    
     creds = service_account.Credentials.from_service_account_file(
         service_account_path,
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
+
     
     # Initialize Document AI client
     client_options = {"api_endpoint": f"{location}-documentai.googleapis.com"}
