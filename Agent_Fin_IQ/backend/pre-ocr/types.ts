@@ -76,6 +76,7 @@ export interface DecisionOutput {
  */
 export interface JobState {
     jobId: string;
+    invoiceId?: string;
     fileName: string;
     inputKind?: 'pdf' | 'image';
     createdAt: string;

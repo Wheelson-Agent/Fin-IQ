@@ -22,6 +22,7 @@
  *     - invoices:get-by-id   → Fetch single invoice
  *     - invoices:upload      → Handle file upload
  *     - invoices:update-status → Approve/Reject/Retry
+ *     - invoices:get-document-view → Resolve artifact path
  *
  *   VENDORS:
  *     - vendors:get-all      → Fetch all vendors (with calculated totals)
@@ -140,6 +141,68 @@ export function registerIpcHandlers() {
     });
 
     /**
+     * Get the best available document view (original or OCR-ready artifact).
+     */
+    ipcMain.handle('invoices:get-document-view', async (_event, { id }) => {
+        try {
+            const invoice = await queries.getInvoiceById(id);
+            if (!invoice) return null;
+
+            const jobsDir = path.resolve(__dirname, '../../data/jobs');
+            let latestJobId: string | null = null;
+            let totalPages = 1;
+
+            if (fs.existsSync(jobsDir)) {
+                // Find the most recent job for this invoice
+                const dirs = fs.readdirSync(jobsDir);
+                let latestTime = 0;
+
+                for (const dirName of dirs) {
+                    const jobJsonPath = path.join(jobsDir, dirName, 'job.json');
+                    if (fs.existsSync(jobJsonPath)) {
+                        try {
+                            const job = JSON.parse(fs.readFileSync(jobJsonPath, 'utf8'));
+                            if (job.invoiceId === id) {
+                                const mtime = fs.statSync(jobJsonPath).mtimeMs;
+                                if (mtime > latestTime) {
+                                    latestTime = mtime;
+                                    latestJobId = dirName;
+                                }
+                            }
+                        } catch { /* ignore */ }
+                    }
+                }
+
+                if (latestJobId) {
+                    const outputDir = path.join(jobsDir, latestJobId, 'output');
+                    const pagesDir = path.join(jobsDir, latestJobId, 'pages');
+                    
+                    // Count pages if the pages directory exists
+                    if (fs.existsSync(pagesDir)) {
+                        const pageFiles = fs.readdirSync(pagesDir).filter(f => /^page_\d+\.png$/i.test(f));
+                        if (pageFiles.length > 0) totalPages = pageFiles.length;
+                    }
+
+                    const pdfPath = path.join(outputDir, 'ocr_ready.pdf');
+                    const pngPath = path.join(outputDir, 'ocr_ready.png');
+
+                    if (fs.existsSync(pdfPath)) return { path: pdfPath, totalPages, source: 'preocr' };
+                    if (fs.existsSync(pngPath)) return { path: pngPath, totalPages: 1, source: 'preocr' };
+                }
+            }
+
+            return { 
+                path: invoice.file_path || invoice.file_location || null, 
+                totalPages: 1, 
+                source: invoice.file_path ? 'original' : 'missing' 
+            };
+        } catch (err) {
+            console.error('[IPC] invoices:get-document-view error:', err);
+            return null;
+        }
+    });
+
+    /**
      * Map a vendor to an invoice.
      */
     ipcMain.handle('invoices:map-vendor', async (_event, { invoiceId, vendorId }) => {
@@ -242,13 +305,10 @@ export function registerIpcHandlers() {
         const current = await queries.getInvoiceById(id);
         const currentStatus = current?.status || 'Processing';
         
-        const terminalStatuses = ['Ready to Post', 'Awaiting Input', 'Handoff', 'Posted', 'Auto-Posted'];
+        const terminalStatuses = ['Ready to Post', 'Awaiting Input', 'Handoff', 'Manual Review', 'Posted', 'Auto-Posted'];
         const nextStatus = (isSuccess && !terminalStatuses.includes(currentStatus)) ? 'Processing' : (isSuccess ? currentStatus : 'Failed');
 
-        return await queries.updateInvoiceWithOCR(id, { 
-            status: nextStatus, 
-            file_path: newPath 
-        });
+        return await queries.updateInvoiceStorageLocation(id, newPath, nextStatus);
     });
 
     ipcMain.handle('invoices:revalidate', async (_event, { id }) => {
@@ -279,11 +339,76 @@ export function registerIpcHandlers() {
 
             const result = await n8n.sendToValidation(payload);
             if (result.success) {
-                // Use ingestN8nData to ensure ALL frontend fields (ocr_raw_payload, n8n_val_json_data) 
-                // are updated correctly from the n8n response.
-                await queries.ingestN8nData(id, result.response);
-                
-                return { success: true, response: result.response };
+                const parseObjectLike = (value: any): Record<string, any> | null => {
+                    if (value === null || value === undefined) return null;
+                    let next = value;
+                    if (typeof next === 'string') {
+                        try { next = JSON.parse(next); } catch (e) { return null; }
+                    }
+                    if (Array.isArray(next)) next = next[0];
+                    if (next && typeof next === 'object' && !Array.isArray(next)) {
+                        return next as Record<string, any>;
+                    }
+                    return null;
+                };
+
+                const toBool = (value: any): boolean | undefined => {
+                    if (typeof value === 'boolean') return value;
+                    if (typeof value === 'number') return value !== 0;
+                    if (typeof value === 'string') {
+                        const normalized = value.trim().toLowerCase();
+                        if (['true', '1', 'yes', 'y', 'pass', 'passed', 'verified', 'success'].includes(normalized)) return true;
+                        if (['false', '0', 'no', 'n', 'fail', 'failed', 'rejected', 'error'].includes(normalized)) return false;
+                    }
+                    return undefined;
+                };
+
+                const responseRoot = parseObjectLike(result.response) || {};
+                const sourceCandidates: Record<string, any>[] = [];
+                const pushSource = (candidate: any) => {
+                    const parsed = parseObjectLike(candidate);
+                    if (parsed) sourceCandidates.push(parsed);
+                };
+
+                pushSource(responseRoot);
+                pushSource(responseRoot.validation_status);
+                pushSource(responseRoot.validation_status?.[0]);
+                pushSource(responseRoot.ap_invoices);
+                pushSource(responseRoot.ap_invoices?.[0]);
+                pushSource(responseRoot.n8n_val_json_data);
+                pushSource(responseRoot.ap_invoices?.[0]?.n8n_val_json_data);
+
+                const readBool = (...keys: string[]) => {
+                    for (const source of sourceCandidates) {
+                        for (const key of keys) {
+                            const normalized = key.toLowerCase().replace(/ /g, '_');
+                            const rawVal = source[key] ?? source[normalized];
+                            const parsed = toBool(rawVal);
+                            if (parsed !== undefined) return parsed;
+                        }
+                    }
+                    return undefined;
+                };
+
+                const validationFlags: Record<string, any> = {
+                    buyer_verification: readBool('Buyer Verification', 'buyer_verification', 'Company Verified'),
+                    gst_validation_status: readBool('GST Validation Status', 'gst_validation_status', 'gst_validation', 'GST Validated'),
+                    invoice_ocr_data_validation: readBool('Invoice OCR Data Validation', 'invoice_ocr_data_validation', 'invoice_ocr_data_valdiation', 'Data Validated', 'Data Validation'),
+                    vendor_verification: readBool('Vendor Verification', 'vendor_verification', 'Vendor Verified'),
+                    duplicate_check: readBool('Duplication', 'duplicate_check', 'duplication', 'Document Duplicate Check'),
+                    line_item_match_status: readBool('Line Item Match Status', 'line_item_match_status', 'line_items_match_status', 'ledger_match_status', 'Stock Items Matched'),
+                };
+
+                // Remove undefineds to keep payload clean
+                Object.keys(validationFlags).forEach((k) => validationFlags[k] === undefined && delete validationFlags[k]);
+                const updatedInvoice = await queries.applyRevalidationOutcome(id, validationFlags, 'System');
+
+                return {
+                    success: true,
+                    response: result.response,
+                    validation: validationFlags,
+                    processing_status: updatedInvoice?.processing_status
+                };
             } else {
                 return { success: false, error: result.error };
             }
@@ -458,7 +583,7 @@ export function registerIpcHandlers() {
             }
 
             const fileBuffer = fs.readFileSync(filePath);
-            const result = await runFullPipeline(fileBuffer, fileName);
+            const result = await runFullPipeline(fileBuffer, fileName, { invoiceId });
             console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
             // If the decision is to fail, return an error back to the frontend
@@ -470,14 +595,31 @@ export function registerIpcHandlers() {
                 return { success: false, error: errorMessage };
             }
 
+            if (result.decision.route === 'MANUAL_REVIEW' || result.decision.route === 'ENHANCE_REQUIRED') {
+                const reviewReason = result.decision.reasons.join(', ') || 'Pre-OCR routed this document for review';
+                await queries.updateInvoicePreOcrReviewRoute(invoiceId, result.decision.route, reviewReason);
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', `Pre-OCR routed to review: ${reviewReason}`);
+                batchLogger.addLog(batchName, fileName, 'OCR', 'Skipped', `OCR skipped because Pre-OCR route is ${result.decision.route}`);
+                return { success: true, decision: result.decision, reviewRequired: true };
+            }
+
             batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
-            batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine`);
+            const preOcrArtifactPath = result.outputArtifactPath;
+            let ocrInputPath = filePath;
+            let ocrInputSource = 'original-fallback';
 
-            // At this point, pre-ocr is successful. In a complete implementation, this is where Python OCR would be called.
-            console.log(`[IPC] Pre-OCR passed for ${fileName}, running OCR...`);
+            if (preOcrArtifactPath && fs.existsSync(preOcrArtifactPath)) {
+                ocrInputPath = preOcrArtifactPath;
+                ocrInputSource = 'preocr-artifact';
+            } else {
+                console.warn(`[IPC] OCR fallback to original input for ${fileName}; missing Pre-OCR artifact: ${preOcrArtifactPath || 'none'}`);
+            }
 
-            const mimeType = ocr.getMimeType(filePath);
-            const ocrResult = await ocr.runOCR(filePath, mimeType);
+            batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine (${ocrInputSource})`);
+            console.log(`[IPC] Pre-OCR passed for ${fileName}, running OCR with ${ocrInputSource}: ${ocrInputPath}`);
+
+            const mimeType = ocr.getMimeType(ocrInputPath);
+            const ocrResult = await ocr.runOCR(ocrInputPath, mimeType);
             console.log(`[IPC] ocr.runOCR result for ${fileName}: success=${ocrResult.success}, error=${ocrResult.error || 'none'}`);
 
             if (!ocrResult.success) {
@@ -500,12 +642,14 @@ export function registerIpcHandlers() {
             }
 
             const payload = {
-                file_name: ocrResult.file_name,
+                file_name: fileName,
                 processed_at: ocrResult.processed_at,
                 ocr_text: ocrResult.ocr_text,
                 documentai_document: {
                     entities: entities
-                }
+                },
+                ocr_input_source: ocrInputSource,
+                ocr_input_path: ocrInputPath,
             };
 
             try {
@@ -522,7 +666,7 @@ export function registerIpcHandlers() {
 
                 // Log webhook success to debug_ocr.log and the new n8n_debug.log
                 const timestamp = new Date().toISOString();
-                const logData = `\n--- WEBHOOK SENT ${timestamp} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nStatus: Success\nResponse: ${JSON.stringify(n8nData, null, 2)}\n--------------------------\n`;
+                const logData = `\n--- WEBHOOK SENT ${timestamp} ---\nOCR Input Source: ${ocrInputSource}\nOCR Input Path: ${ocrInputPath}\nPayload: ${JSON.stringify(payload, null, 2)}\nStatus: Success\nResponse: ${JSON.stringify(n8nData, null, 2)}\n--------------------------\n`;
                 fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
 
                 const n8nDebugData = `\n--- N8N RESPONSE RECEIVED ${timestamp} ---\nInvoice ID: ${invoiceId}\nResponse: ${JSON.stringify(n8nData, null, 2)}\n------------------------------------------\n`;
@@ -536,7 +680,7 @@ export function registerIpcHandlers() {
                 console.error('[IPC] Webhook delivery failed, but OCR was successful:', webhookErr.message);
 
                 // Log webhook failure to debug_ocr.log
-                const logData = `\n--- WEBHOOK FAILED ${new Date().toISOString()} ---\nPayload: ${JSON.stringify(payload, null, 2)}\nError: ${webhookErr.message}\n--------------------------\n`;
+                const logData = `\n--- WEBHOOK FAILED ${new Date().toISOString()} ---\nOCR Input Source: ${ocrInputSource}\nOCR Input Path: ${ocrInputPath}\nPayload: ${JSON.stringify(payload, null, 2)}\nError: ${webhookErr.message}\n--------------------------\n`;
                 fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
 
                 // Fallback: If webhook fails, just mark as Pending
@@ -784,6 +928,40 @@ export function registerIpcHandlers() {
     ipcMain.handle('config:set-storage-path', async (_event, config) => {
         await queries.setAppConfig('storage_config', config);
         return { success: true };
+    });
+
+    // ─── ERP SYNC ──────────────────────────────────────────────
+    ipcMain.handle('erp:sync', async () => {
+        const syncUrl = process.env.N8N_ERP_sync_URL;
+        console.log(`[IPC] ERP Sync requested. Target: ${syncUrl}`);
+
+        if (!syncUrl) {
+            console.error('[IPC] ERP Sync failed: N8N_ERP_sync_URL not defined in .env');
+            return { success: false, error: 'Sync URL not configured' };
+        }
+
+        try {
+            const response = await fetch(syncUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    action: 'manual_sync',
+                    source: 'Agent_Fin_IQ_Desktop'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('[IPC] ERP Sync successful:', data);
+            return { success: true, data };
+        } catch (err: any) {
+            console.error('[IPC] ERP Sync failed:', err.message);
+            return { success: false, error: err.message };
+        }
     });
 
     console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp, config');

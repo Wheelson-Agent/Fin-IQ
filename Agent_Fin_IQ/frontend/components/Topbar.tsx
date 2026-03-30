@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Bell, ChevronDown, Palette, Circle, Check, Wifi, WifiOff, RefreshCw, Building2 } from 'lucide-react';
+import { Search, Bell, ChevronDown, Palette, Circle, Check, Wifi, WifiOff, RefreshCw, Building2, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DateRangeValue } from '../context/DateContext';
 import { Calendar } from '../components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { format, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, isSameDay, startOfDay, endOfDay } from 'date-fns';
+import { toast } from 'sonner';
 
 type Theme = 'color' | 'mono';
 
@@ -56,6 +57,12 @@ function getStatusLabel(status: ServiceStatus): string {
     }
 }
 
+function mapN8nHealthToServiceStatus(rawStatus: unknown): ServiceStatus {
+    if (rawStatus === 'live') return 'connected';
+    if (rawStatus === 'offline') return 'disconnected';
+    return 'connecting';
+}
+
 const BLINK_STYLE_ID = 'agent-tally-blink-style';
 function ensureBlinkStyle() {
     if (typeof document === 'undefined') return;
@@ -86,17 +93,45 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
 
     // Listen for pushed updates and perform initial check
     useEffect(() => {
+        const api = (window as any).api;
+
+        const applyN8nStatus = (rawStatus: unknown, isInitial = false) => {
+            const mapped = mapN8nHealthToServiceStatus(rawStatus);
+            setN8nStatus(mapped);
+            setN8nRetries((prev) => {
+                if (mapped === 'connected') return 0;
+                if (isInitial) return 1;
+                return Math.min(prev + 1, 5);
+            });
+        };
+
+        const checkOcrStatus = async (isInitial = false) => {
+            try {
+                if (!api?.invoke) return;
+                const ocrOk = await api.invoke('status:check-ocr');
+                const mapped: ServiceStatus = ocrOk ? 'connected' : 'disconnected';
+                setOcrStatus(mapped);
+                setOcrRetries((prev) => {
+                    if (mapped === 'connected') return 0;
+                    if (isInitial) return 1;
+                    return Math.min(prev + 1, 5);
+                });
+            } catch (err) {
+                setOcrStatus('disconnected');
+                setOcrRetries((prev) => isInitial ? 1 : Math.min(prev + 1, 5));
+            }
+        };
+
         async function initialCheck() {
             try {
-                const api = (window as any).api;
                 if (api?.invoke) {
                     // Initial n8n status
                     const n8nFull = await api.invoke('status:get-n8n-full');
-                    setN8nStatus(n8nFull === 'live' ? 'connected' : (n8nFull === 'offline' ? 'disconnected' : 'connecting'));
-                    
-                    // Initial OCR check (still manual for now as it's less frequent)
-                    const ocrOk = await api.invoke('status:check-ocr');
-                    setOcrStatus(ocrOk ? 'connected' : 'disconnected');
+                    const n8nRawStatus = typeof n8nFull === 'string' ? n8nFull : n8nFull?.status;
+                    applyN8nStatus(n8nRawStatus, true);
+
+                    // Initial OCR check
+                    await checkOcrStatus(true);
                 }
             } catch (err) {
                 console.warn('[Topbar] Initial status check failed', err);
@@ -105,15 +140,22 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
 
         initialCheck();
 
-        const api = (window as any).api;
+        const ocrPoller = setInterval(() => {
+            void checkOcrStatus(false);
+        }, 30_000);
+
         if (api?.on) {
             // Listen for background pushes
             api.on('n8n:status-update', (data: any) => {
                 if (data.service === 'n8n') {
-                    setN8nStatus(data.status === 'live' ? 'connected' : (data.status === 'offline' ? 'disconnected' : 'connecting'));
+                    applyN8nStatus(data.status, false);
                 }
             });
         }
+
+        return () => {
+            clearInterval(ocrPoller);
+        };
     }, []);
 
     // Logic: 
@@ -162,6 +204,7 @@ export function Topbar({
     const [themeOpen, setThemeOpen] = useState(false);
     const [companyOpen, setCompanyOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isErpSyncing, setIsErpSyncing] = useState(false);
     const dropRef = useRef<HTMLDivElement>(null);
     const companyDropRef = useRef<HTMLDivElement>(null);
     const active = themes.find(t => t.id === theme)!;
@@ -174,6 +217,30 @@ export function Topbar({
         if (onRefresh) onRefresh();
         else window.dispatchEvent(new CustomEvent('app:refresh'));
         setTimeout(() => setIsRefreshing(false), 1500);
+    };
+
+    const handleErpSync = async () => {
+        if (isErpSyncing) return;
+        setIsErpSyncing(true);
+        const syncPromise = (async () => {
+            const api = (window as any).api;
+            if (!api?.invoke) throw new Error('API bridge not available');
+            const res = await api.invoke('erp:sync');
+            if (!res?.success) throw new Error(res?.error || 'ERP sync failed');
+            return res;
+        })();
+
+        toast.promise(syncPromise, {
+            loading: 'Syncing with ERP...',
+            success: 'ERP sync started',
+            error: (e) => (e instanceof Error ? e.message : 'ERP sync failed'),
+        });
+
+        try {
+            await syncPromise;
+        } finally {
+            setIsErpSyncing(false);
+        }
     };
 
     useEffect(() => {
@@ -348,6 +415,17 @@ export function Topbar({
                 <button onClick={handleRefresh} title="Refresh data" className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all">
                     <motion.div animate={{ rotate: isRefreshing ? 360 : 0 }} transition={{ duration: 1, repeat: isRefreshing ? Infinity : 0, ease: 'linear' }}>
                         <RefreshCw size={14} />
+                    </motion.div>
+                </button>
+
+                <button
+                    onClick={handleErpSync}
+                    title="Sync ERP"
+                    className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all"
+                    disabled={isErpSyncing}
+                >
+                    <motion.div animate={{ rotate: isErpSyncing ? 360 : 0 }} transition={{ duration: 1, repeat: isErpSyncing ? Infinity : 0, ease: 'linear' }}>
+                        <Database size={14} />
                     </motion.div>
                 </button>
 

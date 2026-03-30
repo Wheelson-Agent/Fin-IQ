@@ -29,6 +29,7 @@ const ALLOWED_CHANNELS = [
     'invoices:get-by-id',
     'invoices:get-items',
     'invoices:save-items',
+    'invoices:save-all',
     'invoices:upload',
     'invoices:update-status',
     'invoices:map-vendor',
@@ -67,6 +68,8 @@ const ALLOWED_CHANNELS = [
     'processing:get-batch-logs',
     'processing:get-worker-status',
     'processing:get-all-logs-debug',
+    // ERP Sync
+    'erp:sync',
     // Health checks
     'status:check-n8n',
     'status:get-n8n-full',

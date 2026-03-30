@@ -345,6 +345,29 @@ export async function updateInvoiceStatus(id: string, status: string) {
 }
 
 /**
+ * Update the stored file path/location for an invoice and optionally its status.
+ * Used by: batch finalization after the source file is moved on disk.
+ *
+ * @param id       - Invoice UUID
+ * @param filePath - Final on-disk path
+ * @param status   - Optional status to persist as-is
+ * @returns Updated invoice row
+ */
+export async function updateInvoiceStorageLocation(id: string, filePath: string, status?: string) {
+    const result = await query(
+        `UPDATE ap_invoices
+         SET file_path = $2,
+             file_location = $2,
+             processing_status = COALESCE($3, processing_status),
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id, filePath, status || null]
+    );
+    return result.rows[0];
+}
+
+/**
  * Update an invoice as failed with a corresponding failure reason and category.
  * Used by: pre-ocr pipeline when an validation or rasterization fails.
  *
@@ -357,6 +380,28 @@ export async function updateInvoiceFailureReason(id: string, failure_reason: str
     const result = await query(
         `UPDATE ap_invoices SET processing_status = 'Failed', failure_reason = $2, pre_ocr_status = COALESCE($3, pre_ocr_status), updated_at = NOW() WHERE id = $1 RETURNING *`,
         [id, failure_reason, pre_ocr_status || null]
+    );
+    return result.rows[0];
+}
+
+/**
+ * Persist a reviewable Pre-OCR route without touching the manual save flow.
+ *
+ * @param id             - Invoice UUID
+ * @param pre_ocr_status - Exact Pre-OCR route (e.g. MANUAL_REVIEW, ENHANCE_REQUIRED)
+ * @param failure_reason - Human-readable reason from the decision engine
+ * @returns Updated invoice row
+ */
+export async function updateInvoicePreOcrReviewRoute(id: string, pre_ocr_status: string, failure_reason: string) {
+    const result = await query(
+        `UPDATE ap_invoices
+         SET processing_status = 'Manual Review',
+             failure_reason = $2,
+             pre_ocr_status = $3,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id, failure_reason, pre_ocr_status]
     );
     return result.rows[0];
 }
@@ -737,6 +782,50 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
         }
 
+        // Workspace-only save path: update ONLY `ap_invoices.ocr_raw_payload` (no column mapping, no line table writes).
+        if (data && data.__workspace_only === true) {
+            let patch: any = data.ocr_raw_payload ?? {};
+            if (typeof patch === 'string') {
+                try { patch = JSON.parse(patch); } catch (e) { patch = {}; }
+            }
+
+            const mergeObjects = (base: any, next: any) => {
+                if (!base || typeof base !== 'object') return next;
+                if (!next || typeof next !== 'object') return base;
+                const merged: any = { ...base, ...next };
+                if (base.__ap_workspace && next.__ap_workspace && typeof base.__ap_workspace === 'object' && typeof next.__ap_workspace === 'object') {
+                    merged.__ap_workspace = { ...base.__ap_workspace, ...next.__ap_workspace };
+                    if (base.__ap_workspace.validation && next.__ap_workspace.validation) {
+                        merged.__ap_workspace.validation = { ...base.__ap_workspace.validation, ...next.__ap_workspace.validation };
+                    }
+                }
+                return merged;
+            };
+
+            const mergedPayload = mergeObjects(rawPayload, patch);
+
+            const invoiceRes = await client.query(
+                'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *',
+                [id, JSON.stringify(mergedPayload)]
+            );
+            const updatedInvoice = invoiceRes.rows[0];
+
+            await client.query(
+                `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+                [
+                    id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
+                    'Edited', userName,
+                    'Workspace save: updated ocr_raw_payload only',
+                    JSON.stringify({}),
+                    JSON.stringify({}),
+                ]
+            );
+
+            await client.query('COMMIT');
+            return updatedInvoice;
+        }
+
         const allowedCols = [
             "invoice_number", "vendor_name", "invoice_date", "due_date",
             "sub_total", "tax_total", "grand_total", "po_number", "gl_account",
@@ -831,6 +920,128 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
 // ─────────────────────────────────────────────────────────────
 // N8N INGESTION
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Persist re-validation outcomes without touching manual edit/save flow.
+ * Updates:
+ * - ocr_raw_payload (validation flags + workspace metadata)
+ * - n8n_val_json_data (canonical validation map)
+ * - processing_status (recomputed via evaluateInvoiceStatus)
+ */
+export async function applyRevalidationOutcome(
+    id: string,
+    validationFlags: Record<string, any>,
+    userName: string = 'System'
+) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        const current = currentRes.rows[0];
+        if (!current) throw new Error('Invoice not found');
+
+        let rawPayload: any = current.ocr_raw_payload || {};
+        if (typeof rawPayload === 'string') {
+            try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
+        }
+        if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+            rawPayload = {};
+        }
+
+        let n8nVal: any = current.n8n_val_json_data || {};
+        if (typeof n8nVal === 'string') {
+            try { n8nVal = JSON.parse(n8nVal); } catch (e) { n8nVal = {}; }
+        }
+        if (!n8nVal || typeof n8nVal !== 'object' || Array.isArray(n8nVal)) {
+            n8nVal = {};
+        }
+
+        const cleanFlags: Record<string, any> = {};
+        Object.keys(validationFlags || {}).forEach((k) => {
+            if (validationFlags[k] !== undefined) cleanFlags[k] = validationFlags[k];
+        });
+
+        const baseWorkspace = (rawPayload.__ap_workspace && typeof rawPayload.__ap_workspace === 'object' && !Array.isArray(rawPayload.__ap_workspace))
+            ? rawPayload.__ap_workspace
+            : {};
+        const baseWorkspaceValidation = (baseWorkspace.validation && typeof baseWorkspace.validation === 'object' && !Array.isArray(baseWorkspace.validation))
+            ? baseWorkspace.validation
+            : {};
+
+        const mergedN8nVal = { ...n8nVal, ...cleanFlags };
+        const mergedRawPayload = {
+            ...rawPayload,
+            ...cleanFlags,
+            __ap_workspace: {
+                ...baseWorkspace,
+                validation: {
+                    ...baseWorkspaceValidation,
+                    ...cleanFlags
+                },
+                last_revalidated_at: new Date().toISOString(),
+            },
+        };
+
+        const lineItemsRes = await client.query(
+            'SELECT ledger_id, gl_account_id FROM ap_invoice_lines WHERE ap_invoice_id = $1',
+            [id]
+        );
+
+        const finalStatus = await evaluateInvoiceStatus(
+            mergedN8nVal,
+            current.vendor_id || null,
+            current.invoice_number || null,
+            lineItemsRes.rows || [],
+            current.n8n_validation_status,
+            current.company_id,
+            current.grand_total
+        );
+
+        const updateRes = await client.query(
+            `UPDATE ap_invoices
+             SET ocr_raw_payload = $2::jsonb,
+                 n8n_val_json_data = $3,
+                 processing_status = $4,
+                 validation_time = NOW(),
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING *`,
+            [id, JSON.stringify(mergedRawPayload), JSON.stringify(mergedN8nVal), finalStatus]
+        );
+        const updatedInvoice = updateRes.rows[0];
+
+        await client.query(
+            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+            [
+                id,
+                updatedInvoice?.invoice_number || current.invoice_number,
+                updatedInvoice?.vendor_name || current.vendor_name,
+                'Edited',
+                userName,
+                'Revalidation: updated n8n validation data and recomputed status',
+                JSON.stringify({
+                    processing_status: current.processing_status,
+                    n8n_val_json_data: current.n8n_val_json_data || null
+                }),
+                JSON.stringify({
+                    processing_status: updatedInvoice?.processing_status,
+                    n8n_val_json_data: updatedInvoice?.n8n_val_json_data || null
+                }),
+            ]
+        );
+
+        await client.query('COMMIT');
+        return updatedInvoice;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[DB] applyRevalidationOutcome failed:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
 
 /**
  * Ingest the entire JSON payload from the n8n validation webhook.
