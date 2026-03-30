@@ -427,6 +427,10 @@ export function registerIpcHandlers() {
         return await queries.getTallySyncLogs(entityId);
     });
 
+    ipcMain.handle('dashboard:tally-sync', async (_event, { companyId } = {}) => {
+        return await queries.getTallySyncStats(companyId);
+    });
+
     // ─── PROCESSING ────────────────────────────────────────
 
     /**
