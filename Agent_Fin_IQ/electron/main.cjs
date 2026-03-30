@@ -114,12 +114,13 @@ async function createWindow() {
 app.whenReady().then(() => {
     // Register custom protocol for local files
     protocol.handle('local-file', async (request) => {
-        const { net } = require('electron');
         const fs = require('fs');
         const path = require('path');
-        const { pathToFileURL } = require('url');
 
-        let filePath = decodeURIComponent(request.url.replace('local-file:///', ''));
+        let rawUrl = request.url.replace('local-file:///', '');
+        const [withoutFragment] = rawUrl.split('#');
+        const [urlPath] = withoutFragment.split('?');
+        let filePath = decodeURIComponent(urlPath);
         // Normalize separators for filesystem access immediately
         let normalizedPath = path.normalize(filePath);
         // Standardize drive letter case for Windows
@@ -168,9 +169,9 @@ app.whenReady().then(() => {
                     if (fs.existsSync(requestedFinCoreDir)) candidateFinCoreDirs.push(requestedFinCoreDir);
 
                     // Fallbacks if storage base path changed (best-effort, no DB access here)
-                    const fallback1 = path.resolve(process.cwd(), 'data', 'batches', 'Fin_core');
+                    const fallback1 = path.resolve(__dirname, '..', 'data', 'batches', 'Fin_core');
                     if (!candidateFinCoreDirs.includes(fallback1) && fs.existsSync(fallback1)) candidateFinCoreDirs.push(fallback1);
-                    const fallback2 = path.resolve(process.cwd(), '..', 'data', 'batches', 'Fin_core');
+                    const fallback2 = path.resolve(__dirname, '..', '..', 'data', 'batches', 'Fin_core');
                     if (!candidateFinCoreDirs.includes(fallback2) && fs.existsSync(fallback2)) candidateFinCoreDirs.push(fallback2);
 
                     const checkInDate = (finCoreDirToUse, dateDirName) => {
@@ -215,12 +216,50 @@ app.whenReady().then(() => {
 
         if (resolvedPath) normalizedPath = resolvedPath;
 
-        const fileUrl = pathToFileURL(normalizedPath).toString();
-        console.log(`[local-file] Final Fetch: ${fileUrl}`);
-
         try {
-            const response = await net.fetch(fileUrl);
-            return response;
+            const fileBuffer = fs.readFileSync(normalizedPath);
+            const ext = path.extname(normalizedPath).toLowerCase();
+            const contentType =
+                ext === '.pdf' ? 'application/pdf' :
+                ext === '.png' ? 'image/png' :
+                (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' :
+                ext === '.webp' ? 'image/webp' :
+                'application/octet-stream';
+
+            const rangeHeader = request.headers?.get ? request.headers.get('range') : null;
+            const totalLength = fileBuffer.length;
+
+            if (rangeHeader) {
+                const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+                if (match) {
+                    const start = match[1] ? Number(match[1]) : 0;
+                    const end = match[2] ? Number(match[2]) : totalLength - 1;
+
+                    if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end >= start && end < totalLength) {
+                        const chunk = fileBuffer.subarray(start, end + 1);
+                        return new Response(chunk, {
+                            status: 206,
+                            headers: {
+                                'Content-Type': contentType,
+                                'Content-Length': String(chunk.length),
+                                'Content-Range': `bytes ${start}-${end}/${totalLength}`,
+                                'Accept-Ranges': 'bytes',
+                                'Cache-Control': 'no-store',
+                            },
+                        });
+                    }
+                }
+            }
+
+            return new Response(fileBuffer, {
+                status: 200,
+                headers: {
+                    'Content-Type': contentType,
+                    'Content-Length': String(totalLength),
+                    'Accept-Ranges': 'bytes',
+                    'Cache-Control': 'no-store',
+                },
+            });
         } catch (err) {
             console.error(`[local-file] Fetch error:`, err);
             return new Response('File not found', { status: 404 });

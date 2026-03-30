@@ -27,6 +27,7 @@ const ALLOWED_CHANNELS = [
     // Invoices
     'invoices:get-all',
     'invoices:get-by-id',
+    'invoices:get-document-view',
     'invoices:get-items',
     'invoices:save-items',
     'invoices:save-all',

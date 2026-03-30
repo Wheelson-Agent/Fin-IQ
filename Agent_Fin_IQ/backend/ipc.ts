@@ -148,7 +148,7 @@ export function registerIpcHandlers() {
             const invoice = await queries.getInvoiceById(id);
             if (!invoice) return null;
 
-            const jobsDir = path.resolve(__dirname, '../../data/jobs');
+            const jobsDir = path.resolve(__dirname, '../data/jobs');
             let latestJobId: string | null = null;
             let totalPages = 1;
 
