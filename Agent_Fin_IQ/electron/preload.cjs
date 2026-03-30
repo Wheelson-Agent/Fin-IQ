@@ -59,6 +59,7 @@ const ALLOWED_CHANNELS = [
     'companies:get-all',
     'api/companies',
     'dashboard:get-metrics',
+    'dashboard:tally-sync',
     // Audit
     'audit:get-logs',
     // Processing

@@ -374,4 +374,36 @@ export async function getDashboardMetrics(companyId?: string): Promise<Dashboard
     return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
 }
 
+export interface TallySyncStats {
+    posted:  number;
+    pending: number;
+    handoff: number;
+    recent:  Array<{
+        vendor: string;
+        status: 'posted' | 'handoff';
+        amount: number;
+        ts:     string;
+    }>;
+    handoff_reasons: {
+        duplicate: number;
+        gst_validation: number;
+        buyer_validation: number;
+        data_validation: number;
+        vendor_mapping: number;
+        line_item_match: number;
+        missing_invoice_field: number;
+    };
+    duplicate_rate_pct: number;
+}
+
+/**
+ * Fetch live Tally sync stats for the AP dashboard widget.
+ * posted  = invoices with erp_sync_id set
+ * pending = invoices in 'Ready to Post' awaiting Tally push
+ * handoff = invoices that failed validation
+ */
+export async function getTallySyncStats(companyId?: string): Promise<TallySyncStats> {
+    return invoke<TallySyncStats>('dashboard:tally-sync', { companyId });
+}
+
 

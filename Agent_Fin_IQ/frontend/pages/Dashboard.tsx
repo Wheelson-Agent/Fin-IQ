@@ -1,472 +1,1808 @@
 import React, { useState, useEffect } from 'react';
-import {
-  AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-} from 'recharts';
-import {
-  TrendingUp, TrendingDown, ChevronRight,
-  DollarSign, FileCheck, Zap, AlertTriangle,
-} from 'lucide-react';
 import { motion } from 'motion/react';
-import { KPICard } from '../components/at/KPICard';
-import { SectionHeader } from '../components/at/SectionHeader';
-import {
-  cashFlowData, sparklineData, userProductivity
-} from '../lib/mockData';
-import { getInvoices, getDashboardMetrics } from '../lib/api';
+import { Edit2, Check, X, TrendingUp, TrendingDown } from 'lucide-react';
+import { getTallySyncStats, type TallySyncStats } from '../lib/api';
 import { useCompany } from '../context/CompanyContext';
-import type { Invoice, DashboardMetrics } from '../lib/types';
 
-const formatCurrency = (v: number) =>
-  v >= 1000000
-    ? `₹${(v / 1000000).toFixed(1)}M`
-    : v >= 1000
-      ? `₹${(v / 1000).toFixed(0).toLocaleString()}K`
-      : `₹${v.toLocaleString()}`;
+// ============================================================
+// AP KPI DASHBOARD — DESIGN TOKENS
+// ============================================================
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="bg-white border border-[#D0D9E8]/50 rounded-[8px] p-[12px_16px] shadow-[0_4px_16px_rgba(13,27,42,0.1)] font-sans">
-        <p className="text-[12px] font-semibold text-[#1A2640] mb-[8px]">{label}</p>
-        {payload.map((entry: any) => (
-          <p key={entry.name} className="text-[12px]" style={{ color: entry.color }}>
-            {entry.name}: {formatCurrency(entry.value)}
-          </p>
+const C = {
+  ink:        '#0F1923',
+  paper:      '#F8F5EF',
+  surface:    '#FFFFFF',
+  inkMuted:   '#6B7280',
+  inkGhost:   '#C4BFB5',
+  tealDeep:   '#0F6E56',
+  tealMid:    '#1D9E75',
+  tealLight:  '#E1F5EE',
+  amberDeep:  '#854F0B',
+  amberMid:   '#BA7517',
+  amberLight: '#FAEEDA',
+  redDeep:    '#791F1F',
+  redMid:     '#E24B4A',
+  redLight:   '#FCEBEB',
+  navy:       '#1B4F8A',
+  navyLight:  '#E6F1FB',
+} as const;
+
+// ============================================================
+// AP KPI DASHBOARD — UTILITIES
+// ============================================================
+
+function formatINR(v: number): string {
+  return '₹' + v.toLocaleString('en-IN');
+}
+
+function formatINRAbbr(v: number): string {
+  if (v >= 10_000_000) return `₹${(v / 10_000_000).toFixed(1)}Cr`;
+  if (v >= 100_000)    return `₹${(v / 100_000).toFixed(1)}L`;
+  if (v >= 1_000)      return `₹${(v / 1_000).toFixed(0)}K`;
+  return formatINR(v);
+}
+
+function formatTime(isoStr: string): string {
+  return new Date(isoStr).toLocaleTimeString('en-IN', {
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+}
+
+// ============================================================
+// AP KPI DASHBOARD — TYPES
+// ============================================================
+
+interface PulseData {
+  cash_position: {
+    balance:    number;
+    updated_at: string;
+  };
+  due_today: {
+    amount:    number;
+    count:     number;
+    suppliers: number;
+    overdue:   number;
+  };
+  due_this_week: {
+    amount:         number;
+    count:          number;
+    suppliers:      number;
+    coverage_ratio: number;
+  };
+  net_this_month: {
+    amount:    number;
+    count:     number;
+    trend_pct: number;
+  };
+}
+
+// ============================================================
+// AP KPI DASHBOARD — TYPES (continued)
+// ============================================================
+
+interface PipelineData {
+  touchless: { count: number; amount: number };
+  hybrid:    { count: number; amount: number };
+  manual:    { count: number; amount: number };
+  touchless_rate:         number; // % this month
+  touchless_rate_prev:    number; // % last month
+  avg_time: {                     // KPI-11: avg processing time per lane
+    touchless_min:  number;
+    hybrid_hours:   number;
+    manual_days:    number;
+  };
+  oldest_unreviewed_days: number; // KPI-13: age of oldest unreviewed invoice
+}
+
+// ============================================================
+// AP KPI DASHBOARD — MOCK DATA (swap for IPC calls in backend phase)
+// ============================================================
+
+const MOCK_PULSE: PulseData = {
+  cash_position:  { balance: 820000,  updated_at: new Date().toISOString() },
+  due_today:      { amount: 85000,    count: 2,  suppliers: 1, overdue: 45000 },
+  due_this_week:  { amount: 310000,   count: 4,  suppliers: 2, coverage_ratio: 2.6 },
+  net_this_month: { amount: 1840000,  count: 47, trend_pct: 12 },
+};
+
+const MOCK_PIPELINE: PipelineData = {
+  touchless:              { count: 31, amount: 1240000 },
+  hybrid:                 { count: 12, amount: 480000  },
+  manual:                 { count: 4,  amount: 120000  },
+  touchless_rate:         66.0,
+  touchless_rate_prev:    58.0,
+  avg_time:               { touchless_min: 1.8, hybrid_hours: 3.2, manual_days: 1.9 },
+  oldest_unreviewed_days: 2,
+};
+
+interface AgingData {
+  buckets: Array<{
+    label:     string;
+    amount:    number;
+    width_pct: number; // relative to largest bucket (largest = 100)
+  }>;
+  total_outstanding: number;
+  next_30_days:      number;
+}
+
+const AGING_BAR_COLORS = ['#1D9E75', '#BA7517', '#E24B4A', '#791F1F'] as const;
+
+interface SuppliersData {
+  top_suppliers: Array<{
+    rank:    number;
+    name:    string;
+    gstin:   string;
+    amount:  number;
+    bar_pct: number; // top supplier = 100
+  }>;
+  concentration_top3_pct: number;
+  new_this_month:         number; // KPI-19: new supplier GSTINs first seen this month
+}
+
+type ActivityEventType = 'sync_failed' | 'hybrid_flagged' | 'auto_posted' | 'ocr_processed' | 'blocked';
+
+interface ActivityData {
+  events: Array<{
+    type:   ActivityEventType;
+    text:   string; // entity name wrapped in **bold**
+    ts:     string;
+  }>;
+}
+
+interface BriefingData {
+  message:  string; // most urgent item wrapped in **bold**
+  sent_at:  string;
+}
+
+const MOCK_SUPPLIER_ALERTS: SupplierAlertsData = {
+  alerts: [
+    { name: 'ABC Traders',      gstin: '07ABCTR1234F1Z5', risk_level: 'high_risk', note: 'GST lapsed · ITC risk',   score: 28 },
+    { name: 'Priya Logistics',  gstin: '07PQRST3456M4Z3', risk_level: 'review',    note: 'New supplier',             score: 52 },
+    { name: 'Rajan Traders',    gstin: '29ABCDE1234F1Z5', risk_level: 'good',      note: 'Score improved ↑',         score: 81 },
+  ],
+  price_variance: [
+    { name: 'Rajan Traders',    hsn: '7208', change_pct: +14.2 },
+    { name: 'Mehta Steel Works', hsn: '7306', change_pct: -11.8 },
+  ],
+  itc_risk_amount: 42500, // KPI-15: ₹42,500 at risk from GST-lapsed supplier (ABC Traders)
+};
+
+const MOCK_ACTIVITY: ActivityData = {
+  events: [
+    { type: 'sync_failed',    text: 'Tally sync failed — **Rajan Traders** INV-881. Reconnect Tally.',      ts: new Date(Date.now() - 10  * 60000).toISOString() },
+    { type: 'hybrid_flagged', text: 'Hybrid flagged — **Priya Logistics** ₹58K. New supplier rule.',         ts: new Date(Date.now() - 28  * 60000).toISOString() },
+    { type: 'auto_posted',    text: 'Auto-posted — **Sharma & Co** INV-441 ₹28.5K to Tally.',               ts: new Date(Date.now() - 55  * 60000).toISOString() },
+    { type: 'blocked',        text: 'Blocked — **ABC Traders** INV-209. Duplicate invoice detected.',        ts: new Date(Date.now() - 110 * 60000).toISOString() },
+    { type: 'ocr_processed',  text: 'OCR extracted — **Mehta Steel Works** INV-330. Awaiting validation.',  ts: new Date(Date.now() - 180 * 60000).toISOString() },
+  ],
+};
+
+const MOCK_BRIEFING: BriefingData = {
+  message: '**₹85,000 is due today** from 2 invoices across 1 supplier. Cash coverage is healthy at 2.6x. 1 Tally sync failure needs attention — Rajan Traders INV-881. Touchless rate is 66% this month, up from 58% last month.',
+  sent_at: new Date(new Date().setHours(8, 0, 0, 0)).toISOString(),
+};
+
+// MOCK_TALLY_SYNC removed — TallySyncWidget now uses live data via dashboard:tally-sync IPC
+
+const MOCK_AGING: AgingData = {
+  buckets: [
+    { label: '0–30 days',  amount: 640000, width_pct: 100  },
+    { label: '31–60 days', amount: 320000, width_pct: 50   },
+    { label: '61–90 days', amount: 110000, width_pct: 17.2 },
+    { label: '90+ days',   amount: 45000,  width_pct: 7    },
+  ],
+  total_outstanding: 1115000,
+  next_30_days:      940000,
+};
+
+interface SupplierAlertsData {
+  alerts: Array<{
+    name:       string;
+    gstin:      string;
+    risk_level: 'high_risk' | 'review' | 'good';
+    note:       string;
+    score:      number;
+  }>;
+  price_variance: Array<{  // KPI-17: line items with >10% unit price change vs last invoice
+    name:       string;
+    hsn:        string;
+    change_pct: number;    // positive = increase, negative = decrease
+  }>;
+  itc_risk_amount: number; // KPI-15: total ₹ value of invoices from GST-lapsed suppliers
+}
+
+interface TallySyncData {
+  posted:  number;
+  pending: number;
+  handoff: number;            // renamed from failed — matches AP tab "Handoff" tab
+  recent:  Array<{
+    vendor: string;
+    status: 'posted' | 'handoff';
+    amount: number;
+    ts:     string; // ISO
+  }>;
+  handoff_reasons: {
+    duplicate:             number;
+    gst_validation:        number;
+    buyer_validation:      number;
+    data_validation:       number;
+    vendor_mapping:        number;
+    line_item_match:       number;
+    missing_invoice_field: number;
+  };
+  duplicate_rate_pct: number; // KPI-18: % of this month's invoices flagged as duplicate
+}
+
+const MOCK_SUPPLIERS: SuppliersData = {
+  top_suppliers: [
+    { rank: 1, name: 'Rajan Traders Pvt Ltd', gstin: '29ABCDE1234F1Z5', amount: 420000, bar_pct: 100  },
+    { rank: 2, name: 'Sharma & Co',           gstin: '27FGHIJ5678K2Z1', amount: 302000, bar_pct: 71.9 },
+    { rank: 3, name: 'Mehta Steel Works',     gstin: '24KLMNO9012L3Z8', amount: 231000, bar_pct: 55   },
+    { rank: 4, name: 'Priya Logistics',       gstin: '07PQRST3456M4Z3', amount: 158000, bar_pct: 37.6 },
+    { rank: 5, name: 'ABC Packaging',         gstin: '19UVWXY7890N5Z6', amount: 98000,  bar_pct: 23.3 },
+  ],
+  concentration_top3_pct: 61.2,
+  new_this_month:         3,
+};
+
+// ============================================================
+// AP KPI DASHBOARD — PULSE CARD WRAPPER
+// ============================================================
+
+function PulseCard({ label, children, delay = 0, accentColor }: {
+  label:         string;
+  children:      React.ReactNode;
+  delay?:        number;
+  accentColor?:  string;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${hovered ? C.navy : C.inkGhost}`,
+        borderTop:    accentColor ? `2.5px solid ${accentColor}` : `0.5px solid ${hovered ? C.navy : C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px 18px',
+        cursor:       'pointer',
+        transform:    hovered ? 'translateY(-2px)' : 'translateY(0)',
+        transition:   'border-color 120ms ease, transform 160ms ease, box-shadow 160ms ease',
+        boxShadow:    hovered ? '0 4px 16px rgba(15,25,35,0.07)' : '0 1px 3px rgba(15,25,35,0.04)',
+      }}
+    >
+      <div style={{
+        fontSize:     '12px',
+        color:        C.inkMuted,
+        marginBottom: '10px',
+        fontFamily:   '"DM Sans", sans-serif',
+        fontWeight:   400,
+        letterSpacing:'0.01em',
+        textTransform:'uppercase',
+      }}>
+        {label}
+      </div>
+      {children}
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — SHARED UTILITY: bold text renderer
+// ============================================================
+
+function renderBold(text: string, baseColor: string) {
+  return text.split(/\*\*(.*?)\*\*/).map((part, i) =>
+    i % 2 === 1
+      ? <strong key={i} style={{ color: C.ink, fontWeight: 600 }}>{part}</strong>
+      : <span key={i} style={{ color: baseColor }}>{part}</span>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — ACTIVITY FEED WIDGET
+// ============================================================
+
+const ACTIVITY_DOT: Record<ActivityEventType, string> = {
+  sync_failed:    C.redMid,
+  blocked:        C.redMid,
+  hybrid_flagged: C.amberMid,
+  auto_posted:    C.tealMid,
+  ocr_processed:  C.navy,
+};
+
+function ActivityWidget({ data }: { data: ActivityData }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.36 }}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Recent activity
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {data.events.map((ev, i) => (
+          <div key={i} style={{
+            display:      'flex',
+            alignItems:   'flex-start',
+            gap:          '10px',
+            padding:      '9px 0',
+            borderTop:    i > 0 ? `0.5px solid ${C.inkGhost}` : 'none',
+          }}>
+            {/* Coloured dot */}
+            <div style={{
+              width:        '6px',
+              height:       '6px',
+              borderRadius: '50%',
+              background:   ACTIVITY_DOT[ev.type],
+              flexShrink:   0,
+              marginTop:    '5px',
+            }} />
+
+            {/* Event text */}
+            <span style={{ flex: 1, fontSize: '12px', lineHeight: 1.5, fontFamily: '"DM Sans", sans-serif' }}>
+              {renderBold(ev.text, C.inkMuted)}
+            </span>
+
+            {/* Time ago */}
+            <span style={{
+              flexShrink: 0,
+              fontSize:   '12px',
+              color:      C.inkGhost,
+              fontFamily: '"DM Sans", sans-serif',
+              whiteSpace: 'nowrap',
+            }}>
+              {timeAgo(ev.ts)}
+            </span>
+          </div>
         ))}
       </div>
-    );
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — CFO BRIEFING WIDGET
+// ============================================================
+
+function BriefingWidget({ data }: { data: BriefingData }) {
+  const [resent, setResent] = useState(false);
+
+  function handleResend() {
+    setResent(true);
+    setTimeout(() => setResent(false), 2500);
+    // TODO: call window.api.invoke('briefing:resend-whatsapp') in backend phase
   }
-  return null;
-};
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.4 }}
+      style={{
+        background:     C.paper,
+        borderRadius:   '6px',
+        border:         `0.5px solid ${C.inkGhost}`,
+        borderLeft:     `3px solid ${C.navy}`,
+        padding:        '20px 24px',
+        display:        'flex',
+        flexDirection:  'column',
+        gap:            '14px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          CFO briefing
+        </span>
+      </div>
+
+      {/* Briefing text */}
+      <p style={{
+        fontSize:   '13px',
+        color:      C.inkMuted,
+        lineHeight: 1.6,
+        margin:     0,
+        fontFamily: '"DM Sans", sans-serif',
+      }}>
+        {renderBold(data.message, C.inkMuted)}
+      </p>
+
+      {/* Sent time */}
+      <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: '"DM Sans", sans-serif' }}>
+        Sent {new Date(data.sent_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+      </span>
+
+      {/* Resend button */}
+      <button
+        onClick={handleResend}
+        style={{
+          width:        '100%',
+          padding:      '8px',
+          fontSize:     '12px',
+          fontFamily:   '"DM Sans", sans-serif',
+          fontWeight:   500,
+          color:        resent ? C.tealDeep : C.navy,
+          background:   resent ? C.tealLight : 'transparent',
+          border:       `0.5px solid ${resent ? C.tealMid : C.navy}`,
+          borderRadius: '6px',
+          cursor:       'pointer',
+          transition:   'all 200ms ease',
+        }}
+      >
+        {resent ? '✓ Sent to WhatsApp' : 'Resend to WhatsApp'}
+      </button>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — SUPPLIER360 ALERTS WIDGET
+// ============================================================
+
+const RISK_CONFIG = {
+  high_risk: { label: 'High risk', bg: C.redLight,   text: C.redDeep   },
+  review:    { label: 'Review',    bg: C.amberLight, text: C.amberDeep },
+  good:      { label: 'Good',      bg: C.tealLight,  text: C.tealDeep  },
+} as const;
+
+function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.28 }}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Supplier360 alerts
+        </span>
+      </div>
+
+      {/* KPI-15: ITC risk banner — any value > 0 is immediate red alert */}
+      {data.itc_risk_amount > 0 && (
+        <div style={{
+          display:        'flex',
+          justifyContent: 'space-between',
+          alignItems:     'center',
+          marginBottom:   '12px',
+          padding:        '8px 10px',
+          background:     C.redLight,
+          borderRadius:   '5px',
+          border:         `0.5px solid ${C.redMid}`,
+        }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: C.redDeep, fontFamily: '"DM Sans", sans-serif' }}>
+            ITC at risk
+          </span>
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize:   '12px',
+            fontWeight: 700,
+            color:      C.redDeep,
+          }}>
+            {formatINRAbbr(data.itc_risk_amount)}
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {data.alerts.map((a, i) => {
+          const cfg = RISK_CONFIG[a.risk_level];
+          return (
+            <div
+              key={a.gstin}
+              onClick={() => { /* TODO: navigate to Supplier360 — gstin: a.gstin */ }}
+              style={{
+                display:      'flex',
+                alignItems:   'center',
+                gap:          '10px',
+                padding:      '10px 0',
+                borderBottom: i < data.alerts.length - 1 ? `0.5px solid ${C.inkGhost}` : 'none',
+                cursor:       'pointer',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+              onMouseLeave={e => (e.currentTarget.style.opacity  = '1')}
+            >
+              {/* Risk pill */}
+              <span style={{
+                flexShrink:   0,
+                fontSize:     '11px',
+                fontWeight:   500,
+                padding:      '2px 8px',
+                borderRadius: '20px',
+                background:   cfg.bg,
+                color:        cfg.text,
+                fontFamily:   '"DM Sans", sans-serif',
+                whiteSpace:   'nowrap',
+              }}>
+                {cfg.label}
+              </span>
+
+              {/* Name + note */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{
+                  fontSize:   '12px',
+                  color:      C.ink,
+                  fontFamily: '"DM Sans", sans-serif',
+                  fontWeight: 500,
+                }}>
+                  {a.name}
+                </span>
+                <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+                  {' '}— {a.note}
+                </span>
+              </div>
+
+              {/* Score */}
+              <span style={{
+                flexShrink: 0,
+                fontSize:   '12px',
+                color:      C.inkGhost,
+                fontFamily: '"JetBrains Mono", monospace',
+              }}>
+                {a.score}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* KPI-17: Price variance alerts */}
+      {data.price_variance.length > 0 && (
+        <div style={{
+          marginTop:  '12px',
+          paddingTop: '12px',
+          borderTop:  `0.5px solid ${C.inkGhost}`,
+        }}>
+          <span style={{
+            fontSize:      '11px',
+            fontWeight:    500,
+            color:         C.amberDeep,
+            fontFamily:    '"DM Sans", sans-serif',
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}>
+            Price variance
+          </span>
+          {data.price_variance.map((pv, i) => (
+            <div key={i} style={{
+              display:     'flex',
+              alignItems:  'center',
+              gap:         '8px',
+              marginTop:   '6px',
+            }}>
+              <span style={{
+                flex:         1,
+                fontSize:     '12px',
+                color:        C.ink,
+                fontFamily:   '"DM Sans", sans-serif',
+                overflow:     'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace:   'nowrap',
+                minWidth:     0,
+              }}>
+                {pv.name}
+              </span>
+              <span style={{
+                flexShrink: 0,
+                fontSize:   '11px',
+                color:      C.inkGhost,
+                fontFamily: '"JetBrains Mono", monospace',
+              }}>
+                HSN {pv.hsn}
+              </span>
+              <span style={{
+                flexShrink: 0,
+                fontSize:   '12px',
+                fontWeight: 600,
+                fontFamily: '"JetBrains Mono", monospace',
+                color:      pv.change_pct > 0 ? C.redMid : C.tealMid,
+              }}>
+                {pv.change_pct > 0 ? '+' : ''}{pv.change_pct.toFixed(1)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — TALLY SYNC WIDGET
+// ============================================================
+
+function timeAgo(isoStr: string): string {
+  const mins = Math.round((Date.now() - new Date(isoStr).getTime()) / 60000);
+  if (mins < 1)  return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  return `${Math.round(mins / 60)}h ago`;
+}
+
+const SYNC_STATUS_CONFIG = {
+  posted:  { dot: C.tealMid,  label: 'Posted',  bg: C.tealLight,  text: C.tealDeep  },
+  pending: { dot: C.amberMid, label: 'Pending', bg: C.amberLight, text: C.amberDeep },
+  handoff: { dot: C.redMid,   label: 'Handoff', bg: C.redLight,   text: C.redDeep   },
+} as const;
+
+function TallySyncWidget({ data }: { data: any }) {
+  // KPI-12: success rate = posted / (posted + handoff)
+  const successRate     = data.posted + data.handoff > 0
+    ? (data.posted / (data.posted + data.handoff)) * 100
+    : 100;
+  const successRateColor = successRate < 90 ? C.redMid : successRate < 97 ? C.amberMid : C.tealMid;
+
+  const reasonEntries = [
+    { label: 'Duplicate', value: data.handoff_reasons.duplicate },
+    { label: 'GST validation', value: data.handoff_reasons.gst_validation },
+    { label: 'Buyer validation', value: data.handoff_reasons.buyer_validation },
+    { label: 'Data validation', value: data.handoff_reasons.data_validation },
+    { label: 'Vendor mapping', value: data.handoff_reasons.vendor_mapping },
+    { label: 'Line match', value: data.handoff_reasons.line_item_match },
+    { label: 'Missing field', value: data.handoff_reasons.missing_invoice_field },
+  ].filter(item => item.value > 0);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.32 }}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Tally sync
+        </span>
+      </div>
+
+      {/* Three stat cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '16px' }}>
+        {([
+          { label: 'Posted',  value: data.posted,  cfg: SYNC_STATUS_CONFIG.posted  },
+          { label: 'Pending', value: data.pending, cfg: SYNC_STATUS_CONFIG.pending },
+          { label: 'Handoff', value: data.handoff, cfg: SYNC_STATUS_CONFIG.handoff },
+        ] as const).map(({ label, value, cfg }) => (
+          <div key={label} style={{
+            background:   cfg.bg,
+            borderRadius: '6px',
+            padding:      '12px',
+            textAlign:    'center',
+          }}>
+            <div style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize:   '20px',
+              fontWeight: 700,
+              color:      cfg.text,
+              lineHeight: 1,
+              marginBottom: '4px',
+            }}>
+              {value}
+            </div>
+            <div style={{ fontSize: '11px', color: cfg.text, fontFamily: '"DM Sans", sans-serif' }}>
+              {label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* KPI-12: Sync success rate */}
+      <div style={{
+        display:        'flex',
+        justifyContent: 'space-between',
+        alignItems:     'center',
+        marginBottom:   '10px',
+        padding:        '8px 10px',
+        background:     successRate < 90 ? C.redLight : C.tealLight,
+        borderRadius:   '5px',
+        border:         `0.5px solid ${successRateColor}`,
+      }}>
+        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          Sync success rate
+        </span>
+        <span style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize:   '13px',
+          fontWeight: 700,
+          color:      successRateColor,
+        }}>
+          {successRate.toFixed(1)}%
+        </span>
+      </div>
+
+      {/* Handoff reasons + duplicate rate */}
+      {reasonEntries.length > 0 && (
+        <div style={{
+          display:        'flex',
+          justifyContent: 'space-between',
+          alignItems:     'center',
+          marginBottom:   '10px',
+          padding:        '8px 10px',
+          background:     C.amberLight,
+          borderRadius:   '5px',
+          border:         `0.5px solid ${C.amberMid}`,
+        }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif', fontWeight: 500 }}>
+              Handoff reasons
+            </span>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif' }}>
+              {data.blocked.duplicate} dup · {data.blocked.invalid_gstin} GSTIN
+            </span>
+          </div>
+          <span style={{
+            fontSize:   '11px',
+            fontFamily: '"JetBrains Mono", monospace',
+            fontWeight: 600,
+            color:      data.duplicate_rate_pct > 5 ? C.redMid : C.amberDeep,
+          }}>
+            {data.duplicate_rate_pct.toFixed(1)}% dup rate
+          </span>
+        </div>
+      )}
+
+      {/* Recent sync events */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {data.recent.map((event, i) => {
+          const cfg = SYNC_STATUS_CONFIG[event.status];
+          return (
+            <div key={i} style={{
+              display:      'flex',
+              alignItems:   'center',
+              gap:          '10px',
+              padding:      '8px 0',
+              borderTop:    `0.5px solid ${C.inkGhost}`,
+            }}>
+              {/* Status dot */}
+              <div style={{
+                width:        '6px',
+                height:       '6px',
+                borderRadius: '50%',
+                background:   cfg.dot,
+                flexShrink:   0,
+              }} />
+
+              {/* Vendor */}
+              <span style={{
+                flex:         1,
+                fontSize:     '12px',
+                color:        C.ink,
+                fontFamily:   '"DM Sans", sans-serif',
+                overflow:     'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace:   'nowrap',
+                minWidth:     0,
+              }}>
+                {event.vendor}
+              </span>
+
+              {/* Status pill */}
+              <span style={{
+                flexShrink:   0,
+                fontSize:     '11px',
+                fontWeight:   500,
+                padding:      '1px 6px',
+                borderRadius: '20px',
+                background:   cfg.bg,
+                color:        cfg.text,
+                fontFamily:   '"DM Sans", sans-serif',
+              }}>
+                {cfg.label}
+              </span>
+
+              {/* Amount */}
+              <span style={{
+                flexShrink: 0,
+                fontSize:   '12px',
+                color:      C.inkMuted,
+                fontFamily: '"JetBrains Mono", monospace',
+                width:      '68px',
+                textAlign:  'right',
+              }}>
+                {formatINRAbbr(event.amount)}
+              </span>
+
+              {/* Time ago */}
+              <span style={{
+                flexShrink: 0,
+                fontSize:   '11px',
+                color:      C.inkGhost,
+                fontFamily: '"DM Sans", sans-serif',
+                width:      '48px',
+                textAlign:  'right',
+              }}>
+                {timeAgo(event.ts)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
+function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
+  const successRate = data.posted + data.handoff > 0
+    ? (data.posted / (data.posted + data.handoff)) * 100
+    : 100;
+  const successRateColor = successRate < 90 ? C.redMid : successRate < 97 ? C.amberMid : C.tealMid;
+  const reasonEntries = [
+    { label: 'Duplicate', value: data.handoff_reasons.duplicate },
+    { label: 'GST validation', value: data.handoff_reasons.gst_validation },
+    { label: 'Buyer validation', value: data.handoff_reasons.buyer_validation },
+    { label: 'Data validation', value: data.handoff_reasons.data_validation },
+    { label: 'Vendor mapping', value: data.handoff_reasons.vendor_mapping },
+    { label: 'Line match', value: data.handoff_reasons.line_item_match },
+    { label: 'Missing field', value: data.handoff_reasons.missing_invoice_field },
+  ].filter(item => item.value > 0);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.32 }}
+      style={{
+        background: C.surface,
+        border: `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding: '20px 24px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Tally sync
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '16px' }}>
+        {([
+          { label: 'Posted', value: data.posted, cfg: SYNC_STATUS_CONFIG.posted },
+          { label: 'Pending', value: data.pending, cfg: SYNC_STATUS_CONFIG.pending },
+          { label: 'Handoff', value: data.handoff, cfg: SYNC_STATUS_CONFIG.handoff },
+        ] as const).map(({ label, value, cfg }) => (
+          <div key={label} style={{ background: cfg.bg, borderRadius: '6px', padding: '12px', textAlign: 'center' }}>
+            <div style={{
+              fontFamily: '"JetBrains Mono", monospace',
+              fontSize: '20px',
+              fontWeight: 700,
+              color: cfg.text,
+              lineHeight: 1,
+              marginBottom: '4px',
+            }}>
+              {value}
+            </div>
+            <div style={{ fontSize: '11px', color: cfg.text, fontFamily: '"DM Sans", sans-serif' }}>
+              {label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '10px',
+        padding: '8px 10px',
+        background: successRate < 90 ? C.redLight : C.tealLight,
+        borderRadius: '5px',
+        border: `0.5px solid ${successRateColor}`,
+      }}>
+        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          Sync success rate
+        </span>
+        <span style={{
+          fontFamily: '"JetBrains Mono", monospace',
+          fontSize: '13px',
+          fontWeight: 700,
+          color: successRateColor,
+        }}>
+          {successRate.toFixed(1)}%
+        </span>
+      </div>
+
+      {reasonEntries.length > 0 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '10px',
+          padding: '8px 10px',
+          background: C.amberLight,
+          borderRadius: '5px',
+          border: `0.5px solid ${C.amberMid}`,
+        }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif', fontWeight: 500 }}>
+              Handoff reasons
+            </span>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif' }}>
+              {reasonEntries.slice(0, 2).map(item => `${item.value} ${item.label}`).join(' · ')}
+            </span>
+          </div>
+          <span style={{
+            fontSize: '11px',
+            fontFamily: '"JetBrains Mono", monospace',
+            fontWeight: 600,
+            color: data.duplicate_rate_pct > 5 ? C.redMid : C.amberDeep,
+          }}>
+            {data.duplicate_rate_pct.toFixed(1)}% dup rate
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {data.recent.map((event, i) => {
+          const cfg = SYNC_STATUS_CONFIG[event.status];
+          return (
+            <div key={i} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '8px 0',
+              borderTop: `0.5px solid ${C.inkGhost}`,
+            }}>
+              <div style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: cfg.dot,
+                flexShrink: 0,
+              }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: '12px',
+                  color: C.ink,
+                  fontFamily: '"DM Sans", sans-serif',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {event.vendor}
+                </div>
+                <div style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+                  {cfg.label} · {formatINRAbbr(event.amount)}
+                </div>
+              </div>
+              <span style={{
+                fontSize: '11px',
+                color: C.inkGhost,
+                fontFamily: '"DM Sans", sans-serif',
+                flexShrink: 0,
+              }}>
+                {timeAgo(event.ts)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — TOP SUPPLIERS WIDGET
+// ============================================================
+
+function SuppliersWidget({ data }: { data: SuppliersData }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 80);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.24 }}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px',
+      }}
+    >
+      {/* Section header */}
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Top suppliers · 30 days
+        </span>
+      </div>
+
+      {/* Supplier rows */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {data.top_suppliers.map((s, i) => (
+          <div
+            key={s.gstin}
+            onClick={() => { /* TODO: navigate to Supplier360 profile — gstin: s.gstin */ }}
+            style={{
+              display:       'flex',
+              alignItems:    'center',
+              gap:           '10px',
+              padding:       '10px 0',
+              borderBottom:  i < data.top_suppliers.length - 1 ? `0.5px solid ${C.inkGhost}` : 'none',
+              cursor:        'pointer',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+          >
+            {/* Rank */}
+            <span style={{
+              width:      '16px',
+              flexShrink: 0,
+              fontSize:   '11px',
+              color:      C.inkGhost,
+              fontFamily: '"DM Sans", sans-serif',
+              textAlign:  'right',
+            }}>
+              {s.rank}
+            </span>
+
+            {/* Name */}
+            <span style={{
+              flex:         1,
+              fontSize:     '13px',
+              color:        C.ink,
+              fontFamily:   '"DM Sans", sans-serif',
+              overflow:     'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace:   'nowrap',
+              minWidth:     0,
+            }}>
+              {s.name}
+            </span>
+
+            {/* Mini bar */}
+            <div style={{
+              width:        '80px',
+              height:       '5px',
+              borderRadius: '3px',
+              background:   C.paper,
+              flexShrink:   0,
+              overflow:     'hidden',
+            }}>
+              <div style={{
+                height:     '100%',
+                borderRadius: '3px',
+                background:  C.navy,
+                width:       mounted ? `${s.bar_pct}%` : '0%',
+                transition:  `width 350ms ease-out ${i * 60}ms`,
+              }} />
+            </div>
+
+            {/* Amount */}
+            <span style={{
+              width:      '80px',
+              flexShrink: 0,
+              fontSize:   '12px',
+              color:      C.inkMuted,
+              fontFamily: '"JetBrains Mono", monospace',
+              textAlign:  'right',
+            }}>
+              {formatINR(s.amount)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer — spend concentration + KPI-19 new suppliers */}
+      <div style={{
+        marginTop:   '12px',
+        paddingTop:  '12px',
+        borderTop:   `0.5px solid ${C.inkGhost}`,
+        display:     'flex',
+        justifyContent: 'space-between',
+        alignItems:  'center',
+      }}>
+        {/* KPI-19: new suppliers this month */}
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontWeight: 600,
+            color:      data.new_this_month > 0 ? C.navy : C.inkMuted,
+          }}>
+            {data.new_this_month}
+          </span>
+          &nbsp;new this month
+        </span>
+
+        {/* KPI-20: spend concentration */}
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          Top 3&nbsp;=&nbsp;
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            color:      data.concentration_top3_pct > 60 ? C.redMid : C.inkMuted,
+            fontWeight: 500,
+          }}>
+            {data.concentration_top3_pct.toFixed(1)}%
+          </span>
+          &nbsp;of spend
+        </span>
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — AGING WIDGET
+// ============================================================
+
+function AgingWidget({ data }: { data: AgingData }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 80);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.2 }}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px',
+      }}
+    >
+      {/* Section header */}
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '18px', gap: '10px' }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Payables aging
+        </span>
+      </div>
+
+      {/* Bar rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {data.buckets.map((bucket, i) => (
+          <div key={bucket.label} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+
+            {/* Label */}
+            <div style={{
+              width:      '72px',
+              flexShrink: 0,
+              fontSize:   '12px',
+              color:      C.inkMuted,
+              fontFamily: '"DM Sans", sans-serif',
+            }}>
+              {bucket.label}
+            </div>
+
+            {/* Track + fill */}
+            <div style={{
+              flex:         1,
+              height:       '8px',
+              borderRadius: '4px',
+              background:   C.paper,
+              overflow:     'hidden',
+            }}>
+              <div style={{
+                height:           '100%',
+                borderRadius:     '4px',
+                background:       AGING_BAR_COLORS[i],
+                width:            mounted ? `${bucket.width_pct}%` : '0%',
+                transition:       `width 350ms ease-out ${i * 60}ms`,
+              }} />
+            </div>
+
+            {/* Amount */}
+            <div style={{
+              width:      '84px',
+              flexShrink: 0,
+              fontSize:   '12px',
+              color:      C.inkMuted,
+              fontFamily: '"JetBrains Mono", monospace',
+              textAlign:  'right',
+            }}>
+              {formatINR(bucket.amount)}
+            </div>
+
+          </div>
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        display:        'flex',
+        justifyContent: 'space-between',
+        alignItems:     'center',
+        marginTop:      '16px',
+        paddingTop:     '12px',
+        borderTop:      `0.5px solid ${C.inkGhost}`,
+      }}>
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          {formatINRAbbr(data.next_30_days)} due in next 30 days
+        </span>
+        <span style={{
+          fontSize:   '13px',
+          fontWeight: 500,
+          color:      C.ink,
+          fontFamily: '"JetBrains Mono", monospace',
+        }}>
+          Total {formatINR(data.total_outstanding)}
+        </span>
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — PIPELINE WIDGET
+// ============================================================
+
+const PIPELINE_SEGMENTS = [
+  {
+    key:       'touchless' as const,
+    label:     'TOUCHLESS',
+    sublabel:  'Auto-posted',
+    bg:        '#E1F5EE',
+    border:    '#1D9E75',
+    textDeep:  '#0F6E56',
+    textMuted: '#2D7A5F',
+  },
+  {
+    key:       'hybrid' as const,
+    label:     'HYBRID',
+    sublabel:  'Rules flagged',
+    bg:        '#FAEEDA',
+    border:    '#BA7517',
+    textDeep:  '#854F0B',
+    textMuted: '#9A6012',
+  },
+  {
+    key:       'manual' as const,
+    label:     'MANUAL',
+    sublabel:  'OCR failed',
+    bg:        '#FCEBEB',
+    border:    '#E24B4A',
+    textDeep:  '#791F1F',
+    textMuted: '#9B2C2C',
+  },
+] as const;
+
+function PipelineWidget({ data }: { data: PipelineData }) {
+  const rateDelta = data.touchless_rate - data.touchless_rate_prev;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.16 }}
+      style={{
+        background:   C.surface,
+        border:       `0.5px solid ${C.inkGhost}`,
+        borderRadius: '6px',
+        padding:      '20px 24px',
+      }}
+    >
+      {/* Section header */}
+      <div style={{
+        display:      'flex',
+        alignItems:   'center',
+        marginBottom: '16px',
+        gap:          '10px',
+      }}>
+        <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+          Invoice pipeline
+        </span>
+      </div>
+
+      {/* Three segments */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+        {PIPELINE_SEGMENTS.map((seg) => {
+          const d = data[seg.key];
+          return (
+            <div
+              key={seg.key}
+              onClick={() => { /* TODO: navigate to filtered invoice list — filter: seg.key */ }}
+              style={{
+                background:   seg.bg,
+                border:       `0.5px solid ${seg.border}`,
+                borderRadius: '6px',
+                padding:      '16px',
+                cursor:       'pointer',
+                transition:   'opacity 120ms ease',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+              onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+            >
+              <div style={{
+                fontSize:      '11px',
+                fontWeight:    500,
+                letterSpacing: '0.06em',
+                color:         seg.textDeep,
+                fontFamily:    '"DM Sans", sans-serif',
+                marginBottom:  '10px',
+              }}>
+                {seg.label}
+              </div>
+              <div style={{
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize:   '28px',
+                fontWeight: 700,
+                color:      seg.textDeep,
+                lineHeight: 1,
+                marginBottom: '6px',
+              }}>
+                {d.count}
+              </div>
+              <div style={{ fontSize: '12px', color: seg.textMuted, marginBottom: '6px', fontFamily: '"DM Sans", sans-serif' }}>
+                {seg.sublabel}
+              </div>
+              <div style={{
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize:   '12px',
+                color:      seg.textMuted,
+              }}>
+                {formatINRAbbr(d.amount)}
+              </div>
+
+              {/* KPI-13: oldest unreviewed — shown only on HYBRID card */}
+              {seg.key === 'hybrid' && (
+                <div style={{
+                  marginTop:    '8px',
+                  paddingTop:   '8px',
+                  borderTop:    `0.5px solid ${seg.border}`,
+                  fontSize:     '11px',
+                  fontFamily:   '"DM Sans", sans-serif',
+                  color:        data.oldest_unreviewed_days > 3 ? seg.textDeep : seg.textMuted,
+                  fontWeight:   data.oldest_unreviewed_days > 3 ? 600 : 400,
+                }}>
+                  Oldest: {data.oldest_unreviewed_days}d
+                  {data.oldest_unreviewed_days > 3 && ' ⚠'}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer — touchless rate row */}
+      <div style={{
+        display:       'flex',
+        justifyContent:'space-between',
+        alignItems:    'center',
+        marginTop:     '14px',
+        paddingTop:    '12px',
+        borderTop:     `0.5px solid ${C.inkGhost}`,
+      }}>
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          Touchless rate this month
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize:   '13px',
+            fontWeight: 700,
+            color:      C.tealDeep,
+          }}>
+            {data.touchless_rate.toFixed(1)}%
+          </span>
+          <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+            {rateDelta >= 0 ? '↑' : '↓'} from {data.touchless_rate_prev.toFixed(1)}% last month
+          </span>
+        </div>
+      </div>
+
+      {/* KPI-11: Avg processing time — second footer row */}
+      <div style={{
+        display:        'flex',
+        justifyContent: 'space-between',
+        alignItems:     'center',
+        marginTop:      '8px',
+        paddingTop:     '8px',
+        borderTop:      `0.5px solid ${C.inkGhost}`,
+      }}>
+        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          Avg processing time
+        </span>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {([
+            { label: 'Touchless', value: `${data.avg_time.touchless_min}m`,  color: C.tealDeep  },
+            { label: 'Hybrid',    value: `${data.avg_time.hybrid_hours}h`,   color: C.amberDeep },
+            { label: 'Manual',    value: `${data.avg_time.manual_days}d`,    color: C.redDeep   },
+          ] as const).map(({ label, value, color }) => (
+            <span key={label} style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+              {label}&nbsp;
+              <span style={{ fontFamily: '"JetBrains Mono", monospace', fontWeight: 600, color }}>
+                {value}
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// AP KPI DASHBOARD — MAIN COMPONENT
+// ============================================================
 
 export default function Dashboard() {
   const { selectedCompany } = useCompany();
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'payables' | 'ai_insights'>('payables');
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [m, inv] = await Promise.all([
-        getDashboardMetrics(selectedCompany),
-        getInvoices(selectedCompany)
-      ]);
-      setMetrics(m);
-      setInvoices(inv || []);
-    } catch (err) {
-      console.error('[Dashboard] Failed to load data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // — Font injection (scoped to dashboard mount, no index.html changes needed)
   useEffect(() => {
-    fetchData();
-    const handleRefresh = () => fetchData();
-    window.addEventListener('app:refresh', handleRefresh);
-    return () => window.removeEventListener('app:refresh', handleRefresh);
+    const id = 'ap-dashboard-fonts';
+    if (document.getElementById(id)) return;
+    const link = document.createElement('link');
+    link.id   = id;
+    link.rel  = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap';
+    document.head.appendChild(link);
+  }, []);
+
+  // — Pulse row state (MOCK — replace with window.api.invoke('dashboard:ap-pulse') in backend phase)
+  const [pulse] = useState<PulseData>(MOCK_PULSE);
+
+  // — Tally sync live state (connected to backend via dashboard:tally-sync IPC)
+  const [tallySync, setTallySync] = useState<TallySyncStats | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTallySync() {
+      try {
+        const data = await getTallySyncStats(selectedCompany);
+        console.log('[Dashboard] tally-sync data:', data);
+        if (!cancelled) setTallySync(data);
+      } catch (err) {
+        console.error('[Dashboard] dashboard:tally-sync failed:', err);
+      }
+    }
+    loadTallySync();
+    const interval = setInterval(loadTallySync, 30_000); // refresh every 30s
+    return () => { cancelled = true; clearInterval(interval); };
   }, [selectedCompany]);
 
-  // Derived values from live metrics
-  const totalPayables = metrics?.totalAmount || 0;
-  const totalCount = metrics?.totalInvoices || 0;
-  const pendingCount = metrics?.pendingApproval || 0;
+  // — Cash position inline edit
+  const [cashEditing,   setCashEditing]   = useState(false);
+  const [cashBalance,   setCashBalance]   = useState(MOCK_PULSE.cash_position.balance);
+  const [cashInput,     setCashInput]     = useState('');
+  const [cashUpdatedAt, setCashUpdatedAt] = useState(MOCK_PULSE.cash_position.updated_at);
+  const [cashJustSaved, setCashJustSaved] = useState(false);
 
-  const statusCounts = metrics?.statusCounts || [];
-  const autoPostedCount = statusCounts.find(s => s.status === 'Auto-Posted')?.count || 0;
-  const approvedCount = statusCounts.find(s => s.status === 'Approved')?.count || 0;
-
-  const automationRate = totalCount > 0 ? ((autoPostedCount / totalCount) * 100).toFixed(1) : '0';
-
-  // Staggered animation variants
-  const container = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 }
+  function handleCashSave() {
+    const parsed = parseFloat(cashInput.replace(/[^0-9.]/g, ''));
+    if (!isNaN(parsed) && parsed >= 0) {
+      setCashBalance(parsed);
+      setCashUpdatedAt(new Date().toISOString());
+      setCashJustSaved(true);
+      setTimeout(() => setCashJustSaved(false), 2000);
     }
-  };
-  const item = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0, transition: { ease: 'easeOut' as any, duration: 0.4 } }
-  };
+    setCashEditing(false);
+    setCashInput('');
+  }
 
-  // Dynamic Funnel Data
-  const uploadedCount = totalCount;
-  const extractedCount = totalCount - (statusCounts.find(s => s.status === 'Failed')?.count || 0) - (statusCounts.find(s => s.status === 'Processing')?.count || 0);
-  const validatedCount = approvedCount + autoPostedCount;
-
-  const funnelData = [
-    { stage: 'Uploaded', count: uploadedCount, color: '#1E6FD9', icon: 'Upload' },
-    { stage: 'Extracted', count: extractedCount, color: '#6366F1', icon: 'Zap' },
-    { stage: 'Validated', count: validatedCount, color: '#10B981', icon: 'CheckCircle' },
-    { stage: 'Tally Posted', count: autoPostedCount, color: '#059669', icon: 'Trello' },
-  ];
-
-  // Dynamic Insight Data
-  const recentInvoices = invoices.filter(inv => {
-    const d = new Date(inv.date || inv.created_at);
-    const now = new Date();
-    return (now.getTime() - d.getTime()) < 7 * 24 * 60 * 60 * 1000;
-  });
-  const insightData = [
-    { category: 'Processing Volume', trend: 'up' as any, value: `+${recentInvoices.length}`, description: 'Invoices processed in the last 7 days.' },
-    { category: 'Approval Queue', trend: pendingCount > 10 ? 'down' as any : 'up' as any, value: pendingCount.toString(), description: 'Invoices currently awaiting manual review.' },
-    { category: 'Straight-Through', trend: parseFloat(automationRate) > 50 ? 'up' as any : 'down' as any, value: `${automationRate}%`, description: 'Invoices that successfully auto-posted to Tally.' },
-  ];
-
-  // Dynamic Impact Metrics
-  const impactMetrics = {
-    timeSaved: Math.round(totalCount * 3.5 / 60), // assume 3.5 mins saved per invoice
-    manualTouchReduction: Math.round(100 - (pendingCount / (totalCount || 1)) * 100),
-    accuracyGain: 99,
-    touchlessRatio: Math.round((autoPostedCount / (totalCount || 1)) * 100),
-  };
-
-  // Removing Radar Aging Data calculations as requested
-
-  // Dynamic Synergy Data (Simulated over last 6 months based on current ratios)
-  const aiRatio = parseFloat(automationRate) || 75;
-  const synergyData = Array.from({ length: 6 }).map((_, i) => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - (5 - i));
-    const month = d.toLocaleString('default', { month: 'short' });
-    const aiImpact = Math.min(100, Math.max(0, aiRatio - 10 + i * 2 + Math.random() * 5));
-    return { month, ai: Math.round(aiImpact), human: Math.round(100 - aiImpact) };
-  });
-
-  const aiPercentage = synergyData.length > 0 ? synergyData[synergyData.length - 1].ai : 74;
-  const humanPercentage = 100 - aiPercentage;
+  // — Coverage ratio colour logic
+  const ratio      = pulse.due_this_week.coverage_ratio;
+  const ratioBg    = ratio < 1.0 ? C.redLight   : ratio < 1.5 ? C.amberLight : C.tealLight;
+  const ratioText  = ratio < 1.0 ? C.redDeep    : ratio < 1.5 ? C.amberDeep  : C.tealDeep;
+  const ratioBorder= ratio < 1.0 ? C.redMid     : ratio < 1.5 ? C.amberMid   : C.tealMid;
 
   return (
-    <div className="font-sans">
+    <div style={{
+      background: `linear-gradient(180deg, rgba(27,79,138,0.04) 0px, transparent 180px), ${C.paper}`,
+      minHeight:  '100vh',
+      padding:    '36px 52px 52px',
+      fontFamily: '"DM Sans", sans-serif',
+    }}>
 
-      {/* UI Tabs Header */}
-      <div className="flex items-center gap-[12px] mb-[32px] border-b border-[#E2E8F0] pb-[16px]">
-        <button
-          onClick={() => setActiveTab('payables')}
-          className={`px-[20px] py-[10px] text-[13px] font-black rounded-[8px] transition-all tracking-wide ${activeTab === 'payables' ? 'bg-[#1A2640] text-white shadow-md' : 'text-[#64748B] hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0]'}`}
-        >
-          Payables Dashboard
-        </button>
-        <button
-          onClick={() => setActiveTab('ai_insights')}
-          className={`px-[20px] py-[10px] text-[13px] font-black rounded-[8px] transition-all flex items-center gap-2 tracking-wide ${activeTab === 'ai_insights' ? 'bg-gradient-to-r from-[#F59E0B] to-[#FBBF24] text-white shadow-md shadow-amber-500/20' : 'text-[#64748B] hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0]'}`}
-        >
-          <Zap size={14} className={activeTab === 'ai_insights' ? 'fill-white text-white' : 'fill-transparent text-[#64748B]'} /> AI Insights & Trends
-        </button>
+      {/* ── PAGE HEADER ────────────────────────────────────────── */}
+      <div style={{
+        display:        'flex',
+        justifyContent: 'space-between',
+        alignItems:     'flex-end',
+        marginBottom:   '32px',
+        paddingBottom:  '28px',
+        borderBottom:   `0.5px solid ${C.inkGhost}`,
+      }}>
+        <div>
+          <h1 style={{
+            fontFamily:  '"DM Serif Display", serif',
+            fontSize:    '34px',
+            fontWeight:  400,
+            color:       C.ink,
+            margin:      0,
+            lineHeight:  1.1,
+            letterSpacing: '-0.01em',
+          }}>
+            AP dashboard
+          </h1>
+          <p style={{
+            fontSize:   '13px',
+            color:      C.inkMuted,
+            margin:     '8px 0 0',
+            fontFamily: '"DM Sans", sans-serif',
+            fontWeight: 400,
+          }}>
+            Morning snapshot&nbsp;·&nbsp;
+            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+        </div>
+        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+          <div style={{
+            display:      'flex',
+            alignItems:   'center',
+            gap:          '6px',
+            background:   C.tealLight,
+            border:       `0.5px solid ${C.tealMid}`,
+            borderRadius: '20px',
+            padding:      '4px 10px',
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: C.tealMid, animation: 'pulse 2s infinite' }} />
+            <span style={{ fontSize: '11px', color: C.tealDeep, fontWeight: 500, fontFamily: '"DM Sans", sans-serif' }}>
+              Live · 20 KPIs
+            </span>
+          </div>
+          <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: '"DM Sans", sans-serif' }}>
+            Phase 1 · AP Intelligence
+          </span>
+        </div>
       </div>
+      {/* ── END PAGE HEADER ────────────────────────────────────── */}
 
-      {/* Top Payables KPIs */}
-      {activeTab === 'payables' && (
-        <motion.div
-          variants={container}
-          initial="hidden"
-          animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-[20px] mb-[32px]"
-        >
-          <motion.div variants={item}>
-            <KPICard
-              label="Total Payables"
-              value={formatCurrency(totalPayables)}
-              trend="up"
-              trendValue="0%"
-              icon={<DollarSign size={20} />}
-              index={1}
-              sparkData={sparklineData[0].data}
-            />
-          </motion.div>
-          <motion.div variants={item}>
-            <KPICard
-              label="Invoices Processed"
-              value={totalCount.toLocaleString()}
-              trend="up"
-              trendValue="0%"
-              icon={<FileCheck size={20} />}
-              index={2}
-              sparkData={sparklineData[1].data}
-            />
-          </motion.div>
-          <motion.div variants={item}>
-            <KPICard
-              label="Automation Rate"
-              value={`${automationRate}%`}
-              trend="up"
-              trendValue="0%"
-              icon={<Zap size={20} />}
-              index={3}
-              sparkData={sparklineData[2].data}
-            />
-          </motion.div>
-          <motion.div variants={item}>
-            <KPICard
-              label="Pending Review"
-              value={pendingCount.toString()}
-              trend="down"
-              trendValue="0%"
-              icon={<AlertTriangle size={20} />}
-              index={4}
-              sparkData={sparklineData[3].data}
-            />
-          </motion.div>
-        </motion.div>
-      )}
+      {/* ── CFO PULSE ROW ──────────────────────────────────────── */}
+      <div style={{
+        display:             'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap:                 '16px',
+        marginBottom:        '28px',
+      }}>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-[24px] mb-[32px]">
-        <div className="flex flex-col gap-[24px]">
-          {/* AI Insights & Trends – Light Premium Card */}
-          {activeTab === 'ai_insights' && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="bg-white rounded-[28px] p-[28px] shadow-[0_8px_40px_rgba(13,27,42,0.07)] relative overflow-hidden border border-[#D0D9E8]/60 mb-[24px] col-span-full lg:col-span-1"
-              style={{ background: 'linear-gradient(135deg, #ffffff 60%, #EBF3FF 100%)' }}
+        {/* Card 1 — Cash Position */}
+        <PulseCard label="Cash position" delay={0} accentColor={C.navy}>
+          {cashEditing ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                autoFocus
+                value={cashInput}
+                onChange={e => setCashInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter')  handleCashSave();
+                  if (e.key === 'Escape') { setCashEditing(false); setCashInput(''); }
+                }}
+                placeholder={formatINR(cashBalance)}
+                style={{
+                  fontFamily:   '"JetBrains Mono", monospace',
+                  fontSize:     '26px',
+                  fontWeight:   500,
+                  color:        C.ink,
+                  border:       'none',
+                  borderBottom: `1.5px solid ${C.navy}`,
+                  outline:      'none',
+                  background:   'transparent',
+                  width:        '100%',
+                  textAlign:    'right',
+                  padding:      '2px 0',
+                }}
+              />
+              <button
+                onClick={handleCashSave}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.tealMid, padding: '2px', flexShrink: 0 }}
+              >
+                <Check size={14} />
+              </button>
+              <button
+                onClick={() => { setCashEditing(false); setCashInput(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.inkGhost, padding: '2px', flexShrink: 0 }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}
+              onClick={() => { setCashEditing(true); setCashInput(''); }}
             >
-              {/* Subtle top-right blue wash */}
-              <div className="pointer-events-none absolute -top-10 -right-10 w-56 h-56 rounded-full bg-[#1E6FD9]/6 blur-[60px]" />
-
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-[12px] bg-gradient-to-br from-[#F59E0B] to-[#FBBF24] flex items-center justify-center shadow-md shadow-amber-500/20">
-                    <Zap size={16} fill="white" className="text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-[17px] font-black text-[#1A2640] tracking-tight leading-tight">AI Insights &amp; Trends</h2>
-                    <p className="text-[#8899AA] text-[11px] font-medium tracking-wide mt-0.5">Live intelligence • {new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 bg-[#F0FDF4] border border-[#BBF7D0] px-3 py-1.5 rounded-full">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-[#059669]">Live</span>
-                </div>
-              </div>
-
-              {/* Insight rows */}
-              <div className="flex flex-col gap-[8px]">
-                {insightData.map((insight, idx) => {
-                  const isUp = insight.trend === 'up';
-                  const palette = [
-                    { from: '#10B981', to: '#34D399', bg: '#F0FDF4', border: '#BBF7D0' },
-                    { from: '#EF4444', to: '#F87171', bg: '#FFF1F1', border: '#FECACA' },
-                    { from: '#6366F1', to: '#818CF8', bg: '#EEF2FF', border: '#C7D2FE' },
-                  ];
-                  const col = palette[idx % palette.length];
-                  return (
-                    <div
-                      key={insight.category}
-                      className="relative rounded-[16px] px-[16px] py-[14px]"
-                      style={{ backgroundColor: col.bg, border: `1px solid ${col.border}` }}
-                    >
-                      {/* Left accent bar */}
-                      <div
-                        className="absolute left-0 top-[18%] bottom-[18%] w-[3px] rounded-full"
-                        style={{ background: `linear-gradient(to bottom, ${col.from}, ${col.to})` }}
-                      />
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            {isUp
-                              ? <TrendingUp size={13} style={{ color: col.from }} className="shrink-0" />
-                              : <TrendingDown size={13} style={{ color: col.from }} className="shrink-0" />}
-                            <span className="text-[11px] font-black uppercase tracking-widest text-[#1A2640]">{insight.category}</span>
-                          </div>
-                          <p className="text-[11.5px] text-[#4A5568] leading-relaxed font-medium">{insight.description}</p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <div
-                            className="text-[22px] font-black leading-none"
-                            style={{ background: `linear-gradient(135deg, ${col.from}, ${col.to})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
-                          >
-                            {insight.value}
-                          </div>
-                          <div className="text-[10px] font-semibold mt-1 uppercase tracking-wider" style={{ color: col.from }}>{isUp ? '▲ positive' : '▼ at risk'}</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-
-          {/* System Processing Funnel */}
-          {activeTab === 'payables' && (
-            <div className="bg-white border border-[#D0D9E8]/60 rounded-[24px] p-[28px] shadow-[0_8px_40px_rgba(13,27,42,0.04)]">
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-[18px] font-black text-[#1A2640] tracking-tight">agent_w Processing Funnel</h3>
-                  <p className="text-[13px] text-[#8899AA]">Real-time document flow through stages</p>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-[#F0FDF4] rounded-full">
-                  <div className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
-                  <span className="text-[11px] font-black text-[#059669] uppercase tracking-wider">{automationRate}% Success</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-[40px] px-4">
-                {funnelData.map((stage, i) => (
-                  <React.Fragment key={stage.stage}>
-                    <div className="flex-1 flex flex-col items-center group">
-                      <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ delay: 0.3 + i * 0.1 }}
-                        className="w-[72px] h-[72px] rounded-[22px] shadow-sm flex items-center justify-center mb-4 transition-transform group-hover:scale-110"
-                        style={{ backgroundColor: `${stage.color}15`, color: stage.color }}
-                      >
-                        <Zap size={28} fill={i === 1 ? stage.color : 'transparent'} />
-                      </motion.div>
-                      <div className="text-[20px] font-black text-[#1A2640] mb-1">{stage.count}</div>
-                      <div className="text-[11px] font-black text-[#8899AA] uppercase tracking-widest">{stage.stage}</div>
-                    </div>
-                    {i < funnelData.length - 1 && (
-                      <div className="flex flex-col items-center">
-                        <ChevronRight size={24} className="text-[#CBD5E1]" />
-                        <div className="h-[20px] w-px bg-gradient-to-b from-[#CBD5E1] to-transparent mt-2" />
-                      </div>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
+              <span style={{
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize:   '22px',
+                fontWeight: 500,
+                color:      C.ink,
+              }}>
+                {formatINR(cashBalance)}
+              </span>
+              <Edit2 size={13} color={C.inkGhost} style={{ flexShrink: 0 }} />
             </div>
           )}
-
-          <div className="grid grid-cols-1 gap-[24px]">
-
-            {/* Business Impact ROI (AI Insights) */}
-            {activeTab === 'ai_insights' && (
-              <div className="bg-gradient-to-br from-[#F8FAFC] to-[#FFFFFF] border border-[#D0D9E8]/60 rounded-[24px] p-[28px] shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4">
-                  <div className="w-[50px] h-[50px] bg-blue-500/10 rounded-full flex items-center justify-center text-blue-600">
-                    <TrendingUp size={24} />
-                  </div>
-                </div>
-                <h3 className="text-[16px] font-black text-[#1A2640] tracking-tight mb-6">System Impact</h3>
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <div className="text-[11px] font-black text-[#8899AA] uppercase tracking-widest mb-1">Time Saved</div>
-                    <div className="text-[28px] font-black text-[#1E6FD9]">{impactMetrics.timeSaved}h</div>
-                    <p className="text-[10px] text-[#4A5568] mt-1">Direct manual effort reduction</p>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-black text-[#8899AA] uppercase tracking-widest mb-1">Touchless Ratio</div>
-                    <div className="text-[28px] font-black text-[#10B981]">{impactMetrics.touchlessRatio}%</div>
-                    <p className="text-[10px] text-[#4A5568] mt-1">Fully automated extraction</p>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-black text-[#8899AA] uppercase tracking-widest mb-1">Accuracy Gain</div>
-                    <div className="text-[28px] font-black text-[#F59E0B]">+{impactMetrics.accuracyGain}%</div>
-                    <p className="text-[10px] text-[#4A5568] mt-1">vs traditional data entry</p>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-black text-[#8899AA] uppercase tracking-widest mb-1">Manual Reduction</div>
-                    <div className="text-[28px] font-black text-[#6366F1]">{impactMetrics.manualTouchReduction}%</div>
-                    <p className="text-[10px] text-[#4A5568] mt-1">Fewer user interventions</p>
-                  </div>
-                </div>
-              </div>
-            )}
+          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
+            {cashJustSaved ? 'Updated just now' : `Updated today ${formatTime(cashUpdatedAt)}`}
           </div>
+        </PulseCard>
+
+        {/* Card 2 — Due Today */}
+        <PulseCard label="Due today" delay={0.04} accentColor={pulse.due_today.amount > 0 ? C.redMid : C.tealMid}>
+          <div style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize:   '26px',
+            fontWeight: 500,
+            color:      pulse.due_today.amount > 0 ? C.redMid : C.tealDeep,
+          }}>
+            {formatINR(pulse.due_today.amount)}
+          </div>
+          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
+            {pulse.due_today.count} invoice{pulse.due_today.count !== 1 ? 's' : ''}&nbsp;·&nbsp;
+            {pulse.due_today.suppliers} supplier{pulse.due_today.suppliers !== 1 ? 's' : ''}
+          </div>
+          {pulse.due_today.overdue > 0 && (
+            <div style={{
+              display:      'inline-block',
+              marginTop:    '8px',
+              background:   C.redLight,
+              color:        C.redDeep,
+              fontSize:     '11px',
+              fontWeight:   500,
+              padding:      '2px 8px',
+              borderRadius: '4px',
+              fontFamily:   '"DM Sans", sans-serif',
+            }}>
+              Overdue: {formatINRAbbr(pulse.due_today.overdue)}
+            </div>
+          )}
+        </PulseCard>
+
+        {/* Card 3 — Due This Week */}
+        <PulseCard label="Due this week" delay={0.08} accentColor={C.amberMid}>
+          <div style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize:   '26px',
+            fontWeight: 500,
+            color:      C.ink,
+          }}>
+            {formatINR(pulse.due_this_week.amount)}
+          </div>
+          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
+            {pulse.due_this_week.count} invoices&nbsp;·&nbsp;{pulse.due_this_week.suppliers} suppliers
+          </div>
+          <div style={{
+            display:      'inline-block',
+            marginTop:    '8px',
+            background:   ratioBg,
+            color:        ratioText,
+            fontSize:     '11px',
+            fontWeight:   500,
+            padding:      '2px 8px',
+            borderRadius: '4px',
+            border:       `0.5px solid ${ratioBorder}`,
+            fontFamily:   '"DM Sans", sans-serif',
+          }}>
+            {ratio.toFixed(1)}x covered
+          </div>
+        </PulseCard>
+
+        {/* Card 4 — Net This Month */}
+        <PulseCard label="Net this month" delay={0.12} accentColor={C.tealMid}>
+          <div style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize:   '26px',
+            fontWeight: 500,
+            color:      C.ink,
+          }}>
+            {formatINR(pulse.net_this_month.amount)}
+          </div>
+          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
+            {pulse.net_this_month.count} invoices processed
+          </div>
+          <div style={{
+            display:    'flex',
+            alignItems: 'center',
+            gap:        '4px',
+            marginTop:  '6px',
+            fontSize:   '12px',
+            color:      pulse.net_this_month.trend_pct >= 0 ? C.tealMid : C.redMid,
+          }}>
+            {pulse.net_this_month.trend_pct >= 0
+              ? <TrendingUp  size={12} />
+              : <TrendingDown size={12} />}
+            {pulse.net_this_month.trend_pct >= 0 ? '▲' : '▼'}&nbsp;
+            {Math.abs(pulse.net_this_month.trend_pct).toFixed(1)}% vs last month
+          </div>
+        </PulseCard>
+
+      </div>
+      {/* ── END CFO PULSE ROW ──────────────────────────────────── */}
+
+      {/* ── SECTION LABEL ──────────────────────────────────────── */}
+      <div style={{
+        display:       'flex',
+        alignItems:    'center',
+        gap:           '12px',
+        marginBottom:  '16px',
+      }}>
+        <span style={{
+          fontFamily:    '"DM Serif Display", serif',
+          fontSize:      '16px',
+          fontWeight:    400,
+          color:         C.ink,
+          letterSpacing: '-0.01em',
+        }}>
+          AP Intelligence
+        </span>
+        <div style={{ flex: 1, height: '0.5px', background: C.inkGhost }} />
+      </div>
+      {/* ── END SECTION LABEL ──────────────────────────────────── */}
+
+      {/* ── MAIN CONTENT GRID (1.4fr left | 1fr right) ─────────── */}
+      <div style={{
+        display:             'grid',
+        gridTemplateColumns: '1.4fr 1fr',
+        gap:                 '20px',
+        marginBottom:        '20px',
+      }}>
+
+        {/* LEFT COLUMN — Pipeline + Aging */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <PipelineWidget data={MOCK_PIPELINE} />
+          <AgingWidget    data={MOCK_AGING}    />
         </div>
 
-        {/* Synergy & Productivity Sidebar */}
-        <div className="flex flex-col gap-[24px]">
-          {/* Human-AI Synergy (AI Insights) */}
-          {activeTab === 'ai_insights' && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3 }}
-              className="bg-white border border-[#D0D9E8]/60 rounded-[24px] p-[24px] shadow-[0_8px_40px_rgba(13,27,42,0.05)]"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-[16px] font-black text-[#1A2640] tracking-tight flex items-center gap-2">
-                  🤝 System Synergy
-                </h3>
-                <div className="px-2 py-1 bg-blue-50 text-blue-600 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100">
-                  AI + HUMAN
-                </div>
-              </div>
+        {/* RIGHT COLUMN — Top Suppliers + Supplier360 Alerts */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <SuppliersWidget      data={MOCK_SUPPLIERS}       />
+          <SupplierAlertsWidget data={MOCK_SUPPLIER_ALERTS} />
+        </div>
 
-              <div className="h-[180px] mb-6">
-                {synergyData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={synergyData}>
-                      <defs>
-                        <linearGradient id="colorAi" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#1E6FD9" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#1E6FD9" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="colorHuman" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366F1" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.5} />
-                      <XAxis dataKey="month" tick={{ fontSize: 9, fontWeight: 900, fill: '#8899AA' }} axisLine={false} tickLine={false} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="ai" stroke="#1E6FD9" fillOpacity={1} fill="url(#colorAi)" strokeWidth={3} stackId="1" />
-                      <Area type="monotone" dataKey="human" stroke="#6366F1" fillOpacity={1} fill="url(#colorHuman)" strokeWidth={3} stackId="1" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-[#8899AA] bg-[#F8FAFC] rounded-[8px] border border-dashed border-[#D0D9E8]">
-                    <Zap size={32} className="mb-2 opacity-50" />
-                    <span className="text-[13px] font-bold">No Synergy Data</span>
-                  </div>
-                )}
-              </div>
+      </div>
+      {/* ── END MAIN CONTENT GRID ──────────────────────────────── */}
 
-              <div className="flex justify-between border-t border-[#F1F5F9] pt-4">
-                <div>
-                  <div className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">agent_w</div>
-                  <div className="text-[18px] font-black text-[#1A2640]">{aiPercentage}%</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Human</div>
-                  <div className="text-[18px] font-black text-[#1A2640]">{humanPercentage}%</div>
-                </div>
-              </div>
-            </motion.div>
-          )}
+      {/* ── BOTTOM SECTION LABEL ───────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+        <span style={{ fontFamily: '"DM Serif Display", serif', fontSize: '16px', fontWeight: 400, color: C.ink, letterSpacing: '-0.01em' }}>
+          Operations
+        </span>
+        <div style={{ flex: 1, height: '0.5px', background: C.inkGhost }} />
+      </div>
+      {/* ── END BOTTOM SECTION LABEL ───────────────────────────── */}
 
-          {/* User Achievement (Payables) */}
-          {activeTab === 'payables' && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.4 }}
-              className="bg-white border border-[#D0D9E8]/60 rounded-[24px] p-[24px] shadow-[0_8px_40px_rgba(13,27,42,0.05)]"
-            >
-              <h3 className="text-[16px] font-black text-[#1A2640] tracking-tight mb-6">User Achievement</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {userProductivity.map((item) => (
-                  <div key={item.action} className="p-4 rounded-[18px] bg-[#F8FAFC] border border-[#F1F5F9] hover:border-blue-500/20 transition-all hover:shadow-sm">
-                    <div className="text-[10px] font-black text-[#8899AA] uppercase tracking-widest mb-2">{item.action}</div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[20px] font-black text-[#1A2640]">{item.count}</span>
-                      <div className="w-[30px] h-[30px] rounded-lg flex items-center justify-center bg-white shadow-sm" style={{ color: item.color }}>
-                        <Zap size={14} fill={item.color} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <button className="mt-8 w-full py-4 bg-gradient-to-r from-[#1E6FD9] to-[#6366F1] text-white rounded-[16px] text-[12px] font-black shadow-[0_8px_20px_rgba(30,111,217,0.2)] hover:shadow-[0_12px_24px_rgba(30,111,217,0.3)] hover:-translate-y-1 transition-all cursor-pointer border-none uppercase tracking-widest">
-                Sync Performance
-              </button>
-            </motion.div>
-          )}
-        </div> {/* End Synergy & Productivity Sidebar */}
-      </div> {/* End Main Content Grid */}
+      {/* ── BOTTOM ROW (1fr | 1.4fr | 1fr) ────────────────────── */}
+      <div style={{
+        display:             'grid',
+        gridTemplateColumns: '1fr 1.4fr 1fr',
+        gap:                 '20px',
+      }}>
+        {tallySync
+          ? <TallySyncWidgetV2 data={tallySync} />
+          : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '6px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: '"DM Sans", sans-serif' }}>Loading Tally sync…</div>
+        }
+        <ActivityWidget  data={MOCK_ACTIVITY}   />
+        <BriefingWidget  data={MOCK_BRIEFING}   />
+      </div>
+      {/* ── END BOTTOM ROW ─────────────────────────────────────── */}
 
     </div>
   );
