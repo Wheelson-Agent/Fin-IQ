@@ -67,6 +67,59 @@ function smartUpdatePayload(payload: any, targetKey: string, value: any) {
     }
 }
 
+const RAW_PAYLOAD_ALIAS_GROUPS: string[][] = [
+    ['IRN', 'irn'],
+    ['Ack No', 'ack_no'],
+    ['Ack Date', 'ack_date'],
+    ['E-Way Bill No', 'eway_bill_no'],
+    ['Invoice No', 'invoice_no'],
+    ['Invoice Date', 'date'],
+    ['Seller Name', 'vendor_name'],
+    ['Supplier GST', 'vendor_gst'],
+    ['Supplier PAN', 'supplier_pan'],
+    ['Supplier Address', 'supplier_address'],
+    ['Buyer Name', 'buyer_name'],
+    ['Buyer GST', 'buyer_gst'],
+    ['Taxable Value', 'sub_total'],
+    ['Round Off', 'round_off'],
+    ['Total Invoice Amount', 'grand_total'],
+    ['Sum of GST Amount', 'tax_total'],
+    ['CGST', 'cgst'],
+    ['SGST', 'sgst'],
+    ['IGST', 'igst'],
+    ['CGST %', 'cgst_pct'],
+    ['SGST %', 'sgst_pct'],
+    ['IGST %', 'igst_pct'],
+    ['filename', 'file_name'],
+    ['invoice_ocr_data_validation', 'invoice_ocr_data_valdiation'],
+    ['gst_validation_status', 'GST Validation Status'],
+    ['buyer_verification', 'Buyer_status'],
+    ['duplicate_check', 'Duplicate_status'],
+];
+
+function dedupeRawPayloadAliases(payload: any, sourceKeys: string[] = []) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+
+    const deduped: any = { ...payload };
+    const sourceKeySet = new Set(sourceKeys);
+
+    for (const aliases of RAW_PAYLOAD_ALIAS_GROUPS) {
+        const presentKeys = aliases.filter((key) => deduped[key] !== undefined);
+        if (presentKeys.length <= 1) continue;
+
+        const preferredOutputKey = aliases.find((key) => presentKeys.includes(key)) || presentKeys[0];
+        const preferredSourceKey = aliases.find((key) => sourceKeySet.has(key) && deduped[key] !== undefined);
+        const chosenValue = preferredSourceKey
+            ? deduped[preferredSourceKey]
+            : deduped[presentKeys[presentKeys.length - 1]];
+
+        presentKeys.forEach((key) => delete deduped[key]);
+        deduped[preferredOutputKey] = chosenValue;
+    }
+
+    return deduped;
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // AP INVOICES
@@ -856,7 +909,10 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                 return merged;
             };
 
-            const mergedPayload = mergeObjects(rawPayload, patch);
+            const mergedPayload = dedupeRawPayloadAliases(
+                mergeObjects(rawPayload, patch),
+                Object.keys(patch || {})
+            );
 
             const invoiceRes = await client.query(
                 'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *',
@@ -1024,18 +1080,21 @@ export async function applyRevalidationOutcome(
             : {};
 
         const mergedN8nVal = { ...n8nVal, ...cleanFlags };
-        const mergedRawPayload = {
-            ...rawPayload,
-            ...cleanFlags,
-            __ap_workspace: {
-                ...baseWorkspace,
-                validation: {
-                    ...baseWorkspaceValidation,
-                    ...cleanFlags
+        const mergedRawPayload = dedupeRawPayloadAliases(
+            {
+                ...rawPayload,
+                ...cleanFlags,
+                __ap_workspace: {
+                    ...baseWorkspace,
+                    validation: {
+                        ...baseWorkspaceValidation,
+                        ...cleanFlags
+                    },
+                    last_revalidated_at: new Date().toISOString(),
                 },
-                last_revalidated_at: new Date().toISOString(),
             },
-        };
+            Object.keys(cleanFlags)
+        );
 
         const lineItemsRes = await client.query(
             'SELECT ledger_id, gl_account_id FROM ap_invoice_lines WHERE ap_invoice_id = $1',

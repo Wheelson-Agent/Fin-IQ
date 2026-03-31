@@ -548,16 +548,24 @@ export default function APWorkspace() {
     navigate(`/detail/${record.id}?from=${activeTab}`);
   };
 
+  const toEndOfDay = (date?: Date) => {
+    if (!date) return undefined;
+    const inclusive = new Date(date);
+    inclusive.setHours(23, 59, 59, 999);
+    return inclusive;
+  };
+
   const filteredRecords = useMemo(() => {
     let result = records;
 
     // 1. Date filter (Based on Upload Date)
     if (dateFilter.from || dateFilter.to) {
+      const uploadTo = toEndOfDay(dateFilter.to);
       result = result.filter(record => {
         if (!record.createdAt) return false;
         const d = new Date(record.createdAt);
         if (dateFilter.from && d < dateFilter.from) return false;
-        if (dateFilter.to && d > dateFilter.to) return false;
+        if (uploadTo && d > uploadTo) return false;
         return true;
       });
     }
@@ -589,10 +597,11 @@ export default function APWorkspace() {
       result = result.filter(r => r.amount <= Number(maxAmount));
     }
     if (receivedDateRange.from || receivedDateRange.to) {
+      const receivedTo = toEndOfDay(receivedDateRange.to);
       result = result.filter(record => {
         const d = new Date(record.date);
         if (receivedDateRange.from && d < receivedDateRange.from) return false;
-        if (receivedDateRange.to && d > receivedDateRange.to) return false;
+        if (receivedTo && d > receivedTo) return false;
         return true;
       });
     }

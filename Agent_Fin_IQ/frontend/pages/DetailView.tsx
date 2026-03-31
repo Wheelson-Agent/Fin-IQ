@@ -89,6 +89,54 @@ const DETAIL_VALIDATION_KEYS = new Set([
   'line_item_match_status',
 ]);
 
+const normalizeSelectableNames = (value: any): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry ?? '').trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return normalizeSelectableNames(parsed);
+      }
+    } catch {
+      // Plain strings should remain as-is.
+    }
+    return [trimmed];
+  }
+  return [];
+};
+
+const isGenericGoodsMarker = (value: any): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return !normalized || normalized === 'goods';
+};
+
+const findMatchingOption = (value: any, options: string[]): string => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return '';
+  return options.find((option) => String(option ?? '').trim().toLowerCase() === normalized) || '';
+};
+
+const getOptionalBooleanFlag = (...values: any[]): boolean | undefined => {
+  for (const value of values) {
+    if (value === true || value === false) return value;
+    if (typeof value === 'number' && (value === 0 || value === 1)) {
+      return value === 1;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+  }
+  return undefined;
+};
+
 const GST_STATE_MAP: Record<string, string> = {
   "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
   "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar",
@@ -149,7 +197,7 @@ export default function DetailView() {
   const documentPath = documentView?.path || invoice?.file_path || '';
   const isPdf = documentPath.toLowerCase().endsWith('.pdf');
   const totalPages = documentView?.totalPages || 1;
- // Images are always 1 page; PDFs default to 1 (no page count data available)
+  // Images are always 1 page; PDFs default to 1 (no page count data available)
 
   // New states for real-time creation
   const [isVendorMapped, setIsVendorMapped] = useState(true);
@@ -210,7 +258,7 @@ export default function DetailView() {
 
     // Calculate diff before saving for the summary popup
     const diff: { label: string; status: string }[] = [];
-    
+
     // Check doc fields
     const docLabels: Record<string, string> = {
       irn: 'IRN', ack_no: 'Ack No', ack_date: 'Ack Date', eway_bill_no: 'E-Way Bill No',
@@ -244,6 +292,11 @@ export default function DetailView() {
           id: li?.id ?? `${Date.now()}_${idx}`,
           description: li?.description ?? '',
           ledger: li?.ledger ?? '',
+          matched_stock_item: String(li?.matched_stock_item ?? '').trim(),
+          matched_id: li?.matched_id ?? '',
+          mapped_ledger: String(li?.mapped_ledger ?? '').trim(),
+          possible_gl_names: normalizeSelectableNames(li?.possible_gl_names),
+          match_status: li?.match_status ?? '',
           hsn_sac: li?.hsn_sac ?? '',
           tax: li?.tax ?? '',
           qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
@@ -271,7 +324,7 @@ export default function DetailView() {
       // Reset originals using deep copy to break all references
       setOriginalDocFields(JSON.parse(JSON.stringify(docFields)));
       setOriginalLineItems(JSON.parse(JSON.stringify(lineItems)));
-      
+
       setShowSaveSummary(true);
       return true;
     })();
@@ -365,16 +418,16 @@ export default function DetailView() {
             n8nValidation = {};
           }
         }
-        const companyVerifiedFromN8n =
-          n8nValidation?.buyer_verification === true ||
-          String(n8nValidation?.buyer_verification).toLowerCase() === 'true';
+        const companyVerifiedFromN8n = getOptionalBooleanFlag(n8nValidation?.buyer_verification) === true;
 
         setRawPayload(raw);
 
-        const vendorVerified =
-          Boolean(raw?.__ap_workspace?.validation?.vendor_verification) ||
-          Boolean(raw?.vendor_verification) ||
-          Boolean(invoiceRecord.is_mapped);
+        const vendorVerified = getOptionalBooleanFlag(
+          n8nValidation?.vendor_verification,
+          raw?.__ap_workspace?.validation?.vendor_verification,
+          raw?.vendor_verification,
+          invoiceRecord.is_mapped,
+        ) === true;
         setIsVendorMapped(vendorVerified);
 
         // Prefill vendor slideout fields from raw payload (best-effort)
@@ -459,6 +512,8 @@ export default function DetailView() {
           fields.buyer_name = raw?.['Name as per Tally'] || fields.buyer_name;
         }
 
+        fields.doc_type = invoiceRecord.doc_type || raw?.doc_type || fields.doc_type;
+
         // Always keep a display file name for UI use (non-edit)
         fields.file_name = invoiceRecord.file_name || raw?.file_name || fields.file_name || '';
 
@@ -502,6 +557,11 @@ export default function DetailView() {
               id: item?.id ?? `${Date.now()}_${idx}`,
               description: item?.description ?? item?.item_description ?? '',
               ledger: item?.ledger ?? item?.gl_account_id ?? item?.gl_mapped ?? item?.mapped_ledger ?? '',
+              matched_stock_item: item?.matched_stock_item ?? '',
+              matched_id: item?.matched_id ?? '',
+              mapped_ledger: item?.mapped_ledger ?? item?.gl_mapped ?? '',
+              possible_gl_names: normalizeSelectableNames(item?.possible_gl_names),
+              match_status: item?.match_status ?? '',
               hsn_sac: item?.hsn_sac ?? item?.hsn ?? '',
               tax: item?.tax ?? item?.tax_rate ?? '',
               qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
@@ -512,7 +572,21 @@ export default function DetailView() {
           setLineItems(mappedItems);
           setOriginalLineItems(JSON.parse(JSON.stringify(mappedItems)));
         } else {
-          const defaultItems = [{ id: Date.now(), description: '', ledger: '', hsn_sac: '', tax: '', qty: 1, rate: 0, discount: 0 }];
+          const defaultItems = [{
+            id: Date.now(),
+            description: '',
+            ledger: '',
+            matched_stock_item: '',
+            matched_id: '',
+            mapped_ledger: '',
+            possible_gl_names: [],
+            match_status: '',
+            hsn_sac: '',
+            tax: '',
+            qty: 1,
+            rate: 0,
+            discount: 0,
+          }];
           setLineItems(defaultItems);
           setOriginalLineItems(JSON.parse(JSON.stringify(defaultItems)));
         }
@@ -614,9 +688,47 @@ export default function DetailView() {
     return ledgerNameToId[key] || String(value);
   };
 
+  const isGoodsDocument = docFields.doc_type_label?.toLowerCase().includes('goods');
+
+  const getFirstGoodsLedgerSuggestion = (possibleGlNames: any) =>
+    normalizeSelectableNames(possibleGlNames).find((name) => !isGenericGoodsMarker(name)) || '';
+
+  const getGoodsLineSelectionValue = (item: any) => {
+    const matchedStockItem = String(item?.matched_stock_item ?? '').trim();
+    if (matchedStockItem) return matchedStockItem;
+
+    const mappedLedger = String(item?.mapped_ledger ?? '').trim();
+    if (mappedLedger && !isGenericGoodsMarker(mappedLedger)) return mappedLedger;
+
+    const suggestedLedger = getFirstGoodsLedgerSuggestion(item?.possible_gl_names);
+    if (suggestedLedger) return suggestedLedger;
+
+    const resolvedLedger = String(ledgerIdToName[String(item?.ledger ?? '')] || item?.ledger || '').trim();
+    if (resolvedLedger && !isGenericGoodsMarker(resolvedLedger)) return resolvedLedger;
+
+    return '';
+  };
+
   const handleAddLineItem = () => {
     if (readOnly) return;
-    setLineItems([...lineItems, { id: Date.now(), description: '', ledger: '', hsn_sac: '', tax: '', qty: 1, rate: 0, discount: 0 }]);
+    setLineItems([
+      ...lineItems,
+      {
+        id: Date.now(),
+        description: '',
+        ledger: '',
+        matched_stock_item: '',
+        matched_id: '',
+        mapped_ledger: '',
+        possible_gl_names: [],
+        match_status: '',
+        hsn_sac: '',
+        tax: '',
+        qty: 1,
+        rate: 0,
+        discount: 0,
+      },
+    ]);
   };
 
   const handleRemoveLineItem = (id: number) => {
@@ -1032,7 +1144,7 @@ export default function DetailView() {
                           <thead className="bg-slate-50/80 border-b border-slate-200">
                             <tr>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[30%]">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">{docFields.doc_type_label?.toLowerCase().includes('goods') ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">{isGoodsDocument ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%]">HSN/SAC</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Quantity</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%] text-center">Unit Rate</th>
@@ -1050,25 +1162,35 @@ export default function DetailView() {
                                     className="w-full border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px] text-[13px] outline-none cursor-default"
                                     value={item.description}
                                     onChange={() => { }} // No-op as it's read-only
-                                    style={{ color: docFields.doc_type_label?.toLowerCase().includes('goods') ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
+                                    style={{ color: isGoodsDocument ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
                                   />
                                 </td>
                                 <td className="p-3 align-top">
                                   <CustomTableSelect
-                                    value={(docFields.doc_type_label?.toLowerCase().includes('goods'))
-                                      ? (item.matched_stock_item || item.description)
+                                    value={isGoodsDocument
+                                      ? getGoodsLineSelectionValue(item)
                                       : (ledgerIdToName[String(item.ledger || '')] || item.ledger)}
                                     onChange={(val: string) => {
                                       const key = String(val || '').toLowerCase();
                                       const resolvedId = ledgerNameToId[key];
-                                      const isGoods = docFields.doc_type_label?.toLowerCase().includes('goods');
+                                      const selectedItem = isGoodsDocument ? findMatchingOption(val, itemOptions) : '';
+                                      const selectedLedger = findMatchingOption(val, ledgerOptions) || String(val || '').trim();
 
                                       const newLines = lineItems.map((ln, i) => {
                                         if (i !== index) return ln;
                                         const updated = { ...ln };
-                                        if (isGoods) {
-                                          updated.description = val;
-                                          updated.ledger = val;
+                                        if (isGoodsDocument) {
+                                          if (selectedItem) {
+                                            updated.matched_stock_item = selectedItem;
+                                            if (String(ln?.matched_stock_item ?? '').trim().toLowerCase() !== selectedItem.toLowerCase()) {
+                                              updated.matched_id = '';
+                                            }
+                                          } else {
+                                            updated.ledger = selectedLedger;
+                                            updated.mapped_ledger = isGenericGoodsMarker(selectedLedger) ? '' : selectedLedger;
+                                            updated.matched_stock_item = '';
+                                            updated.matched_id = '';
+                                          }
                                         } else {
                                           updated.ledger = resolvedId || val;
                                         }
@@ -1081,8 +1203,18 @@ export default function DetailView() {
                                         const updatedArr = [...updatedRaw.line_items];
                                         updatedArr[index] = { ...updatedArr[index] };
 
-                                        if (isGoods) {
-                                          updatedArr[index].description = val;
+                                        if (isGoodsDocument) {
+                                          if (selectedItem) {
+                                            updatedArr[index].matched_stock_item = selectedItem;
+                                            if (String(rawPayload.line_items[index]?.matched_stock_item ?? '').trim().toLowerCase() !== selectedItem.toLowerCase()) {
+                                              updatedArr[index].matched_id = '';
+                                            }
+                                          } else {
+                                            updatedArr[index].ledger = selectedLedger;
+                                            updatedArr[index].mapped_ledger = isGenericGoodsMarker(selectedLedger) ? '' : selectedLedger;
+                                            updatedArr[index].matched_stock_item = '';
+                                            updatedArr[index].matched_id = '';
+                                          }
                                         } else {
                                           updatedArr[index].gl_mapped = val;
                                         }
@@ -1092,21 +1224,25 @@ export default function DetailView() {
 
                                       setLineItems(newLines);
                                     }}
-                                    options={Array.from(new Set([...itemOptions, ...ledgerOptions])).sort((a, b) => a.localeCompare(b))}
+                                    options={Array.from(new Set([
+                                      ...(isGoodsDocument ? itemOptions : []),
+                                      ...ledgerOptions,
+                                    ]))
+                                      .filter((option) => !isGoodsDocument || !isGenericGoodsMarker(option))
+                                      .sort((a, b) => a.localeCompare(b))}
                                     disabled={readOnly}
                                     highlight
-                                    showCreate={!readOnly}
-                                    createLabel={docFields.doc_type_label?.toLowerCase().includes('goods') ? 'Create Ledger / Stock Item' : 'Create New Ledger'}
+                                    showCreate={!readOnly && (!isGoodsDocument || !String(item?.matched_stock_item ?? '').trim())}
+                                    createLabel={isGoodsDocument ? 'Create Ledger / Stock Item' : 'Create New Ledger'}
                                     onCreateClick={() => {
                                       setActiveLedgerIndex(index);
-                                      const isGoods = docFields.doc_type_label?.toLowerCase().includes('goods');
                                       const suggestedBuyer = rawPayload?.['Name as per Tally'] || '';
-                                      if (isGoods) {
+                                      if (isGoodsDocument) {
                                         setCreationMode('STOCK_ITEM');
-                                        setNewStockItem({ 
-                                          name: (item.description || '').trim(), 
-                                          uom: (item.uom || 'PCS').trim(), 
-                                          hsn: (item.hsn_sac || '').trim(), 
+                                        setNewStockItem({
+                                          name: (item.description || '').trim(),
+                                          uom: (item.uom || 'PCS').trim(),
+                                          hsn: (item.hsn_sac || '').trim(),
                                           tax_rate: (item.tax_rate || '18').trim(),
                                           buyerName: suggestedBuyer
                                         });
@@ -1117,7 +1253,7 @@ export default function DetailView() {
                                       setShowLedgerSlideout(true);
                                     }}
                                   />
-                                  {(!docFields.doc_type_label?.toLowerCase().includes('goods') && rawPayload?.line_items?.[index]?.mapped_ledger) && (
+                                  {(!isGoodsDocument && rawPayload?.line_items?.[index]?.mapped_ledger) && (
                                     <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
                                       <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">OCR Suggested Ledger</span>
                                       <span className="text-[11px] text-slate-700 font-medium truncate max-w-[200px]" title={rawPayload.line_items[index].mapped_ledger}>
@@ -1356,8 +1492,6 @@ export default function DetailView() {
                       console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
                       if (result.success) {
                         toast.success(result.message || 'Vendor created successfully in Tally');
-                        setIsVendorMapped(true);
-                        setDocFields(prev => ({ ...prev, vendor_name: name }));
                         setShowVendorSlideout(false);
                       } else {
                         toast.error(result.message || 'Vendor sync with Tally failed');
@@ -1383,7 +1517,7 @@ export default function DetailView() {
                 </Button>
               </div>
             </div>
-                     {/* Create Ledger / Stock Item Slide-out */}
+            {/* Create Ledger / Stock Item Slide-out */}
             <div className={`absolute top-0 right-0 h-full w-[460px] bg-white border-l border-slate-200 shadow-[-20px_0_50px_rgba(0,0,0,0.15)] transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-50 flex flex-col ${showLedgerSlideout ? 'translate-x-0' : 'translate-x-full'}`}>
               <div className="p-7 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                 <div className="flex items-center gap-4">
@@ -1448,17 +1582,17 @@ export default function DetailView() {
                       console.warn('[MasterCreation] Blocked: No active ledger index');
                       return;
                     }
-                    
+
                     const label = docFields?.doc_type_label || '';
                     const isGoods = label.toLowerCase().includes('goods');
-                    
+
                     setSaving(true);
                     try {
                       if (creationMode === 'STOCK_ITEM') {
                         const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
                         console.log('[MasterCreation] Creating Stock Item:', { name, uom, hsn, tax_rate, buyerName });
                         if (!name.trim()) throw new Error('Item name is required');
-                        
+
                         toast.info('Item creation started');
                         const result = await createItemMaster({
                           name: name.trim(),
@@ -1479,11 +1613,15 @@ export default function DetailView() {
 
                         const createdName = result.item.item_name || name;
                         setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
-                        
+
                         setLineItems(prev => {
                           const next = [...prev];
                           if (next[activeLedgerIndex]) {
-                            next[activeLedgerIndex] = { ...next[activeLedgerIndex], description: createdName, ledger: createdName };
+                            next[activeLedgerIndex] = {
+                              ...next[activeLedgerIndex],
+                              matched_stock_item: createdName,
+                              matched_id: '',
+                            };
                           }
                           return next;
                         });
@@ -1491,7 +1629,7 @@ export default function DetailView() {
                       } else {
                         const { name, underGroup, buyerName, gstApplicable } = newLedger;
                         if (!name.trim()) throw new Error('Ledger name is required');
-                        
+
                         toast.info('Ledger creation started');
                         const result = await createLedgerMaster({
                           name, parent_group: underGroup, account_type: 'expense',
@@ -1515,10 +1653,15 @@ export default function DetailView() {
                         setLineItems(prev => {
                           const next = [...prev];
                           if (next[activeLedgerIndex]) {
-                            next[activeLedgerIndex] = { ...next[activeLedgerIndex], ledger: createdId };
-                            if (isGoods) {
-                               next[activeLedgerIndex].description = createdName;
-                            }
+                            next[activeLedgerIndex] = isGoods
+                              ? {
+                                ...next[activeLedgerIndex],
+                                ledger: createdName,
+                                mapped_ledger: createdName,
+                                matched_stock_item: '',
+                                matched_id: '',
+                              }
+                              : { ...next[activeLedgerIndex], ledger: createdId };
                           }
                           return next;
                         });
