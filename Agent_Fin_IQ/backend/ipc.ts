@@ -937,7 +937,21 @@ export function registerIpcHandlers() {
     // ─── CONFIGURATION ──────────────────────────────────────────
     
     ipcMain.handle('config:get-rules', async (_event, { companyId } = {}) => {
-        return await queries.getAppConfig('posting_rules', companyId);
+        const rules = await queries.getAppConfig('posting_rules', companyId);
+        const legacyDateRange = await queries.getAppConfig('global_invoice_date_range');
+
+        if (!legacyDateRange) return rules;
+        if (rules?.criteria?.filter_invoice_date_enabled !== undefined) return rules;
+
+        return {
+            ...(rules || {}),
+            criteria: {
+                ...((rules && rules.criteria) || {}),
+                filter_invoice_date_enabled: legacyDateRange.filter_invoice_date_enabled === true,
+                filter_invoice_date_from: legacyDateRange.filter_invoice_date_from || '',
+                filter_invoice_date_to: legacyDateRange.filter_invoice_date_to || '',
+            }
+        };
     });
 
     ipcMain.handle('config:save-rules', async (_event, { rules }) => {

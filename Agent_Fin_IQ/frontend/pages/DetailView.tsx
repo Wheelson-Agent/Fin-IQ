@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ZoomIn, ZoomOut, ChevronLeft, ChevronRight, FileText, ArrowLeft, Trash2, RefreshCw,
-  AlertCircle, CheckCircle, CheckCircle2, ChevronDown, Calendar, Edit2, Plus, X, UserPlus, Database, Save,
+  AlertCircle, AlertTriangle, CheckCircle, CheckCircle2, ChevronDown, Calendar, Edit2, Plus, X, UserPlus, Database, Save,
   Search, Bell, RefreshCcw, Eye, Maximize2
 } from 'lucide-react';
 import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
@@ -363,6 +363,30 @@ const parseAddress = (address: string) => {
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
+const normalizeDateOnly = (value: string | null | undefined) => {
+  if (!value) return '';
+  const directMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (directMatch) return `${directMatch[1]}-${directMatch[2]}-${directMatch[3]}`;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const normalizeGstValue = (value: string | null | undefined) => String(value || '').trim().toUpperCase();
+const normalizeItemText = (value: string | null | undefined) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const itemDescriptionMatches = (description: string, selectedItemName: string) => {
+  const normalizedDescription = normalizeItemText(description);
+  const normalizedItemName = normalizeItemText(selectedItemName);
+  if (!normalizedDescription || !normalizedItemName) return false;
+  if (normalizedDescription === normalizedItemName) return true;
+  return new RegExp(`(^| )${escapeRegExp(normalizedItemName)}( |$)`).test(normalizedDescription) ||
+    new RegExp(`(^| )${escapeRegExp(normalizedDescription)}( |$)`).test(normalizedItemName);
+};
+
 
 export default function DetailView() {
   const { id } = useParams();
@@ -515,6 +539,9 @@ export default function DetailView() {
   const [ledgerNameToId, setLedgerNameToId] = useState<Record<string, string>>({});
   const [ledgerIdToName, setLedgerIdToName] = useState<Record<string, string>>({});
   const [rawPayload, setRawPayload] = useState<any>(null);
+  const [itemMasterRecords, setItemMasterRecords] = useState<any[]>([]);
+  const [supplierRecords, setSupplierRecords] = useState<any[]>([]);
+  const [postingRules, setPostingRules] = useState<any>(null);
 
   useEffect(() => {
     setPage(1);
@@ -549,7 +576,27 @@ export default function DetailView() {
       try {
         const compId = invoiceRecord?.company_id;
         itemsMasterRecord = await getItems(compId) || [];
+        setItemMasterRecords(itemsMasterRecord);
       } catch (e) { console.error('[DetailView] Error fetching items master:', e); }
+
+      try {
+        const compId = invoiceRecord?.company_id;
+        // @ts-ignore
+        const vendors = await window.api?.invoke?.('vendors:get-all', { companyId: compId });
+        setSupplierRecords(vendors || []);
+      } catch (e) {
+        console.error('[DetailView] Error fetching vendors for routing summary:', e);
+        setSupplierRecords([]);
+      }
+
+      try {
+        // @ts-ignore
+        const rules = await window.api?.invoke?.('config:get-rules');
+        setPostingRules(rules || null);
+      } catch (e) {
+        console.error('[DetailView] Error fetching posting rules:', e);
+        setPostingRules(null);
+      }
 
       if (invoiceRecord) {
         setInvoice(invoiceRecord);
@@ -772,7 +819,100 @@ export default function DetailView() {
     }
   }, [id]);
 
+  const isGoodsDocument = docFields.doc_type_label?.toLowerCase().includes('goods');
 
+  const routingReasons = React.useMemo(() => {
+    if (!invoice || invoice.is_posted_to_tally || !!invoice.erp_sync_id) return [];
+
+    const reasons: Array<{ label: string; detail: string; matchedValue?: string }> = [];
+    const rules = postingRules?.criteria || {};
+
+    if (invoice.is_high_amount && rules.enableValueLimit) {
+      reasons.push({
+        label: 'High Value',
+        detail: rules.valueLimit ? `Amount is above the auto-post limit of ${fmt(Number(rules.valueLimit || 0))}.` : 'Amount is above the configured auto-post limit.'
+      });
+    }
+
+    const fromDate = normalizeDateOnly(rules.filter_invoice_date_from);
+    const toDate = normalizeDateOnly(rules.filter_invoice_date_to);
+    const invoiceDate = normalizeDateOnly(String(docFields.date || invoice.date || ''));
+    if (rules.filter_invoice_date_enabled && fromDate && toDate && invoiceDate && (invoiceDate < fromDate || invoiceDate > toDate)) {
+      reasons.push({
+        label: 'Outside Date Range',
+        detail: `Invoice date falls outside the allowed window of ${formatDateToDDMMYYYY(fromDate)} to ${formatDateToDDMMYYYY(toDate)}.`
+      });
+    }
+
+    const selectedSupplierIds = Array.isArray(rules.filter_supplier_ids) ? rules.filter_supplier_ids : [];
+    if (rules.filter_supplier_enabled && selectedSupplierIds.length > 0) {
+      const matchedSupplier = selectedSupplierIds
+        .map((supplierId: string) => supplierRecords.find((vendor) => vendor.id === supplierId))
+        .find((vendor: any) => normalizeGstValue(vendor?.gstin) === normalizeGstValue(String(docFields.vendor_gst || invoice.vendor_gst || '')));
+      if (matchedSupplier) {
+        reasons.push({
+          label: 'Supplier Filter',
+          detail: 'Supplier is part of the blocked auto-post list.',
+          matchedValue: String(matchedSupplier?.name || docFields.vendor_name || invoice.vendor_name || '').trim()
+        });
+      }
+    }
+
+    const selectedItemIds = Array.isArray(rules.filter_item_ids) ? rules.filter_item_ids : [];
+    if (rules.filter_item_enabled && isGoodsDocument && selectedItemIds.length > 0) {
+      const selectedItemNames = selectedItemIds
+        .map((itemId: string) => itemMasterRecords.find((item) => item.id === itemId))
+        .map((item: any) => String(item?.item_name || '').trim())
+        .filter(Boolean);
+      const matchedItemName = selectedItemNames.find((itemName: string) =>
+        lineItems.some((line) => itemDescriptionMatches(String(line?.description || ''), itemName))
+      );
+      if (matchedItemName) {
+        reasons.push({
+          label: 'Item Filter',
+          detail: 'A goods line item matches the blocked stock-item list.',
+          matchedValue: matchedItemName
+        });
+      }
+    }
+
+    return reasons;
+  }, [invoice, postingRules, docFields, lineItems, isGoodsDocument, itemMasterRecords, supplierRecords]);
+
+  const routingReasonTone = (label: string) => {
+    if (label === 'High Value') {
+      return {
+        accent: 'from-amber-500/18 via-orange-500/10 to-transparent',
+        iconBg: 'bg-amber-100',
+        iconText: 'text-amber-700',
+        border: 'border-amber-200/70',
+      };
+    }
+    if (label === 'Outside Date Range') {
+      return {
+        accent: 'from-sky-500/18 via-blue-500/10 to-transparent',
+        iconBg: 'bg-sky-100',
+        iconText: 'text-sky-700',
+        border: 'border-sky-200/70',
+      };
+    }
+    if (label === 'Supplier Filter') {
+      return {
+        accent: 'from-rose-500/18 via-pink-500/10 to-transparent',
+        iconBg: 'bg-rose-100',
+        iconText: 'text-rose-700',
+        border: 'border-rose-200/70',
+      };
+    }
+    return {
+      accent: 'from-emerald-500/18 via-teal-500/10 to-transparent',
+      iconBg: 'bg-emerald-100',
+      iconText: 'text-emerald-700',
+      border: 'border-emerald-200/70',
+    };
+  };
+
+  
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-200px)]">
@@ -850,8 +990,6 @@ export default function DetailView() {
     const key = String(value).toLowerCase();
     return ledgerNameToId[key] || String(value);
   };
-
-  const isGoodsDocument = docFields.doc_type_label?.toLowerCase().includes('goods');
 
   const getFirstGoodsLedgerSuggestion = (possibleGlNames: any) =>
     normalizeSelectableNames(possibleGlNames).find((name) => !isGenericGoodsMarker(name)) || '';
@@ -1226,15 +1364,70 @@ export default function DetailView() {
                     </div>
                   )}
 
-                  {(isVendorMapped && invoice.is_high_amount) && (
-                    <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm">
-                      <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center shrink-0 border border-blue-200">
-                        <AlertCircle size={20} className="text-blue-600" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-[14px] font-bold text-blue-800 leading-tight">
-                          High Value Invoice Detected. Requires manual approval as per corporate rules.
-                        </p>
+                  {routingReasons.length > 0 && (
+                    <div className="overflow-hidden rounded-[22px] border border-[#DCE7F5] bg-[linear-gradient(135deg,#FFFFFF_0%,#F8FBFF_45%,#F6FAF8_100%)] shadow-[0_14px_32px_rgba(15,23,42,0.07)]">
+                      <div className="relative px-5 py-4">
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_38%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_32%)]" />
+                        <div className="relative flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-[#D7E6F8] bg-[linear-gradient(180deg,#FFFFFF_0%,#EAF3FF_100%)] shadow-[0_8px_18px_rgba(59,130,246,0.12)]">
+                            <AlertTriangle size={16} className="text-[#D97706]" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7183A1]">Routing Decision</div>
+                              <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(191,219,254,0.85),rgba(226,232,240,0.25))]" />
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
+                              <div>
+                                <p className="text-[18px] font-black tracking-tight text-[#15233B] leading-none">Auto-post skipped</p>
+                                <p className="mt-1.5 max-w-[620px] text-[12px] font-medium leading-relaxed text-[#60708B]">
+                                  This invoice matched <span className="font-black text-[#1A2640]">{routingReasons.length}</span> active routing {routingReasons.length === 1 ? 'rule' : 'rules'}, so it stays in the manual review flow.
+                                </p>
+                              </div>
+                              <div className="rounded-full border border-[#D8E6F8] bg-white/90 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_12px_rgba(59,130,246,0.08)]">
+                                Review Required
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="relative mt-4 flex flex-col gap-2.5">
+                          {routingReasons.map((reason) => {
+                            const tone = routingReasonTone(reason.label);
+                            return (
+                              <div
+                                key={reason.label}
+                                className={`relative overflow-hidden rounded-[16px] border bg-white/90 px-4 py-3 shadow-[0_8px_16px_rgba(15,23,42,0.04)] backdrop-blur-sm ${tone.border}`}
+                              >
+                                <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${tone.accent}`} />
+                                <div className="relative flex items-start gap-3">
+                                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] ${tone.iconBg}`}>
+                                    <div className={`h-2.5 w-2.5 rounded-full ${tone.iconText.replace('text', 'bg')}`} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="text-[11px] font-black uppercase tracking-[0.1em] text-[#21324F]">{reason.label}</div>
+                                      <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-2 py-[4px] text-[9px] font-black uppercase tracking-[0.12em] text-[#486A98]">
+                                        Matched
+                                      </div>
+                                      {reason.matchedValue && (
+                                        <div className="rounded-full bg-[#F6F9FD] px-2.5 py-[4px] text-[10px] font-bold text-[#27405F] ring-1 ring-[#DDE7F5]">
+                                          {reason.label === 'Supplier Filter' ? `Vendor: ${reason.matchedValue}` : `Item: ${reason.matchedValue}`}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="mt-1.5 text-[12px] font-medium leading-relaxed text-[#5E708B]">
+                                      {reason.detail}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="relative mt-3 flex items-center gap-2 text-[11px] font-medium text-[#7A8AA2]">
+                          <div className="h-1.5 w-1.5 rounded-full bg-[#94A3B8]" />
+                          Routing rules are shown in AP Workspace as quick badges and explained here with more context.
+                        </div>
                       </div>
                     </div>
                   )}

@@ -103,56 +103,144 @@ function RadioPill({
 interface SelectOption { id: string; label: string; }
 function MultiSelect({ options, selectedIds, onToggle, placeholder }: { options: SelectOption[], selectedIds: string[], onToggle: (id: string) => void, placeholder: string }) {
     const [searchTerm, setSearchTerm] = useState('');
-    const filtered = options.filter(opt => opt.label.toLowerCase().includes(searchTerm.toLowerCase()));
+    const [showAllSelected, setShowAllSelected] = useState(false);
+    const selectedOptions = selectedIds
+        .map(id => options.find(option => option.id === id))
+        .filter(Boolean) as SelectOption[];
+    const visibleSelectedOptions = showAllSelected ? selectedOptions : selectedOptions.slice(0, 4);
+    const hiddenSelectedCount = Math.max(0, selectedOptions.length - visibleSelectedOptions.length);
+    const filtered = options
+        .filter(opt => opt.label.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => {
+            const aSelected = selectedIds.includes(a.id) ? 1 : 0;
+            const bSelected = selectedIds.includes(b.id) ? 1 : 0;
+            if (aSelected !== bSelected) return bSelected - aSelected;
+            return a.label.localeCompare(b.label);
+        });
 
     return (
-        <div className="flex flex-col gap-[10px] bg-white border border-[#E2E8F0] rounded-[12px] p-[12px] shadow-sm">
-            <div className="relative">
-                <Search size={14} className="absolute left-[12px] top-1/2 -translate-y-1/2 text-[#94A3B8]" />
-                <input
-                    type="text"
-                    placeholder={placeholder}
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-[#F8FAFC] border-none rounded-[8px] pl-[34px] pr-[12px] py-[8px] text-[12px] font-bold outline-none focus:ring-2 focus:ring-[#1E6FD91A]"
-                />
-            </div>
-            
-            <div className="max-h-[160px] overflow-y-auto flex flex-col gap-[4px] pr-[4px]">
-                {filtered.length === 0 ? (
-                    <div className="text-center py-[20px] text-[11px] text-[#94A3B8]">No matches found</div>
-                ) : (
-                    filtered.map(opt => {
-                        const isSelected = selectedIds.includes(opt.id);
-                        return (
-                            <button
-                                key={opt.id}
-                                onClick={() => onToggle(opt.id)}
-                                className={`flex items-center justify-between p-[8px_12px] rounded-[8px] text-left transition-all ${isSelected ? 'bg-[#1E6FD910] text-[#1E6FD9]' : 'hover:bg-[#F1F5F9] text-[#64748B]'}`}
-                            >
-                                <span className="text-[12px] font-bold truncate">{opt.label}</span>
-                                {isSelected && <Check size={14} />}
-                            </button>
-                        );
-                    })
-                )}
+        <div className="overflow-hidden rounded-[16px] border border-[#D9E4F2] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FBFF_100%)] shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+            <div className="border-b border-[#E8EEF7] bg-[linear-gradient(135deg,rgba(30,111,217,0.06),rgba(16,185,129,0.05))] px-[14px] py-[12px]">
+                <div className="flex items-center justify-between gap-[12px]">
+                    <div>
+                        <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[#64748B]">Selected Items</div>
+                        <div className="text-[12px] font-semibold text-[#1A2640] mt-[2px]">
+                            {selectedOptions.length ? `${selectedOptions.length} chosen for routing control` : 'Choose one or more entries to keep matching invoices in Ready to Post'}
+                        </div>
+                    </div>
+                    {selectedOptions.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => selectedIds.forEach(id => onToggle(id))}
+                            className="rounded-full border border-[#D7E3F4] bg-white px-[10px] py-[5px] text-[10px] font-black uppercase tracking-[0.12em] text-[#5B6B84] transition-colors hover:border-[#B9CCE6] hover:text-[#1A2640]"
+                        >
+                            Clear All
+                        </button>
+                    )}
+                </div>
+                <div className="mt-[12px] flex flex-wrap gap-[8px]">
+                    {selectedOptions.length > 0 ? visibleSelectedOptions.map(option => (
+                        <motion.button
+                            key={option.id}
+                            type="button"
+                            whileTap={{ scale: 0.96 }}
+                            onClick={() => onToggle(option.id)}
+                            className="group flex items-center gap-[8px] rounded-full border border-[#B9D3F8] bg-white px-[12px] py-[7px] text-left shadow-[0_4px_10px_rgba(30,111,217,0.10)] transition-all hover:border-[#8FB7F0] hover:shadow-[0_8px_18px_rgba(30,111,217,0.16)]"
+                        >
+                            <span className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-[#E8F1FF] text-[#1E6FD9]">
+                                <Check size={12} />
+                            </span>
+                            <span className="max-w-[260px] truncate text-[11px] font-bold text-[#1A2640]">{option.label}</span>
+                            <span className="text-[#94A3B8] transition-colors group-hover:text-[#1A2640]">
+                                <X size={12} />
+                            </span>
+                        </motion.button>
+                    )) : (
+                        <div className="rounded-[12px] border border-dashed border-[#CFE0F6] bg-white/70 px-[12px] py-[10px] text-[11px] font-medium text-[#7B8BA5]">
+                            Selected entries will appear here for quick review and removal.
+                        </div>
+                    )}
+                    {selectedOptions.length > 4 && (
+                        <button
+                            type="button"
+                            onClick={() => setShowAllSelected(!showAllSelected)}
+                            className="rounded-full border border-dashed border-[#B9CCE6] bg-white/80 px-[12px] py-[7px] text-[10px] font-black uppercase tracking-[0.12em] text-[#56739F] transition-colors hover:border-[#8FB7F0] hover:text-[#1A2640]"
+                        >
+                            {showAllSelected ? 'Show Less' : `+${hiddenSelectedCount} More`}
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {selectedIds.length > 0 && (
-                <div className="border-t border-[#F1F5F9] pt-[10px] mt-[4px] flex flex-wrap gap-[6px]">
-                    {selectedIds.map(id => {
-                        const opt = options.find(o => o.id === id);
-                        return (
-                            <div key={id} className="bg-[#1E6FD9] text-white p-[4px_10px] rounded-full text-[10px] font-bold flex items-center gap-[6px]">
-                                {opt?.label}
-                                <button onClick={() => onToggle(id)} className="bg-transparent border-none p-0 text-white/70 hover:text-white cursor-pointer">
-                                    <X size={12} />
-                                </button>
-                            </div>
-                        );
-                    })}
+            <div className="p-[14px]">
+                <div className="relative rounded-[14px] border border-[#E2E8F0] bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                    <Search size={15} className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[#7C8DA6]" />
+                    <input
+                        type="text"
+                        placeholder={placeholder}
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full rounded-[14px] border-none bg-transparent pl-[40px] pr-[44px] py-[11px] text-[12px] font-bold text-[#1A2640] outline-none placeholder:text-[#94A3B8]"
+                    />
+                    {searchTerm && (
+                        <button
+                            type="button"
+                            onClick={() => setSearchTerm('')}
+                            className="absolute right-[12px] top-1/2 -translate-y-1/2 rounded-full p-[4px] text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#1A2640]"
+                        >
+                            <X size={12} />
+                        </button>
+                    )}
                 </div>
-            )}
+
+                <div className="mt-[10px] flex items-center justify-between">
+                    <div className="text-[10px] font-black uppercase tracking-[0.12em] text-[#8A99B2]">
+                        {searchTerm ? 'Matching Results' : 'Browse Active Options'}
+                    </div>
+                    <div className="rounded-full bg-[#EEF4FF] px-[8px] py-[4px] text-[10px] font-black uppercase tracking-[0.08em] text-[#4D6B9A]">
+                        {filtered.length} shown
+                    </div>
+                </div>
+
+                <div className="mt-[10px] max-h-[220px] overflow-y-auto rounded-[14px] border border-[#E8EEF7] bg-white/80 p-[6px]">
+                    {filtered.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-[28px] text-center">
+                            <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-[#EFF5FF] text-[#7C8DA6]">
+                                <Search size={16} />
+                            </div>
+                            <div className="mt-[10px] text-[12px] font-bold text-[#5F6F89]">No matches found</div>
+                            <div className="mt-[4px] text-[11px] text-[#94A3B8]">Try a different keyword or clear the search.</div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col gap-[6px]">
+                            {filtered.map(opt => {
+                                const isSelected = selectedIds.includes(opt.id);
+                                return (
+                                    <button
+                                        key={opt.id}
+                                        type="button"
+                                        onClick={() => onToggle(opt.id)}
+                                        className={`group flex items-center gap-[12px] rounded-[12px] border px-[12px] py-[11px] text-left transition-all ${
+                                            isSelected
+                                                ? 'border-[#B9D3F8] bg-[linear-gradient(135deg,rgba(30,111,217,0.12),rgba(16,185,129,0.08))] shadow-[0_8px_18px_rgba(30,111,217,0.10)]'
+                                                : 'border-transparent bg-[#FBFDFF] hover:border-[#DCE8F7] hover:bg-[#F7FAFE]'
+                                        }`}
+                                    >
+                                        <span className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border ${
+                                            isSelected ? 'border-[#93C5FD] bg-white text-[#1E6FD9]' : 'border-[#D5E0EF] bg-white text-transparent group-hover:text-[#9AAAC2]'
+                                        }`}>
+                                            <Check size={12} />
+                                        </span>
+                                        <span className={`min-w-0 flex-1 text-[12px] font-bold ${isSelected ? 'text-[#1A2640]' : 'text-[#526884]'}`}>
+                                            <span className="block truncate">{opt.label}</span>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
@@ -261,7 +349,20 @@ export default function Config() {
         sources: { email: true, drive: true, sharepoint: false, onedrive: false, whatsapp: false, local_folder: false },
         destination: 'tally',
         reports: { email: true, teams: true, sharepoint: false, whatsapp: false },
-        criteria: { knownVendor: true, valueLimit: '100000', poMatch: true, twoWayMatch: true, enableValueLimit: false },
+        criteria: {
+            knownVendor: true,
+            valueLimit: '100000',
+            poMatch: true,
+            twoWayMatch: true,
+            enableValueLimit: false,
+            filter_invoice_date_enabled: false,
+            filter_invoice_date_from: '',
+            filter_invoice_date_to: '',
+            filter_item_enabled: false,
+            filter_item_ids: [] as string[],
+            filter_supplier_enabled: false,
+            filter_supplier_ids: [] as string[]
+        },
         sourceConfigs: {
             email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: '••••••••••••' },
             sharepoint: { tenantId: '8a91-4c...', siteUrl: 'https://sigma.sharepoint.com', secret: '' },
@@ -291,14 +392,7 @@ export default function Config() {
         criteriaExtended: {
             fc_exceeded_supplier_avg_enabled: false,
             fc_exceeded_supplier_avg_threshold: 110, // 110%
-            fc_new_ledger_for_supplier_enabled: false,
-            filter_invoice_date_enabled: false,
-            filter_invoice_date_from: '',
-            filter_invoice_date_to: '',
-            filter_item_enabled: false,
-            filter_item_ids: [] as string[],
-            filter_supplier_enabled: false,
-            filter_supplier_ids: [] as string[]
+            fc_new_ledger_for_supplier_enabled: false
         }
     };
 
@@ -327,6 +421,27 @@ export default function Config() {
     const [validationError, setValidationError] = useState<string | null>(null);
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ processing: true, amount: false, vendor: false, posting: false, approval: false });
     const [emailInput, setEmailInput] = useState('');
+    const selectableSuppliers = React.useMemo(() => {
+        const seenGstins = new Set<string>();
+        return (allSuppliers || []).filter((supplier: any) => {
+            const gstin = String(supplier?.gstin || '').trim().toUpperCase();
+            if (!gstin) return false;
+            if (seenGstins.has(gstin)) return false;
+            seenGstins.add(gstin);
+            return true;
+        });
+    }, [allSuppliers]);
+    const selectableItems = React.useMemo(() => {
+        const seenNames = new Set<string>();
+        return (allItems || []).filter((item: any) => {
+            if (item?.is_active === false) return false;
+            const itemName = String(item?.item_name || '').trim().toLowerCase();
+            if (!itemName) return false;
+            if (seenNames.has(itemName)) return false;
+            seenNames.add(itemName);
+            return true;
+        });
+    }, [allItems]);
 
     // Tally Connection state
     const [isCheckingTally, setIsCheckingTally] = useState(false);
@@ -435,6 +550,23 @@ export default function Config() {
     }, []);
 
     useEffect(() => {
+        if (!companies.length) return;
+
+        const hasCurrentActiveCompany = activeCompanyId
+            ? companies.some((company) => company.id === activeCompanyId)
+            : false;
+
+        if (hasCurrentActiveCompany) return;
+
+        // Keep company-scoped configuration aligned with a real synced company before loading dependent data.
+        const preferredCompany = companies.find((company) => company.isActive) || companies[0];
+        if (!preferredCompany?.id) return;
+
+        setActiveCompanyId(preferredCompany.id);
+        localStorage.setItem('activeCompanyId', preferredCompany.id);
+    }, [companies, activeCompanyId]);
+
+    useEffect(() => {
         const timer = setInterval(() => {
             if (!lastSyncedAt) return;
             const diff = Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 1000);
@@ -511,7 +643,7 @@ export default function Config() {
                     const rules = await window.api.invoke('config:get-rules');
                     if (rules) {
                         const loadedMode     = rules.postingMode || INIT.postingMode;
-                        const loadedCriteria = rules.criteria    || INIT.criteria;
+                        const loadedCriteria = { ...INIT.criteria, ...(rules.criteria || {}) };
                         const loadedDest     = rules.destination || INIT.destination;
                         setPostingMode(loadedMode);
                         setCriteria(loadedCriteria);
@@ -553,7 +685,11 @@ export default function Config() {
                         const items = await window.api.invoke('items:get-all', { companyId: activeCompanyId });
                         setAllItems(items || []);
                     } catch (e) { console.error('[Config] Failed to load items:', e); }
+                } else {
+                    setAllSuppliers([]);
+                    setAllItems([]);
                 }
+
             }
         };
         loadPaths();
@@ -564,13 +700,27 @@ export default function Config() {
         if (savedConfigStr) {
             try {
                 const parsed = JSON.parse(savedConfigStr);
+                const legacyDateRangeCriteria = {
+                    filter_invoice_date_enabled: parsed.criteria?.filter_invoice_date_enabled ?? parsed.criteriaExtended?.filter_invoice_date_enabled ?? INIT.criteria.filter_invoice_date_enabled,
+                    filter_invoice_date_from: parsed.criteria?.filter_invoice_date_from ?? parsed.criteriaExtended?.filter_invoice_date_from ?? INIT.criteria.filter_invoice_date_from,
+                    filter_invoice_date_to: parsed.criteria?.filter_invoice_date_to ?? parsed.criteriaExtended?.filter_invoice_date_to ?? INIT.criteria.filter_invoice_date_to,
+                };
+                const legacySupplierCriteria = {
+                    filter_supplier_enabled: parsed.criteria?.filter_supplier_enabled ?? parsed.criteriaExtended?.filter_supplier_enabled ?? INIT.criteria.filter_supplier_enabled,
+                    filter_supplier_ids: parsed.criteria?.filter_supplier_ids ?? parsed.criteriaExtended?.filter_supplier_ids ?? INIT.criteria.filter_supplier_ids,
+                };
+                const legacyItemCriteria = {
+                    filter_item_enabled: parsed.criteria?.filter_item_enabled ?? parsed.criteriaExtended?.filter_item_enabled ?? INIT.criteria.filter_item_enabled,
+                    filter_item_ids: parsed.criteria?.filter_item_ids ?? parsed.criteriaExtended?.filter_item_ids ?? INIT.criteria.filter_item_ids,
+                };
                 setPostingMode(parsed.postingMode || INIT.postingMode);
                 setSources(parsed.sources || INIT.sources);
                 setDestination(parsed.destination || INIT.destination);
                 setReports(parsed.reports || INIT.reports);
-                setCriteria(parsed.criteria || INIT.criteria);
+                setCriteria({ ...INIT.criteria, ...(parsed.criteria || {}), ...legacyDateRangeCriteria, ...legacySupplierCriteria, ...legacyItemCriteria });
                 setSourceConfigs(parsed.sourceConfigs || INIT.sourceConfigs);
                 setDestConfigs(parsed.destConfigs || INIT.destConfigs);
+                setCriteriaExtended(parsed.criteriaExtended || INIT.criteriaExtended);
 
                 // Legacy migration for old reports UI
                 let safeReportConfigs = parsed.reportConfigs || INIT.reportConfigs;
@@ -624,6 +774,7 @@ export default function Config() {
         JSON.stringify(sources) !== JSON.stringify(committedConfig.sources) ||
         JSON.stringify(reports) !== JSON.stringify(committedConfig.reports) ||
         JSON.stringify(criteria) !== JSON.stringify(committedConfig.criteria) ||
+        JSON.stringify(criteriaExtended) !== JSON.stringify(committedConfig.criteriaExtended) ||
         JSON.stringify(sourceConfigs) !== JSON.stringify(committedConfig.sourceConfigs) ||
         JSON.stringify(destConfigs) !== JSON.stringify(committedConfig.destConfigs) ||
         JSON.stringify(reportConfigs) !== JSON.stringify(committedConfig.reportConfigs) ||
@@ -672,6 +823,27 @@ export default function Config() {
             return "Maximum invoice value limit is required when enabled.";
         }
 
+        if ((criteria as any).filter_invoice_date_enabled && (!(criteria as any).filter_invoice_date_from || !(criteria as any).filter_invoice_date_to)) {
+            return "Invoice date range requires both From and To dates.";
+        }
+
+        if (
+            (criteria as any).filter_invoice_date_enabled &&
+            (criteria as any).filter_invoice_date_from &&
+            (criteria as any).filter_invoice_date_to &&
+            (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to
+        ) {
+            return "Invoice date range From date cannot be after To date.";
+        }
+
+        if ((criteria as any).filter_supplier_enabled && !((criteria as any).filter_supplier_ids || []).length) {
+            return "Supplier filter requires at least one GST-mapped vendor.";
+        }
+
+        if ((criteria as any).filter_item_enabled && !((criteria as any).filter_item_ids || []).length) {
+            return "Item filter requires at least one active item.";
+        }
+
         // Reports validation
         if (reports.email && (!(reportConfigs.email.recipients as string[]).length || !reportConfigs.email.schedule.time)) return "Email recipients and schedule time are required.";
         if (reports.whatsapp && (!reportConfigs.whatsapp.phoneNumber || !reportConfigs.whatsapp.schedule.time)) return "WhatsApp phone number and schedule time are required.";
@@ -698,7 +870,20 @@ export default function Config() {
             // In manual mode criteria have no effect — clear them in DB so the value
             // limit rule never fires for existing invoices when mode is manual.
             const effectiveCriteria = newConfig.postingMode === 'manual'
-                ? { knownVendor: false, poMatch: false, twoWayMatch: false, enableValueLimit: false, valueLimit: null }
+                ? {
+                    knownVendor: false,
+                    poMatch: false,
+                    twoWayMatch: false,
+                    enableValueLimit: false,
+                    valueLimit: null,
+                    filter_invoice_date_enabled: false,
+                    filter_invoice_date_from: '',
+                    filter_invoice_date_to: '',
+                    filter_item_enabled: false,
+                    filter_item_ids: [],
+                    filter_supplier_enabled: false,
+                    filter_supplier_ids: []
+                }
                 : newConfig.criteria;
 
             // Storage — non-blocking (failure must not prevent rules from saving)
@@ -1670,33 +1855,39 @@ export default function Config() {
                                                                 </div>
                                                             </div>
                                                             <Toggle 
-                                                                checked={criteriaExtended.filter_invoice_date_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, filter_invoice_date_enabled: !criteriaExtended.filter_invoice_date_enabled })} 
+                                                                checked={(criteria as any).filter_invoice_date_enabled} 
+                                                                onChange={() => setCriteria({ ...(criteria as any), filter_invoice_date_enabled: !(criteria as any).filter_invoice_date_enabled })} 
                                                             />
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.filter_invoice_date_enabled && (
+                                                            {(criteria as any).filter_invoice_date_enabled && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <div className="flex items-center gap-[12px]">
                                                                         <div className="flex-1">
                                                                             <div className="text-[10px] font-bold text-[#64748B] uppercase mb-[4px]">From</div>
                                                                             <input 
                                                                                 type="date" 
-                                                                                value={criteriaExtended.filter_invoice_date_from}
-                                                                                onChange={(e) => setCriteriaExtended({...criteriaExtended, filter_invoice_date_from: e.target.value})}
-                                                                                className="w-full bg-white border border-[#E2E8F0] rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]" 
+                                                                                value={(criteria as any).filter_invoice_date_from}
+                                                                                onChange={(e) => setCriteria({ ...(criteria as any), filter_invoice_date_from: e.target.value })}
+                                                                                className={`w-full bg-white border ${(!(criteria as any).filter_invoice_date_from || ((criteria as any).filter_invoice_date_to && (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to)) ? 'border-[#EF4444]' : 'border-[#E2E8F0]'} rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]`}
                                                                             />
                                                                         </div>
                                                                         <div className="flex-1">
                                                                             <div className="text-[10px] font-bold text-[#64748B] uppercase mb-[4px]">To</div>
                                                                             <input 
                                                                                 type="date" 
-                                                                                value={criteriaExtended.filter_invoice_date_to}
-                                                                                onChange={(e) => setCriteriaExtended({...criteriaExtended, filter_invoice_date_to: e.target.value})}
-                                                                                className="w-full bg-white border border-[#E2E8F0] rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]" 
+                                                                                value={(criteria as any).filter_invoice_date_to}
+                                                                                onChange={(e) => setCriteria({ ...(criteria as any), filter_invoice_date_to: e.target.value })}
+                                                                                className={`w-full bg-white border ${(!(criteria as any).filter_invoice_date_to || ((criteria as any).filter_invoice_date_from && (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to)) ? 'border-[#EF4444]' : 'border-[#E2E8F0]'} rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]`}
                                                                             />
                                                                         </div>
                                                                     </div>
+                                                                    {(!(criteria as any).filter_invoice_date_from || !(criteria as any).filter_invoice_date_to) && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> Both dates are required when the range is enabled</div>
+                                                                    )}
+                                                                    {((criteria as any).filter_invoice_date_from && (criteria as any).filter_invoice_date_to && (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to) && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> From date cannot be after To date</div>
+                                                                    )}
                                                                 </motion.div>
                                                             )}
                                                         </AnimatePresence>
@@ -1713,24 +1904,28 @@ export default function Config() {
                                                                 </div>
                                                             </div>
                                                             <Toggle 
-                                                                checked={criteriaExtended.filter_item_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, filter_item_enabled: !criteriaExtended.filter_item_enabled })} 
+                                                                checked={(criteria as any).filter_item_enabled} 
+                                                                onChange={() => setCriteria({ ...(criteria as any), filter_item_enabled: !(criteria as any).filter_item_enabled })} 
                                                             />
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.filter_item_enabled && (
+                                                            {(criteria as any).filter_item_enabled && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <MultiSelect 
-                                                                        options={allItems.map(i => ({ id: i.id, label: i.item_name }))}
-                                                                        selectedIds={criteriaExtended.filter_item_ids}
+                                                                        options={selectableItems.map((item: any) => ({ id: item.id, label: item.item_code ? `${item.item_name} (${item.item_code})` : item.item_name }))}
+                                                                        selectedIds={(criteria as any).filter_item_ids}
                                                                         onToggle={(id) => {
-                                                                            const newIds = criteriaExtended.filter_item_ids.includes(id)
-                                                                                ? criteriaExtended.filter_item_ids.filter(sid => sid !== id)
-                                                                                : [...criteriaExtended.filter_item_ids, id];
-                                                                            setCriteriaExtended({...criteriaExtended, filter_item_ids: newIds});
+                                                                            const currentIds = (criteria as any).filter_item_ids || [];
+                                                                            const newIds = currentIds.includes(id)
+                                                                                ? currentIds.filter((itemId: string) => itemId !== id)
+                                                                                : [...currentIds, id];
+                                                                            setCriteria({ ...(criteria as any), filter_item_ids: newIds });
                                                                         }}
-                                                                        placeholder="Search and select items..."
+                                                                        placeholder="Search active stock items..."
                                                                     />
+                                                                    {!((criteria as any).filter_item_ids || []).length && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> Select at least one active item</div>
+                                                                    )}
                                                                 </motion.div>
                                                             )}
                                                         </AnimatePresence>
@@ -1747,24 +1942,28 @@ export default function Config() {
                                                                 </div>
                                                             </div>
                                                             <Toggle 
-                                                                checked={criteriaExtended.filter_supplier_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, filter_supplier_enabled: !criteriaExtended.filter_supplier_enabled })} 
+                                                                checked={(criteria as any).filter_supplier_enabled} 
+                                                                onChange={() => setCriteria({ ...(criteria as any), filter_supplier_enabled: !(criteria as any).filter_supplier_enabled })} 
                                                             />
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.filter_supplier_enabled && (
+                                                            {(criteria as any).filter_supplier_enabled && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <MultiSelect 
-                                                                        options={allSuppliers.map(v => ({ id: v.id, label: v.name }))}
-                                                                        selectedIds={criteriaExtended.filter_supplier_ids}
+                                                                        options={selectableSuppliers.map((v: any) => ({ id: v.id, label: `${v.name} (${String(v.gstin || '').trim().toUpperCase()})` }))}
+                                                                        selectedIds={(criteria as any).filter_supplier_ids}
                                                                         onToggle={(id) => {
-                                                                            const newIds = criteriaExtended.filter_supplier_ids.includes(id)
-                                                                                ? criteriaExtended.filter_supplier_ids.filter(sid => sid !== id)
-                                                                                : [...criteriaExtended.filter_supplier_ids, id];
-                                                                            setCriteriaExtended({...criteriaExtended, filter_supplier_ids: newIds});
+                                                                            const currentIds = (criteria as any).filter_supplier_ids || [];
+                                                                            const newIds = currentIds.includes(id)
+                                                                                ? currentIds.filter((sid: string) => sid !== id)
+                                                                                : [...currentIds, id];
+                                                                            setCriteria({ ...(criteria as any), filter_supplier_ids: newIds });
                                                                         }}
-                                                                        placeholder="Search and select suppliers..."
+                                                                        placeholder="Search GST-mapped suppliers..."
                                                                     />
+                                                                    {!((criteria as any).filter_supplier_ids || []).length && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> Select at least one GST-mapped supplier</div>
+                                                                    )}
                                                                 </motion.div>
                                                             )}
                                                         </AnimatePresence>
@@ -2387,6 +2586,72 @@ export default function Config() {
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* ─── Sticky Bottom Save Bar ─────────────────────────────── */}
+            <AnimatePresence>
+                {(hasChanges || saved) && (
+                    <motion.div
+                        key="sticky-save-bar"
+                        initial={{ y: 80, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: 80, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+                        className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-3 border-t border-slate-200/80"
+                        style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)' }}
+                    >
+                        <div className="flex items-center gap-2 text-[13px] text-slate-500 font-medium">
+                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                            {saved ? 'All changes saved' : 'You have unsaved changes'}
+                        </div>
+                        <div className="flex items-center gap-3">
+                            {hasChanges && !saved && (
+                                <button
+                                    onClick={() => {
+                                        setPostingMode(committedConfig.postingMode);
+                                        setSources(committedConfig.sources);
+                                        setDestination(committedConfig.destination);
+                                        setReports(committedConfig.reports);
+                                        setCriteria(committedConfig.criteria);
+                                        setCriteriaExtended(committedConfig.criteriaExtended);
+                                        setSourceConfigs(committedConfig.sourceConfigs);
+                                        setDestConfigs(committedConfig.destConfigs);
+                                        setReportConfigs(committedConfig.reportConfigs);
+                                        setStorage(committedConfig.storage);
+                                    }}
+                                    className="text-[13px] font-semibold text-slate-500 hover:text-slate-700 px-4 py-2 rounded-[10px] hover:bg-slate-100 transition-colors"
+                                >
+                                    Discard
+                                </button>
+                            )}
+                            <motion.button
+                                onClick={handleSave}
+                                whileHover={{ scale: 1.03 }}
+                                whileTap={{ scale: 0.97 }}
+                                animate={{ scale: saved ? [1, 1.06, 1] : 1 }}
+                                className="flex items-center gap-2 text-white font-bold text-[13px] px-6 py-2 rounded-[10px] border-none cursor-pointer"
+                                style={{
+                                    background: saved ? 'linear-gradient(135deg,#059669,#10B981)' : 'linear-gradient(135deg,#1E6FD9,#7C3AED)',
+                                    boxShadow: saved ? '0 4px 16px rgba(5,150,105,0.35)' : '0 4px 16px rgba(30,111,217,0.35)',
+                                }}
+                            >
+                                <AnimatePresence mode="wait">
+                                    {saved ? (
+                                        <motion.span key="saved" className="flex items-center gap-2"
+                                            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                                            <CheckCircle size={14} /> Saved!
+                                        </motion.span>
+                                    ) : (
+                                        <motion.span key="save" className="flex items-center gap-2"
+                                            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                                            <Save size={14} /> Save Changes
+                                        </motion.span>
+                                    )}
+                                </AnimatePresence>
+                            </motion.button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
