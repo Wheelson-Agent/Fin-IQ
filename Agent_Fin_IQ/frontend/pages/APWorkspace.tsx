@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, Filter, FilterX, MoreVertical,
   Calendar as CalendarIcon, Layers, FileText, ArrowRight, Download, Eye, Clock, ShieldCheck, Mail, Info, Trash2, X, RefreshCw,
-  FileSearch, Archive, Check, Percent, ReceiptText, Upload, UploadCloud
+  FileSearch, Archive, Check, Percent, ReceiptText, Upload, UploadCloud, TrendingUp
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -51,6 +51,7 @@ interface APRecord {
   taxAmount: number;
   uploadedAt: string;
   docTypeLabel: string;
+  isHighAmount: boolean;
   taxBreakdown: {
     igst: number | null;
     cgst: number | null;
@@ -78,6 +79,27 @@ const formatCurrency = (amount: number) => {
     maximumFractionDigits: 0,
   }).format(amount);
 };
+
+function RoutingFlags({ record, valueLimitConfig }: {
+  record: { isHighAmount: boolean };
+  valueLimitConfig: { enabled: boolean; limit: number } | null;
+}) {
+  const flags: { icon: React.ReactNode; label: string }[] = [];
+  if (record.isHighAmount && valueLimitConfig?.enabled) {
+    flags.push({ icon: <TrendingUp className="w-2.5 h-2.5 shrink-0" />, label: `Amount Cap · ${formatCurrency(valueLimitConfig.limit)}` });
+  }
+  if (flags.length === 0) return <span className="text-slate-300 text-[11px] select-none">—</span>;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {flags.map((flag, i) => (
+        <div key={i} className="flex items-center gap-1.5 w-fit bg-amber-50 border border-amber-300 rounded-full px-2.5 py-1 shadow-sm" title="Routed here by an active business rule">
+          <span className="text-amber-600">{flag.icon}</span>
+          <span className="text-[9px] font-black text-amber-700 uppercase tracking-wide leading-none whitespace-nowrap">{flag.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const DOC_TYPE_OPTIONS = ['Invoice (Goods)', 'Invoice (Service)', 'Unknown'];
 const STATUS_OPTIONS = [
@@ -116,7 +138,8 @@ export default function APWorkspace() {
     posted: 1,
   });
   const [pageSize, setPageSize] = useState(10);
-  
+  const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
+
   // Advanced Filter State (Received Tab)
   const [selectedDocTypes, setSelectedDocTypes] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
@@ -306,6 +329,7 @@ export default function APWorkspace() {
             taxAmount: Number(inv.gst || inv.tax_total || 0),
             uploadedAt: inv.uploaded_date ? new Date(inv.uploaded_date).toISOString() : 'Unknown',
             docTypeLabel: docTypeLabel,
+            isHighAmount: !!inv.is_high_amount,
             taxBreakdown: {
               igst: raw.igst ?? raw.IGST ?? null,
               cgst: raw.cgst ?? raw.CGST ?? null,
@@ -347,6 +371,20 @@ export default function APWorkspace() {
     return () => {
       window.removeEventListener('app:refresh', handleRefresh);
     };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // @ts-ignore
+        const rules = await window.api.invoke('config:get-rules');
+        if (rules?.criteria?.enableValueLimit) {
+          setValueLimitConfig({ enabled: true, limit: Number(rules.criteria.valueLimit || 0) });
+        } else {
+          setValueLimitConfig({ enabled: false, limit: 0 });
+        }
+      } catch { setValueLimitConfig(null); }
+    })();
   }, []);
 
 
@@ -1140,6 +1178,7 @@ export default function APWorkspace() {
                       <TableHead className="font-semibold text-slate-700 h-10 w-[22%]">Supplier</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Items</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
+                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[10%] text-right">Status</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
@@ -1207,6 +1246,9 @@ export default function APWorkspace() {
                               </div>
                             </div>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-col items-end gap-1">
@@ -1322,13 +1364,14 @@ export default function APWorkspace() {
                       <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Approval Snapshot</TableHead>
+                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[16%]">Remarks</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('ready').length === 0 ? (
-                      <TableRow><TableCell colSpan={6} className="text-center py-12 text-slate-500">No documents ready to post.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents ready to post.</TableCell></TableRow>
                     ) : getPaginatedData('ready').map(record => (
                       <TableRow
                         key={record.id}
@@ -1376,6 +1419,9 @@ export default function APWorkspace() {
                               </div>
                             ))}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1484,13 +1530,14 @@ export default function APWorkspace() {
                       <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Required Input</TableHead>
+                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[16%]">Remarks</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('input').length === 0 ? (
-                      <TableRow><TableCell colSpan={6} className="text-center py-12 text-slate-500">No documents awaiting input.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents awaiting input.</TableCell></TableRow>
                     ) : getPaginatedData('input').map(record => (
                       <TableRow
                         key={record.id}
@@ -1520,6 +1567,9 @@ export default function APWorkspace() {
                           <div className="text-[12px] font-bold text-rose-600 leading-tight">
                             {record.reason || 'Pending Input'}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1628,13 +1678,14 @@ export default function APWorkspace() {
                       <TableHead className="font-semibold text-slate-700 h-10 w-[18%]">Supplier</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Value (₹)</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[16%] text-center">Failure Reason</TableHead>
+                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[23%]">Remarks</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[7%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('handoff').length === 0 ? (
-                      <TableRow><TableCell colSpan={7} className="text-center py-12 text-slate-500">No documents requiring human handoff.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents requiring human handoff.</TableCell></TableRow>
                     ) : getPaginatedData('handoff').map(record => (
                       <TableRow key={record.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleRowClick(record)}>
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
@@ -1661,6 +1712,9 @@ export default function APWorkspace() {
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                             <span className="text-[11px] font-medium leading-tight truncate max-w-[120px]">{record.reason || 'Failure'}</span>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1754,13 +1808,14 @@ export default function APWorkspace() {
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[45%] px-6">Supplier Reference</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[40%]">ERP Reference</TableHead>
+                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[10%]">Remarks</TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('posted').length === 0 ? (
-                      <TableRow><TableCell colSpan={7} className="text-center py-12 text-slate-500">No documents posted yet.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={6} className="text-center py-12 text-slate-500">No documents posted yet.</TableCell></TableRow>
                     ) : getPaginatedData('posted').map(record => (
                       <TableRow key={record.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleRowClick(record)}>
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
@@ -1792,6 +1847,9 @@ export default function APWorkspace() {
                               Posted: {formatDetailedDate(record.updatedAt)}
                             </div>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input

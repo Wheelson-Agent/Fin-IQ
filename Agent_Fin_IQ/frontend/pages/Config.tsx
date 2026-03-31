@@ -296,9 +296,9 @@ export default function Config() {
             filter_invoice_date_from: '',
             filter_invoice_date_to: '',
             filter_item_enabled: false,
-            filter_item_ids: [],
+            filter_item_ids: [] as string[],
             filter_supplier_enabled: false,
-            filter_supplier_ids: []
+            filter_supplier_ids: [] as string[]
         }
     };
 
@@ -485,55 +485,74 @@ export default function Config() {
             // @ts-ignore
             if (window.api && window.api.invoke) {
                 // Load Storage Config from Database
-                // @ts-ignore
-                const storageConfig = await window.api.invoke('config:get-storage-path');
-                if (storageConfig) {
-                    setStorage({
-                        ...INIT.storage,
-                        provider: storageConfig.provider || INIT.storage.provider,
-                        localPath: storageConfig.localPath || INIT.storage.localPath
-                    });
-                    setCommittedConfig(prev => ({
-                        ...prev,
-                        storage: {
-                            ...prev.storage,
+                try {
+                    // @ts-ignore
+                    const storageConfig = await window.api.invoke('config:get-storage-path');
+                    if (storageConfig) {
+                        setStorage({
+                            ...INIT.storage,
                             provider: storageConfig.provider || INIT.storage.provider,
                             localPath: storageConfig.localPath || INIT.storage.localPath
-                        }
-                    }));
-                }
+                        });
+                        setCommittedConfig(prev => ({
+                            ...prev,
+                            storage: {
+                                ...prev.storage,
+                                provider: storageConfig.provider || INIT.storage.provider,
+                                localPath: storageConfig.localPath || INIT.storage.localPath
+                            }
+                        }));
+                    }
+                } catch (e) { console.error('[Config] Failed to load storage config:', e); }
 
                 // Load Posting Rules from Database
-                // @ts-ignore
-                const rules = await window.api.invoke('config:get-rules');
-                if (rules) {
-                    setPostingMode(rules.postingMode || INIT.postingMode);
-                    setCriteria(rules.criteria || INIT.criteria);
-                    setDestination(rules.destination || INIT.destination);
-                    // Update committed config to prevent "unsaved changes" on load
-                    setCommittedConfig(prev => ({
-                        ...prev,
-                        postingMode: rules.postingMode || INIT.postingMode,
-                        criteria: rules.criteria || INIT.criteria,
-                        destination: rules.destination || INIT.destination
-                    }));
-                }
+                try {
+                    // @ts-ignore
+                    const rules = await window.api.invoke('config:get-rules');
+                    if (rules) {
+                        const loadedMode     = rules.postingMode || INIT.postingMode;
+                        const loadedCriteria = rules.criteria    || INIT.criteria;
+                        const loadedDest     = rules.destination || INIT.destination;
+                        setPostingMode(loadedMode);
+                        setCriteria(loadedCriteria);
+                        setDestination(loadedDest);
+                        // Sync DB values into localStorage so the stale localStorage useEffect
+                        // (which runs in parallel) doesn't overwrite the authoritative DB values.
+                        try {
+                            const cached = localStorage.getItem('agent_w_config');
+                            if (cached) {
+                                const parsed = JSON.parse(cached);
+                                parsed.postingMode = loadedMode;
+                                parsed.criteria    = loadedCriteria;
+                                parsed.destination = loadedDest;
+                                localStorage.setItem('agent_w_config', JSON.stringify(parsed));
+                            }
+                        } catch { /* ignore */ }
+                        setCommittedConfig(prev => ({
+                            ...prev,
+                            postingMode: loadedMode,
+                            criteria: loadedCriteria,
+                            destination: loadedDest
+                        }));
+                    }
+                } catch (e) { console.error('[Config] Failed to load posting rules:', e); }
 
                 // Load Extended Criteria for active company
                 if (activeCompanyId) {
-                    const extended = await window.api.invoke('config:get-extended-criteria', { companyId: activeCompanyId });
-                    if (extended) {
-                        setCriteriaExtended(extended);
-                    } else {
-                        setCriteriaExtended(INIT.criteriaExtended);
-                    }
+                    try {
+                        const extended = await window.api.invoke('config:get-extended-criteria', { companyId: activeCompanyId });
+                        setCriteriaExtended(extended || INIT.criteriaExtended);
+                    } catch (e) { console.error('[Config] Failed to load extended criteria:', e); }
 
-                    // Fetch Suppliers and Items for filters
-                    const suppliers = await window.api.invoke('vendors:get-all', { companyId: activeCompanyId });
-                    setAllSuppliers(suppliers || []);
+                    try {
+                        const suppliers = await window.api.invoke('vendors:get-all', { companyId: activeCompanyId });
+                        setAllSuppliers(suppliers || []);
+                    } catch (e) { console.error('[Config] Failed to load suppliers:', e); }
 
-                    const items = await window.api.invoke('items:get-all', { companyId: activeCompanyId });
-                    setAllItems(items || []);
+                    try {
+                        const items = await window.api.invoke('items:get-all', { companyId: activeCompanyId });
+                        setAllItems(items || []);
+                    } catch (e) { console.error('[Config] Failed to load items:', e); }
                 }
             }
         };
@@ -649,7 +668,7 @@ export default function Config() {
         // Storage validation
         if (storage.provider === 'local' && !storage.localPath) return "Local Storage Path is required.";
 
-        if (postingMode === 'auto' && (criteria as any).enableValueLimit && !criteria.valueLimit) {
+        if (postingMode !== 'manual' && (criteria as any).enableValueLimit && !criteria.valueLimit) {
             return "Maximum invoice value limit is required when enabled.";
         }
 
@@ -676,31 +695,54 @@ export default function Config() {
 
         // @ts-ignore
         if (window.api && window.api.invoke) {
-            // Persist Storage Config to Database (Provider + Path)
-            // @ts-ignore
-            await window.api.invoke('config:set-storage-path', {
-                provider: storage.provider,
-                localPath: storage.localPath
-            });
+            // In manual mode criteria have no effect — clear them in DB so the value
+            // limit rule never fires for existing invoices when mode is manual.
+            const effectiveCriteria = newConfig.postingMode === 'manual'
+                ? { knownVendor: false, poMatch: false, twoWayMatch: false, enableValueLimit: false, valueLimit: null }
+                : newConfig.criteria;
 
-            // Persist Posting Rules to Database
-            // @ts-ignore
-            await window.api.invoke('config:save-rules', {
-                rules: {
-                    postingMode: newConfig.postingMode,
-                    criteria: newConfig.criteria,
-                    destination: newConfig.destination
-                },
-                companyId: activeCompanyId
-            });
-
-            // Persist Extended Criteria to Database
-            if (activeCompanyId) {
-                await window.api.invoke('config:save-extended-criteria', {
-                    criteria: criteriaExtended,
-                    companyId: activeCompanyId
+            // Storage — non-blocking (failure must not prevent rules from saving)
+            try {
+                // @ts-ignore
+                await window.api.invoke('config:set-storage-path', {
+                    provider: storage.provider,
+                    localPath: storage.localPath
                 });
+            } catch (storageErr) {
+                console.error('[Config] config:set-storage-path failed (non-blocking):', storageErr);
             }
+
+            // Posting Rules — always runs regardless of storage result
+            let rulesSaved = false;
+            try {
+                // @ts-ignore
+                await window.api.invoke('config:save-rules', {
+                    rules: {
+                        postingMode: newConfig.postingMode,
+                        criteria: effectiveCriteria,
+                        destination: newConfig.destination
+                    }
+                });
+                rulesSaved = true;
+            } catch (rulesErr) {
+                console.error('[Config] config:save-rules failed:', rulesErr);
+                toast.error('Failed to save posting rules. Please try again.');
+            }
+
+            // Extended Criteria
+            if (activeCompanyId) {
+                try {
+                    // @ts-ignore
+                    await window.api.invoke('config:save-extended-criteria', {
+                        criteria: criteriaExtended,
+                        companyId: activeCompanyId
+                    });
+                } catch (extErr) {
+                    console.error('[Config] config:save-extended-criteria failed (non-blocking):', extErr);
+                }
+            }
+
+            if (!rulesSaved) return; // don't show "Saved ✓" if the critical save failed
         }
 
         setSaved(true);
