@@ -331,8 +331,9 @@ export function registerIpcHandlers() {
                 };
             }
 
+            const { __ap_workspace, ...n8nPayloadBase } = rawPayload || {};
             const payload = {
-                ...rawPayload,
+                ...n8nPayloadBase,
                 revalidation: true,
                 invoice_id: id 
             };
