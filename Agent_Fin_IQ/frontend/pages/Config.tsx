@@ -261,7 +261,20 @@ export default function Config() {
         sources: { email: true, drive: true, sharepoint: false, onedrive: false, whatsapp: false, local_folder: false },
         destination: 'tally',
         reports: { email: true, teams: true, sharepoint: false, whatsapp: false },
-        criteria: { knownVendor: true, valueLimit: '100000', poMatch: true, twoWayMatch: true, enableValueLimit: false },
+        criteria: {
+            knownVendor: true,
+            valueLimit: '100000',
+            poMatch: true,
+            twoWayMatch: true,
+            enableValueLimit: false,
+            filter_invoice_date_enabled: false,
+            filter_invoice_date_from: '',
+            filter_invoice_date_to: '',
+            filter_item_enabled: false,
+            filter_item_ids: [] as string[],
+            filter_supplier_enabled: false,
+            filter_supplier_ids: [] as string[]
+        },
         sourceConfigs: {
             email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: '••••••••••••' },
             sharepoint: { tenantId: '8a91-4c...', siteUrl: 'https://sigma.sharepoint.com', secret: '' },
@@ -291,14 +304,7 @@ export default function Config() {
         criteriaExtended: {
             fc_exceeded_supplier_avg_enabled: false,
             fc_exceeded_supplier_avg_threshold: 110, // 110%
-            fc_new_ledger_for_supplier_enabled: false,
-            filter_invoice_date_enabled: false,
-            filter_invoice_date_from: '',
-            filter_invoice_date_to: '',
-            filter_item_enabled: false,
-            filter_item_ids: [] as string[],
-            filter_supplier_enabled: false,
-            filter_supplier_ids: [] as string[]
+            fc_new_ledger_for_supplier_enabled: false
         }
     };
 
@@ -327,6 +333,27 @@ export default function Config() {
     const [validationError, setValidationError] = useState<string | null>(null);
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ processing: true, amount: false, vendor: false, posting: false, approval: false });
     const [emailInput, setEmailInput] = useState('');
+    const selectableSuppliers = React.useMemo(() => {
+        const seenGstins = new Set<string>();
+        return (allSuppliers || []).filter((supplier: any) => {
+            const gstin = String(supplier?.gstin || '').trim().toUpperCase();
+            if (!gstin) return false;
+            if (seenGstins.has(gstin)) return false;
+            seenGstins.add(gstin);
+            return true;
+        });
+    }, [allSuppliers]);
+    const selectableItems = React.useMemo(() => {
+        const seenNames = new Set<string>();
+        return (allItems || []).filter((item: any) => {
+            if (item?.is_active === false) return false;
+            const itemName = String(item?.item_name || '').trim().toLowerCase();
+            if (!itemName) return false;
+            if (seenNames.has(itemName)) return false;
+            seenNames.add(itemName);
+            return true;
+        });
+    }, [allItems]);
 
     // Tally Connection state
     const [isCheckingTally, setIsCheckingTally] = useState(false);
@@ -435,6 +462,23 @@ export default function Config() {
     }, []);
 
     useEffect(() => {
+        if (!companies.length) return;
+
+        const hasCurrentActiveCompany = activeCompanyId
+            ? companies.some((company) => company.id === activeCompanyId)
+            : false;
+
+        if (hasCurrentActiveCompany) return;
+
+        // Keep company-scoped configuration aligned with a real synced company before loading dependent data.
+        const preferredCompany = companies.find((company) => company.isActive) || companies[0];
+        if (!preferredCompany?.id) return;
+
+        setActiveCompanyId(preferredCompany.id);
+        localStorage.setItem('activeCompanyId', preferredCompany.id);
+    }, [companies, activeCompanyId]);
+
+    useEffect(() => {
         const timer = setInterval(() => {
             if (!lastSyncedAt) return;
             const diff = Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 1000);
@@ -511,7 +555,7 @@ export default function Config() {
                     const rules = await window.api.invoke('config:get-rules');
                     if (rules) {
                         const loadedMode     = rules.postingMode || INIT.postingMode;
-                        const loadedCriteria = rules.criteria    || INIT.criteria;
+                        const loadedCriteria = { ...INIT.criteria, ...(rules.criteria || {}) };
                         const loadedDest     = rules.destination || INIT.destination;
                         setPostingMode(loadedMode);
                         setCriteria(loadedCriteria);
@@ -553,7 +597,11 @@ export default function Config() {
                         const items = await window.api.invoke('items:get-all', { companyId: activeCompanyId });
                         setAllItems(items || []);
                     } catch (e) { console.error('[Config] Failed to load items:', e); }
+                } else {
+                    setAllSuppliers([]);
+                    setAllItems([]);
                 }
+
             }
         };
         loadPaths();
@@ -564,13 +612,27 @@ export default function Config() {
         if (savedConfigStr) {
             try {
                 const parsed = JSON.parse(savedConfigStr);
+                const legacyDateRangeCriteria = {
+                    filter_invoice_date_enabled: parsed.criteria?.filter_invoice_date_enabled ?? parsed.criteriaExtended?.filter_invoice_date_enabled ?? INIT.criteria.filter_invoice_date_enabled,
+                    filter_invoice_date_from: parsed.criteria?.filter_invoice_date_from ?? parsed.criteriaExtended?.filter_invoice_date_from ?? INIT.criteria.filter_invoice_date_from,
+                    filter_invoice_date_to: parsed.criteria?.filter_invoice_date_to ?? parsed.criteriaExtended?.filter_invoice_date_to ?? INIT.criteria.filter_invoice_date_to,
+                };
+                const legacySupplierCriteria = {
+                    filter_supplier_enabled: parsed.criteria?.filter_supplier_enabled ?? parsed.criteriaExtended?.filter_supplier_enabled ?? INIT.criteria.filter_supplier_enabled,
+                    filter_supplier_ids: parsed.criteria?.filter_supplier_ids ?? parsed.criteriaExtended?.filter_supplier_ids ?? INIT.criteria.filter_supplier_ids,
+                };
+                const legacyItemCriteria = {
+                    filter_item_enabled: parsed.criteria?.filter_item_enabled ?? parsed.criteriaExtended?.filter_item_enabled ?? INIT.criteria.filter_item_enabled,
+                    filter_item_ids: parsed.criteria?.filter_item_ids ?? parsed.criteriaExtended?.filter_item_ids ?? INIT.criteria.filter_item_ids,
+                };
                 setPostingMode(parsed.postingMode || INIT.postingMode);
                 setSources(parsed.sources || INIT.sources);
                 setDestination(parsed.destination || INIT.destination);
                 setReports(parsed.reports || INIT.reports);
-                setCriteria(parsed.criteria || INIT.criteria);
+                setCriteria({ ...INIT.criteria, ...(parsed.criteria || {}), ...legacyDateRangeCriteria, ...legacySupplierCriteria, ...legacyItemCriteria });
                 setSourceConfigs(parsed.sourceConfigs || INIT.sourceConfigs);
                 setDestConfigs(parsed.destConfigs || INIT.destConfigs);
+                setCriteriaExtended(parsed.criteriaExtended || INIT.criteriaExtended);
 
                 // Legacy migration for old reports UI
                 let safeReportConfigs = parsed.reportConfigs || INIT.reportConfigs;
@@ -624,6 +686,7 @@ export default function Config() {
         JSON.stringify(sources) !== JSON.stringify(committedConfig.sources) ||
         JSON.stringify(reports) !== JSON.stringify(committedConfig.reports) ||
         JSON.stringify(criteria) !== JSON.stringify(committedConfig.criteria) ||
+        JSON.stringify(criteriaExtended) !== JSON.stringify(committedConfig.criteriaExtended) ||
         JSON.stringify(sourceConfigs) !== JSON.stringify(committedConfig.sourceConfigs) ||
         JSON.stringify(destConfigs) !== JSON.stringify(committedConfig.destConfigs) ||
         JSON.stringify(reportConfigs) !== JSON.stringify(committedConfig.reportConfigs) ||
@@ -672,6 +735,27 @@ export default function Config() {
             return "Maximum invoice value limit is required when enabled.";
         }
 
+        if ((criteria as any).filter_invoice_date_enabled && (!(criteria as any).filter_invoice_date_from || !(criteria as any).filter_invoice_date_to)) {
+            return "Invoice date range requires both From and To dates.";
+        }
+
+        if (
+            (criteria as any).filter_invoice_date_enabled &&
+            (criteria as any).filter_invoice_date_from &&
+            (criteria as any).filter_invoice_date_to &&
+            (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to
+        ) {
+            return "Invoice date range From date cannot be after To date.";
+        }
+
+        if ((criteria as any).filter_supplier_enabled && !((criteria as any).filter_supplier_ids || []).length) {
+            return "Supplier filter requires at least one GST-mapped vendor.";
+        }
+
+        if ((criteria as any).filter_item_enabled && !((criteria as any).filter_item_ids || []).length) {
+            return "Item filter requires at least one active item.";
+        }
+
         // Reports validation
         if (reports.email && (!(reportConfigs.email.recipients as string[]).length || !reportConfigs.email.schedule.time)) return "Email recipients and schedule time are required.";
         if (reports.whatsapp && (!reportConfigs.whatsapp.phoneNumber || !reportConfigs.whatsapp.schedule.time)) return "WhatsApp phone number and schedule time are required.";
@@ -698,7 +782,20 @@ export default function Config() {
             // In manual mode criteria have no effect — clear them in DB so the value
             // limit rule never fires for existing invoices when mode is manual.
             const effectiveCriteria = newConfig.postingMode === 'manual'
-                ? { knownVendor: false, poMatch: false, twoWayMatch: false, enableValueLimit: false, valueLimit: null }
+                ? {
+                    knownVendor: false,
+                    poMatch: false,
+                    twoWayMatch: false,
+                    enableValueLimit: false,
+                    valueLimit: null,
+                    filter_invoice_date_enabled: false,
+                    filter_invoice_date_from: '',
+                    filter_invoice_date_to: '',
+                    filter_item_enabled: false,
+                    filter_item_ids: [],
+                    filter_supplier_enabled: false,
+                    filter_supplier_ids: []
+                }
                 : newConfig.criteria;
 
             // Storage — non-blocking (failure must not prevent rules from saving)
@@ -1670,33 +1767,39 @@ export default function Config() {
                                                                 </div>
                                                             </div>
                                                             <Toggle 
-                                                                checked={criteriaExtended.filter_invoice_date_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, filter_invoice_date_enabled: !criteriaExtended.filter_invoice_date_enabled })} 
+                                                                checked={(criteria as any).filter_invoice_date_enabled} 
+                                                                onChange={() => setCriteria({ ...(criteria as any), filter_invoice_date_enabled: !(criteria as any).filter_invoice_date_enabled })} 
                                                             />
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.filter_invoice_date_enabled && (
+                                                            {(criteria as any).filter_invoice_date_enabled && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <div className="flex items-center gap-[12px]">
                                                                         <div className="flex-1">
                                                                             <div className="text-[10px] font-bold text-[#64748B] uppercase mb-[4px]">From</div>
                                                                             <input 
                                                                                 type="date" 
-                                                                                value={criteriaExtended.filter_invoice_date_from}
-                                                                                onChange={(e) => setCriteriaExtended({...criteriaExtended, filter_invoice_date_from: e.target.value})}
-                                                                                className="w-full bg-white border border-[#E2E8F0] rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]" 
+                                                                                value={(criteria as any).filter_invoice_date_from}
+                                                                                onChange={(e) => setCriteria({ ...(criteria as any), filter_invoice_date_from: e.target.value })}
+                                                                                className={`w-full bg-white border ${(!(criteria as any).filter_invoice_date_from || ((criteria as any).filter_invoice_date_to && (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to)) ? 'border-[#EF4444]' : 'border-[#E2E8F0]'} rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]`}
                                                                             />
                                                                         </div>
                                                                         <div className="flex-1">
                                                                             <div className="text-[10px] font-bold text-[#64748B] uppercase mb-[4px]">To</div>
                                                                             <input 
                                                                                 type="date" 
-                                                                                value={criteriaExtended.filter_invoice_date_to}
-                                                                                onChange={(e) => setCriteriaExtended({...criteriaExtended, filter_invoice_date_to: e.target.value})}
-                                                                                className="w-full bg-white border border-[#E2E8F0] rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]" 
+                                                                                value={(criteria as any).filter_invoice_date_to}
+                                                                                onChange={(e) => setCriteria({ ...(criteria as any), filter_invoice_date_to: e.target.value })}
+                                                                                className={`w-full bg-white border ${(!(criteria as any).filter_invoice_date_to || ((criteria as any).filter_invoice_date_from && (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to)) ? 'border-[#EF4444]' : 'border-[#E2E8F0]'} rounded-[8px] p-[6px_10px] text-[12px] font-bold outline-none focus:border-[#1E6FD9]`}
                                                                             />
                                                                         </div>
                                                                     </div>
+                                                                    {(!(criteria as any).filter_invoice_date_from || !(criteria as any).filter_invoice_date_to) && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> Both dates are required when the range is enabled</div>
+                                                                    )}
+                                                                    {((criteria as any).filter_invoice_date_from && (criteria as any).filter_invoice_date_to && (criteria as any).filter_invoice_date_from > (criteria as any).filter_invoice_date_to) && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> From date cannot be after To date</div>
+                                                                    )}
                                                                 </motion.div>
                                                             )}
                                                         </AnimatePresence>
@@ -1713,24 +1816,28 @@ export default function Config() {
                                                                 </div>
                                                             </div>
                                                             <Toggle 
-                                                                checked={criteriaExtended.filter_item_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, filter_item_enabled: !criteriaExtended.filter_item_enabled })} 
+                                                                checked={(criteria as any).filter_item_enabled} 
+                                                                onChange={() => setCriteria({ ...(criteria as any), filter_item_enabled: !(criteria as any).filter_item_enabled })} 
                                                             />
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.filter_item_enabled && (
+                                                            {(criteria as any).filter_item_enabled && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <MultiSelect 
-                                                                        options={allItems.map(i => ({ id: i.id, label: i.item_name }))}
-                                                                        selectedIds={criteriaExtended.filter_item_ids}
+                                                                        options={selectableItems.map((item: any) => ({ id: item.id, label: item.item_code ? `${item.item_name} (${item.item_code})` : item.item_name }))}
+                                                                        selectedIds={(criteria as any).filter_item_ids}
                                                                         onToggle={(id) => {
-                                                                            const newIds = criteriaExtended.filter_item_ids.includes(id)
-                                                                                ? criteriaExtended.filter_item_ids.filter(sid => sid !== id)
-                                                                                : [...criteriaExtended.filter_item_ids, id];
-                                                                            setCriteriaExtended({...criteriaExtended, filter_item_ids: newIds});
+                                                                            const currentIds = (criteria as any).filter_item_ids || [];
+                                                                            const newIds = currentIds.includes(id)
+                                                                                ? currentIds.filter((itemId: string) => itemId !== id)
+                                                                                : [...currentIds, id];
+                                                                            setCriteria({ ...(criteria as any), filter_item_ids: newIds });
                                                                         }}
-                                                                        placeholder="Search and select items..."
+                                                                        placeholder="Search active stock items..."
                                                                     />
+                                                                    {!((criteria as any).filter_item_ids || []).length && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> Select at least one active item</div>
+                                                                    )}
                                                                 </motion.div>
                                                             )}
                                                         </AnimatePresence>
@@ -1747,24 +1854,28 @@ export default function Config() {
                                                                 </div>
                                                             </div>
                                                             <Toggle 
-                                                                checked={criteriaExtended.filter_supplier_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, filter_supplier_enabled: !criteriaExtended.filter_supplier_enabled })} 
+                                                                checked={(criteria as any).filter_supplier_enabled} 
+                                                                onChange={() => setCriteria({ ...(criteria as any), filter_supplier_enabled: !(criteria as any).filter_supplier_enabled })} 
                                                             />
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.filter_supplier_enabled && (
+                                                            {(criteria as any).filter_supplier_enabled && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <MultiSelect 
-                                                                        options={allSuppliers.map(v => ({ id: v.id, label: v.name }))}
-                                                                        selectedIds={criteriaExtended.filter_supplier_ids}
+                                                                        options={selectableSuppliers.map((v: any) => ({ id: v.id, label: `${v.name} (${String(v.gstin || '').trim().toUpperCase()})` }))}
+                                                                        selectedIds={(criteria as any).filter_supplier_ids}
                                                                         onToggle={(id) => {
-                                                                            const newIds = criteriaExtended.filter_supplier_ids.includes(id)
-                                                                                ? criteriaExtended.filter_supplier_ids.filter(sid => sid !== id)
-                                                                                : [...criteriaExtended.filter_supplier_ids, id];
-                                                                            setCriteriaExtended({...criteriaExtended, filter_supplier_ids: newIds});
+                                                                            const currentIds = (criteria as any).filter_supplier_ids || [];
+                                                                            const newIds = currentIds.includes(id)
+                                                                                ? currentIds.filter((sid: string) => sid !== id)
+                                                                                : [...currentIds, id];
+                                                                            setCriteria({ ...(criteria as any), filter_supplier_ids: newIds });
                                                                         }}
-                                                                        placeholder="Search and select suppliers..."
+                                                                        placeholder="Search GST-mapped suppliers..."
                                                                     />
+                                                                    {!((criteria as any).filter_supplier_ids || []).length && (
+                                                                        <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> Select at least one GST-mapped supplier</div>
+                                                                    )}
                                                                 </motion.div>
                                                             )}
                                                         </AnimatePresence>

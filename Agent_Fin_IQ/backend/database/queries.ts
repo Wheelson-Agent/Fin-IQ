@@ -20,6 +20,22 @@
 import { query, pool } from './connection';
 import { sendInvoiceToTally } from '../sync/tally_posting';
 
+type InvoiceDateRangeConfig = {
+    filter_invoice_date_enabled?: boolean;
+    filter_invoice_date_from?: string;
+    filter_invoice_date_to?: string;
+};
+
+type SupplierFilterConfig = {
+    filter_supplier_enabled?: boolean;
+    filter_supplier_ids?: string[];
+};
+
+type ItemFilterConfig = {
+    filter_item_enabled?: boolean;
+    filter_item_ids?: string[];
+};
+
 /**
  * Standardizes inconsistent OCR field names to their canonical database column names.
  */
@@ -65,6 +81,223 @@ function smartUpdatePayload(payload: any, targetKey: string, value: any) {
     } else {
         payload[targetKey] = value;
     }
+}
+
+function normalizeDateOnlyValue(value: any): string | null {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const yyyyMmDdMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (yyyyMmDdMatch) {
+        return `${yyyyMmDdMatch[1]}-${yyyyMmDdMatch[2]}-${yyyyMmDdMatch[3]}`;
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+
+    const year = parsed.getUTCFullYear();
+    const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function normalizeGstin(value: any): string {
+    return String(value || '').trim().toUpperCase();
+}
+
+function normalizeItemText(value: any): string {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isGoodsDocumentType(docType: any): boolean {
+    return String(docType || '').toLowerCase().includes('goods');
+}
+
+function getEffectiveInvoiceDateRange(config: any): InvoiceDateRangeConfig {
+    const source = config?.criteria ? config.criteria : config;
+    return {
+        filter_invoice_date_enabled: source?.filter_invoice_date_enabled === true,
+        filter_invoice_date_from: normalizeDateOnlyValue(source?.filter_invoice_date_from) || '',
+        filter_invoice_date_to: normalizeDateOnlyValue(source?.filter_invoice_date_to) || '',
+    };
+}
+
+function getEffectiveSupplierFilter(config: any): SupplierFilterConfig {
+    const source = config?.criteria ? config.criteria : config;
+    const supplierIds = Array.isArray(source?.filter_supplier_ids)
+        ? source.filter_supplier_ids.map((id: any) => String(id || '').trim()).filter(Boolean)
+        : [];
+
+    return {
+        filter_supplier_enabled: source?.filter_supplier_enabled === true,
+        filter_supplier_ids: supplierIds,
+    };
+}
+
+function getEffectiveItemFilter(config: any): ItemFilterConfig {
+    const source = config?.criteria ? config.criteria : config;
+    const itemIds = Array.isArray(source?.filter_item_ids)
+        ? source.filter_item_ids.map((id: any) => String(id || '').trim()).filter(Boolean)
+        : [];
+
+    return {
+        filter_item_enabled: source?.filter_item_enabled === true,
+        filter_item_ids: itemIds,
+    };
+}
+
+function passesInvoiceDateRange(invoiceDate: any, config: any): boolean {
+    const normalizedConfig = getEffectiveInvoiceDateRange(config);
+    if (!normalizedConfig.filter_invoice_date_enabled) return true;
+
+    const invoiceDateValue = normalizeDateOnlyValue(invoiceDate);
+    if (!invoiceDateValue || !normalizedConfig.filter_invoice_date_from || !normalizedConfig.filter_invoice_date_to) {
+        return false;
+    }
+
+    // Compare normalized YYYY-MM-DD strings so invoice routing stays date-only and timezone-safe.
+    return invoiceDateValue >= normalizedConfig.filter_invoice_date_from &&
+        invoiceDateValue <= normalizedConfig.filter_invoice_date_to;
+}
+
+function passesValueLimitRule(grandTotal: any, postingRules: any): boolean {
+    if (postingRules?.criteria?.enableValueLimit !== true) return true;
+    const limit = Number(postingRules?.criteria?.valueLimit || 0);
+    const total = Number(grandTotal || 0);
+    if (limit <= 0 || total <= 0) return false;
+    return total <= limit;
+}
+
+async function getSelectedSupplierGstins(config: any): Promise<Set<string>> {
+    const supplierFilter = getEffectiveSupplierFilter(config);
+    if (!supplierFilter.filter_supplier_enabled || !supplierFilter.filter_supplier_ids?.length) {
+        return new Set();
+    }
+
+    const { rows } = await query(
+        `SELECT gstin
+         FROM vendors
+         WHERE id = ANY($1::uuid[])
+           AND gstin IS NOT NULL
+           AND LENGTH(TRIM(gstin)) > 0`,
+        [supplierFilter.filter_supplier_ids]
+    );
+
+    return new Set(
+        rows
+            .map((row: any) => normalizeGstin(row.gstin))
+            .filter(Boolean)
+    );
+}
+
+async function getSelectedItemNames(config: any): Promise<string[]> {
+    const itemFilter = getEffectiveItemFilter(config);
+    if (!itemFilter.filter_item_enabled || !itemFilter.filter_item_ids?.length) {
+        return [];
+    }
+
+    const { rows } = await query(
+        `SELECT item_name
+         FROM item_master
+         WHERE id = ANY($1::uuid[])
+           AND is_active = true
+           AND item_name IS NOT NULL
+           AND LENGTH(TRIM(item_name)) > 0`,
+        [itemFilter.filter_item_ids]
+    );
+
+    return Array.from(new Set(
+        rows
+            .map((row: any) => normalizeItemText(row.item_name))
+            .filter(Boolean)
+    ));
+}
+
+function passesSupplierFilterRule(invoiceVendorGst: any, supplierFilter: any, selectedSupplierGstins: Set<string>): boolean {
+    const effectiveFilter = getEffectiveSupplierFilter(supplierFilter);
+    if (!effectiveFilter.filter_supplier_enabled) return true;
+    if (!selectedSupplierGstins.size) return true;
+
+    const normalizedInvoiceGst = normalizeGstin(invoiceVendorGst);
+    if (!normalizedInvoiceGst) return true;
+
+    return !selectedSupplierGstins.has(normalizedInvoiceGst);
+}
+
+function matchesSelectedItemName(lineDescription: any, selectedItemName: string): boolean {
+    const normalizedLine = normalizeItemText(lineDescription);
+    const normalizedItem = normalizeItemText(selectedItemName);
+    if (!normalizedLine || !normalizedItem) return false;
+    if (normalizedLine === normalizedItem) return true;
+
+    const lineContainsItem = new RegExp(`(^| )${escapeRegExp(normalizedItem)}( |$)`).test(normalizedLine);
+    const itemContainsLine = new RegExp(`(^| )${escapeRegExp(normalizedLine)}( |$)`).test(normalizedItem);
+    return lineContainsItem || itemContainsLine;
+}
+
+function passesItemFilterRule(lineItems: any[], docType: any, itemFilter: any, selectedItemNames: string[]): boolean {
+    const effectiveFilter = getEffectiveItemFilter(itemFilter);
+    if (!effectiveFilter.filter_item_enabled) return true;
+    if (!isGoodsDocumentType(docType)) return true;
+    if (!selectedItemNames.length) return true;
+
+    const descriptions = (Array.isArray(lineItems) ? lineItems : [])
+        .map((line: any) => line?.description)
+        .filter(Boolean);
+
+    if (!descriptions.length) return true;
+
+    return !descriptions.some((description) =>
+        selectedItemNames.some((selectedItemName) => matchesSelectedItemName(description, selectedItemName))
+    );
+}
+
+function shouldInvoiceAutoPostWithRules(args: {
+    grandTotal: any;
+    invoiceDate: any;
+    invoiceVendorGst: any;
+    docType: any;
+    lineItems: any[];
+    postingRules: any;
+    invoiceDateRange: any;
+    selectedSupplierGstins: Set<string>;
+    selectedItemNames: string[];
+}): boolean {
+    return passesValueLimitRule(args.grandTotal, args.postingRules) &&
+        passesInvoiceDateRange(args.invoiceDate, args.invoiceDateRange) &&
+        passesSupplierFilterRule(args.invoiceVendorGst, args.postingRules, args.selectedSupplierGstins) &&
+        passesItemFilterRule(args.lineItems, args.docType, args.postingRules, args.selectedItemNames);
+}
+
+async function shouldAutoPostInvoice(grandTotal: any, invoiceDate: any, invoiceVendorGst: any, docType: any, lineItems: any[] = [], companyId?: string) {
+    const postingRules = await getAppConfig('posting_rules', companyId || undefined);
+    if (postingRules?.postingMode === 'manual') return false;
+    // Fall back to the legacy config key so previously saved date ranges still work during the production migration.
+    const invoiceDateRange = postingRules?.criteria?.filter_invoice_date_enabled !== undefined
+        ? postingRules
+        : await getAppConfig('global_invoice_date_range');
+    const selectedSupplierGstins = await getSelectedSupplierGstins(postingRules);
+    const selectedItemNames = await getSelectedItemNames(postingRules);
+    return shouldInvoiceAutoPostWithRules({
+        grandTotal,
+        invoiceDate,
+        invoiceVendorGst,
+        docType,
+        lineItems,
+        postingRules,
+        invoiceDateRange,
+        selectedSupplierGstins,
+        selectedItemNames,
+    });
 }
 
 const RAW_PAYLOAD_ALIAS_GROUPS: string[][] = [
@@ -136,7 +369,10 @@ export async function evaluateInvoiceStatus(
     lineItems: any[] = [],
     n8nStatus?: string,
     companyId?: string,
-    grandTotal?: number
+    grandTotal?: number,
+    invoiceDate?: string | null,
+    invoiceVendorGst?: string | null,
+    docType?: string | null
 ): Promise<string> {
     const getVal = (key: string) => {
         if (!validationData) return false;
@@ -170,16 +406,11 @@ export async function evaluateInvoiceStatus(
             let finalStatus = 'Ready to Post';
 
             // --- POSTING RULES EVALUATION ---
-            // Use companyId || undefined so null company_id still performs a global lookup.
+            // Evaluate the enabled auto-post gates without changing fallback routing.
             try {
-                const rules = await getAppConfig('posting_rules', companyId || undefined);
-                if (rules?.criteria?.enableValueLimit) {
-                    const limit = Number(rules.criteria.valueLimit || 0);
-                    const total = Number(grandTotal || 0);
-                    if (total > 0 && total <= limit) {
-                        console.log(`[DB] Value limit passed: ${total} <= ${limit}. Status → Auto-Posted.`);
-                        finalStatus = 'Auto-Posted';
-                    }
+                if (await shouldAutoPostInvoice(grandTotal, invoiceDate, invoiceVendorGst, docType, lineItems, companyId)) {
+                    console.log(`[DB] Auto-post criteria passed for invoice date "${invoiceDate || 'missing'}". Status -> Auto-Posted.`);
+                    finalStatus = 'Auto-Posted';
                 }
             } catch (ruleErr) {
                 console.error('[DB] Error evaluating posting rules:', ruleErr);
@@ -345,9 +576,12 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
     const items = await getInvoiceItems(id);
     const compId = updateValues.company_id || current.company_id;
     const gTotal = updateValues.grand_total || current.grand_total;
+    const invDate = updateValues.invoice_date || current.invoice_date;
+    const vGst = updateValues.vendor_gst || current.vendor_gst;
+    const currentDocType = updateValues.doc_type || current.doc_type;
 
     // Always re-calculate status on save to ensure correct tab movement
-    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal);
+    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal, invDate, vGst, currentDocType);
     updateValues.processing_status = finalStatus;
 
     // Special handling for date strings to ensure PostgreSQL compatibility
@@ -1095,7 +1329,7 @@ export async function applyRevalidationOutcome(
         );
 
         const lineItemsRes = await client.query(
-            'SELECT ledger_id, gl_account_id FROM ap_invoice_lines WHERE ap_invoice_id = $1',
+            'SELECT ledger_id, gl_account_id, description FROM ap_invoice_lines WHERE ap_invoice_id = $1',
             [id]
         );
 
@@ -1106,7 +1340,10 @@ export async function applyRevalidationOutcome(
             lineItemsRes.rows || [],
             current.n8n_validation_status,
             current.company_id,
-            current.grand_total
+            current.grand_total,
+            current.invoice_date,
+            current.vendor_gst,
+            current.doc_type
         );
 
         const updateRes = await client.query(
@@ -1275,7 +1512,10 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             tempLineItems,
             invData.n8n_validation_status,
             invData.company_id,
-            invData.grand_total
+            invData.grand_total,
+            invData.invoice_date,
+            invData.vendor_gst,
+            invData.doc_type
         );
 
         console.log(`[DB] ingestN8nData Final Status for ${invoiceId}: ${finalStatus}`);
@@ -2060,6 +2300,10 @@ export async function setAppConfig(key: string, value: any, companyId?: string) 
  * the DB is never left in a half-updated state.
  */
 export async function reEvaluateHighAmountFlags(rules: any) {
+    // Route global re-evaluation through the shared helper so invoice date range and value limit stay aligned.
+    await reEvaluateAutoPostStatuses();
+    return;
+
     const enabled: boolean = rules?.criteria?.enableValueLimit === true;
     const limit: number = enabled ? Number(rules.criteria.valueLimit || 0) : 0;
 
@@ -2124,6 +2368,123 @@ export async function reEvaluateHighAmountFlags(rules: any) {
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('[DB] reEvaluateHighAmountFlags failed, rolled back:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+export async function reEvaluateAutoPostStatuses() {
+    const postingRules = await getAppConfig('posting_rules');
+    // Fall back to the legacy config key so existing saved ranges still participate until they are resaved.
+    const invoiceDateRange = getEffectiveInvoiceDateRange(
+        postingRules?.criteria?.filter_invoice_date_enabled !== undefined
+            ? postingRules
+            : await getAppConfig('global_invoice_date_range')
+    );
+    const autoPostEnabled = postingRules?.postingMode !== 'manual';
+    const valueLimitEnabled: boolean = postingRules?.criteria?.enableValueLimit === true;
+    const valueLimit: number = valueLimitEnabled ? Number(postingRules?.criteria?.valueLimit || 0) : 0;
+    const dateRangeEnabled: boolean = invoiceDateRange.filter_invoice_date_enabled === true;
+    const dateRangeFrom = invoiceDateRange.filter_invoice_date_from || '';
+    const dateRangeTo = invoiceDateRange.filter_invoice_date_to || '';
+    const supplierFilter = getEffectiveSupplierFilter(postingRules);
+    const selectedSupplierIds = supplierFilter.filter_supplier_ids || [];
+    const selectedSupplierGstins = await getSelectedSupplierGstins(postingRules);
+    const hasSupplierFilterRule = supplierFilter.filter_supplier_enabled === true && selectedSupplierIds.length > 0 && selectedSupplierGstins.size > 0;
+    const itemFilter = getEffectiveItemFilter(postingRules);
+    const selectedItemIds = itemFilter.filter_item_ids || [];
+    const selectedItemNames = await getSelectedItemNames(postingRules);
+    const hasItemFilterRule = itemFilter.filter_item_enabled === true && selectedItemIds.length > 0 && selectedItemNames.length > 0;
+    const hasAnyAutoPostRule = autoPostEnabled && ((valueLimitEnabled && valueLimit > 0) || (dateRangeEnabled && !!dateRangeFrom && !!dateRangeTo) || hasSupplierFilterRule || hasItemFilterRule);
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        if (!valueLimitEnabled || valueLimit <= 0) {
+            await client.query(
+                `UPDATE ap_invoices
+                 SET is_high_amount = false, updated_at = NOW()
+                 WHERE is_high_amount = true`,
+                []
+            );
+        } else {
+            await client.query(
+                `UPDATE ap_invoices
+                 SET is_high_amount = (grand_total > $1), updated_at = NOW()
+                 WHERE processing_status IN ('Processing', 'Ready to Post', 'Awaiting Input', 'Auto-Posted')
+                   AND grand_total IS NOT NULL AND grand_total > 0`,
+                [valueLimit]
+            );
+        }
+
+        if (!hasAnyAutoPostRule) {
+            await client.query(
+                `UPDATE ap_invoices
+                 SET processing_status = 'Ready to Post', updated_at = NOW()
+                 WHERE processing_status = 'Auto-Posted'
+                    AND (is_posted_to_tally IS NULL OR is_posted_to_tally = false)`,
+                []
+            );
+        } else {
+            const candidateInvoicesRes = await client.query(
+                `SELECT id, grand_total, invoice_date, vendor_gst, doc_type, processing_status
+                 FROM ap_invoices
+                 WHERE processing_status IN ('Ready to Post', 'Auto-Posted')
+                   AND (is_posted_to_tally IS NULL OR is_posted_to_tally = false)`,
+                []
+            );
+
+            const candidateInvoices = candidateInvoicesRes.rows || [];
+            const candidateInvoiceIds = candidateInvoices.map((invoice: any) => invoice.id);
+            const lineItemsByInvoiceId = new Map<string, any[]>();
+
+            if (candidateInvoiceIds.length > 0) {
+                const lineItemsRes = await client.query(
+                    `SELECT ap_invoice_id, description
+                     FROM ap_invoice_lines
+                     WHERE ap_invoice_id = ANY($1::uuid[])`,
+                    [candidateInvoiceIds]
+                );
+
+                for (const row of lineItemsRes.rows || []) {
+                    const existingLines = lineItemsByInvoiceId.get(row.ap_invoice_id) || [];
+                    existingLines.push(row);
+                    lineItemsByInvoiceId.set(row.ap_invoice_id, existingLines);
+                }
+            }
+
+            for (const invoice of candidateInvoices) {
+                const shouldAutoPost = shouldInvoiceAutoPostWithRules({
+                    grandTotal: invoice.grand_total,
+                    invoiceDate: invoice.invoice_date,
+                    invoiceVendorGst: invoice.vendor_gst,
+                    docType: invoice.doc_type,
+                    lineItems: lineItemsByInvoiceId.get(invoice.id) || [],
+                    postingRules,
+                    invoiceDateRange,
+                    selectedSupplierGstins,
+                    selectedItemNames,
+                });
+
+                const nextStatus = shouldAutoPost ? 'Auto-Posted' : 'Ready to Post';
+                if (invoice.processing_status !== nextStatus) {
+                    await client.query(
+                        `UPDATE ap_invoices
+                         SET processing_status = $2, updated_at = NOW()
+                         WHERE id = $1`,
+                        [invoice.id, nextStatus]
+                    );
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+        console.log('[DB] reEvaluateAutoPostStatuses: refreshed global auto-post routing');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[DB] reEvaluateAutoPostStatuses failed, rolled back:', err);
         throw err;
     } finally {
         client.release();
