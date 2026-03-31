@@ -79,6 +79,10 @@ const ALLOWED_CHANNELS = [
     'dialog:open-directory',
     'config:get-storage-path',
     'config:set-storage-path',
+    'config:get-rules',
+    'config:save-rules',
+    'config:get-extended-criteria',
+    'config:save-extended-criteria',
     'items:get-all',
 ];
 

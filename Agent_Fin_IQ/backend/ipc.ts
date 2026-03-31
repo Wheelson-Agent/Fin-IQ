@@ -939,8 +939,12 @@ export function registerIpcHandlers() {
         return await queries.getAppConfig('posting_rules', companyId);
     });
 
-    ipcMain.handle('config:save-rules', async (_event, { rules, companyId }) => {
-        await queries.setAppConfig('posting_rules', rules, companyId);
+    ipcMain.handle('config:save-rules', async (_event, { rules }) => {
+        // Always save globally (company_id = null) — invoices have company_id = null,
+        // so a company-scoped save would never be found by getAppConfig.
+        await queries.setAppConfig('posting_rules', rules, undefined);
+        // Re-evaluate is_high_amount and statuses for all active invoices atomically.
+        await queries.reEvaluateHighAmountFlags(rules);
         return { success: true };
     });
 

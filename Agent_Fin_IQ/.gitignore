@@ -4,9 +4,13 @@ dist/
 release/
 
 # Config secrets
+config/
 config/.env
 config/app.config.json
 config/google-service-account.json
+debug_ocr.log
+n8n_debug.log
+electron/dump.html
 
 # Data and Artifacts
 data/

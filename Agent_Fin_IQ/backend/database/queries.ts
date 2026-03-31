@@ -168,25 +168,23 @@ export async function evaluateInvoiceStatus(
     if (majorChecksPassed) {
         if (vendorPassed && ledgerPassed && hasInvoiceNo && stockItemsMatch) {
             let finalStatus = 'Ready to Post';
-            
-            // --- POSTING RULES EVALUATION ---
-            if (companyId) {
-                try {
-                    const rules = await getAppConfig('posting_rules', companyId);
-                    if (rules && rules.postingMode === 'auto') {
-                        const limit = rules.criteria?.enableValueLimit ? (rules.criteria.valueLimit || 0) : Infinity;
-                        const total = Number(grandTotal || 0);
 
-                        if (total <= limit) {
-                            console.log(`[DB] Auto-Posting: Total ${total} <= Limit ${limit}. Triggering 'Auto-Posted'.`);
-                            finalStatus = 'Auto-Posted';
-                        }
+            // --- POSTING RULES EVALUATION ---
+            // Use companyId || undefined so null company_id still performs a global lookup.
+            try {
+                const rules = await getAppConfig('posting_rules', companyId || undefined);
+                if (rules?.criteria?.enableValueLimit) {
+                    const limit = Number(rules.criteria.valueLimit || 0);
+                    const total = Number(grandTotal || 0);
+                    if (total > 0 && total <= limit) {
+                        console.log(`[DB] Value limit passed: ${total} <= ${limit}. Status → Auto-Posted.`);
+                        finalStatus = 'Auto-Posted';
                     }
-                } catch (ruleErr) {
-                    console.error('[DB] Error evaluating posting rules:', ruleErr);
                 }
+            } catch (ruleErr) {
+                console.error('[DB] Error evaluating posting rules:', ruleErr);
             }
-            
+
             return finalStatus;
         } else {
             // Structurally valid but missing master data or invoice number -> Awaiting Input
@@ -1282,6 +1280,20 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
 
         console.log(`[DB] ingestN8nData Final Status for ${invoiceId}: ${finalStatus}`);
 
+        // --- IS HIGH AMOUNT FLAG ---
+        let isHighAmount = false;
+        try {
+            const postingRules = await getAppConfig('posting_rules', invData.company_id || undefined);
+            if (postingRules?.criteria?.enableValueLimit) {
+                const limit = Number(postingRules.criteria.valueLimit || 0);
+                const total = Number(invData.grand_total || 0);
+                isHighAmount = total > 0 && total > limit;
+            }
+        } catch (flagErr) {
+            console.error('[DB] Error evaluating is_high_amount flag:', flagErr);
+        }
+        invData.is_high_amount = isHighAmount;
+
         // --- DYNAMIC DATABASE SCHEMAS --- 
         const allowedApInvoicesCols = [
             "ocr_raw_payload", "company_id", "vendor_id", "purchase_order_id", "invoice_date", "due_date",
@@ -2039,5 +2051,81 @@ export async function setAppConfig(key: string, value: any, companyId?: string) 
             `INSERT INTO app_config (config_key, config_value, company_id) VALUES ($1, $2, $3)`,
             [key, valueJson, companyId || null]
         );
+    }
+}
+
+/**
+ * Batch-update is_high_amount AND processing_status on all active invoices when
+ * the value limit rule changes. All 3 UPDATEs run in a single transaction so
+ * the DB is never left in a half-updated state.
+ */
+export async function reEvaluateHighAmountFlags(rules: any) {
+    const enabled: boolean = rules?.criteria?.enableValueLimit === true;
+    const limit: number = enabled ? Number(rules.criteria.valueLimit || 0) : 0;
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        if (!enabled || limit <= 0) {
+            // Rule is OFF: clear all high-amount flags
+            await client.query(
+                `UPDATE ap_invoices SET is_high_amount = false, updated_at = NOW()
+                 WHERE is_high_amount = true`,
+                []
+            );
+            // Move value-limit Auto-Posted invoices back to Ready to Post.
+            // Safe because evaluateInvoiceStatus is the only code path that sets Auto-Posted;
+            // invoices actually posted to Tally have is_posted_to_tally = true.
+            await client.query(
+                `UPDATE ap_invoices
+                 SET processing_status = 'Ready to Post', updated_at = NOW()
+                 WHERE processing_status = 'Auto-Posted'
+                   AND (is_posted_to_tally IS NULL OR is_posted_to_tally = false)`,
+                []
+            );
+            await client.query('COMMIT');
+            console.log('[DB] reEvaluateHighAmountFlags: rule off — cleared flags, reverted Auto-Posted');
+            return;
+        }
+
+        // Rule is ON with a valid limit.
+        // 1. Update is_high_amount flag for all active invoices
+        await client.query(
+            `UPDATE ap_invoices
+             SET is_high_amount = (grand_total > $1), updated_at = NOW()
+             WHERE processing_status IN ('Processing', 'Ready to Post', 'Awaiting Input', 'Auto-Posted')
+               AND grand_total IS NOT NULL AND grand_total > 0`,
+            [limit]
+        );
+
+        // 2. Move over-limit Auto-Posted invoices back to Ready to Post
+        await client.query(
+            `UPDATE ap_invoices
+             SET processing_status = 'Ready to Post', updated_at = NOW()
+             WHERE processing_status = 'Auto-Posted'
+               AND grand_total IS NOT NULL AND grand_total > $1
+               AND (is_posted_to_tally IS NULL OR is_posted_to_tally = false)`,
+            [limit]
+        );
+
+        // 3. Move under-limit Ready-to-Post invoices to Auto-Posted
+        await client.query(
+            `UPDATE ap_invoices
+             SET processing_status = 'Auto-Posted', updated_at = NOW()
+             WHERE processing_status = 'Ready to Post'
+               AND grand_total IS NOT NULL AND grand_total > 0 AND grand_total <= $1
+               AND (is_posted_to_tally IS NULL OR is_posted_to_tally = false)`,
+            [limit]
+        );
+
+        await client.query('COMMIT');
+        console.log(`[DB] reEvaluateHighAmountFlags: updated flags and statuses with limit=${limit}`);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[DB] reEvaluateHighAmountFlags failed, rolled back:', err);
+        throw err;
+    } finally {
+        client.release();
     }
 }
