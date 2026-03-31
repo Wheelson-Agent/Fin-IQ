@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, Filter, FilterX, MoreVertical,
   Calendar as CalendarIcon, Layers, FileText, ArrowRight, Download, Eye, Clock, ShieldCheck, Mail, Info, Trash2, X, RefreshCw,
-  FileSearch, Archive, Check, Percent, ReceiptText, Upload, UploadCloud, TrendingUp
+  FileSearch, Archive, Check, Percent, ReceiptText, Upload, UploadCloud, TrendingUp, Users
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -34,6 +34,8 @@ interface APRecord {
   invoiceNo: string;
   date: string;
   supplier: string;
+  vendorGst: string;
+  itemDescriptions: string[];
   amount: number;
   taxPct: number;
   status: RecordStatus;
@@ -80,21 +82,149 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
-function RoutingFlags({ record, valueLimitConfig }: {
-  record: { isHighAmount: boolean };
+const formatDateRangeLabel = (value: string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const normalizeDateOnly = (value: string | null | undefined) => {
+  if (!value || value === 'Unknown') return '';
+  const directMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (directMatch) return `${directMatch[1]}-${directMatch[2]}-${directMatch[3]}`;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const normalizeGstValue = (value: string | null | undefined) => String(value || '').trim().toUpperCase();
+const normalizeItemText = (value: string | null | undefined) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const isOutsideConfiguredDateRange = (invoiceDate: string, config: { enabled: boolean; from: string; to: string } | null) => {
+  if (!config?.enabled || !config.from || !config.to) return false;
+  const invoiceDateOnly = normalizeDateOnly(invoiceDate);
+  if (!invoiceDateOnly) return false;
+
+  // Compare normalized YYYY-MM-DD strings so the routing flag stays aligned with backend date-only checks.
+  return invoiceDateOnly < config.from || invoiceDateOnly > config.to;
+};
+
+const itemDescriptionMatches = (description: string, selectedItemName: string) => {
+  const normalizedDescription = normalizeItemText(description);
+  const normalizedItemName = normalizeItemText(selectedItemName);
+  if (!normalizedDescription || !normalizedItemName) return false;
+  if (normalizedDescription === normalizedItemName) return true;
+  return new RegExp(`(^| )${normalizedItemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).test(normalizedDescription) ||
+    new RegExp(`(^| )${normalizedDescription.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).test(normalizedItemName);
+};
+
+/* function RoutingFlags({ record, valueLimitConfig, invoiceDateRangeConfig }: {
+  record: { isHighAmount: boolean; date: string };
   valueLimitConfig: { enabled: boolean; limit: number } | null;
+  invoiceDateRangeConfig: { enabled: boolean; from: string; to: string } | null;
 }) {
   const flags: { icon: React.ReactNode; label: string }[] = [];
   if (record.isHighAmount && valueLimitConfig?.enabled) {
     flags.push({ icon: <TrendingUp className="w-2.5 h-2.5 shrink-0" />, label: `Amount Cap · ${formatCurrency(valueLimitConfig.limit)}` });
   }
   if (flags.length === 0) return <span className="text-slate-300 text-[11px] select-none">—</span>;
+  if (isOutsideConfiguredDateRange(record.date, invoiceDateRangeConfig)) {
+    flags.push({
+      icon: <CalendarIcon className="w-2.5 h-2.5 shrink-0" />,
+      label: `Date Range Â· ${formatDateRangeLabel(invoiceDateRangeConfig!.from)} to ${formatDateRangeLabel(invoiceDateRangeConfig!.to)}`
+    });
+  }
   return (
     <div className="flex flex-col gap-1.5">
       {flags.map((flag, i) => (
         <div key={i} className="flex items-center gap-1.5 w-fit bg-amber-50 border border-amber-300 rounded-full px-2.5 py-1 shadow-sm" title="Routed here by an active business rule">
           <span className="text-amber-600">{flag.icon}</span>
           <span className="text-[9px] font-black text-amber-700 uppercase tracking-wide leading-none whitespace-nowrap">{flag.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+} */
+
+function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, supplierFilterConfig, itemFilterConfig }: {
+  record: { isHighAmount: boolean; date: string; vendorGst: string; docTypeLabel: string; itemDescriptions: string[]; status: RecordStatus };
+  valueLimitConfig: { enabled: boolean; limit: number } | null;
+  invoiceDateRangeConfig: { enabled: boolean; from: string; to: string } | null;
+  supplierFilterConfig: { enabled: boolean; blockedGstins: string[] } | null;
+  itemFilterConfig: { enabled: boolean; blockedItemNames: string[] } | null;
+}) {
+  if (record.status === 'posted') return <span className="text-slate-300 text-[11px] select-none">-</span>;
+
+  const flags: { icon: React.ReactNode; label: string; title: string; className: string; iconWrapClassName: string; iconClassName: string; textClassName: string }[] = [];
+
+  if (record.isHighAmount && valueLimitConfig?.enabled) {
+    flags.push({
+      icon: <TrendingUp className="w-2.5 h-2.5 shrink-0" />,
+      label: 'High Value',
+      title: `High value invoice. Limit: ${formatCurrency(valueLimitConfig.limit)}`,
+      className: 'bg-white border-slate-200',
+      iconWrapClassName: 'bg-amber-50 border border-amber-200',
+      iconClassName: 'text-amber-600',
+      textClassName: 'text-slate-700',
+    });
+  }
+
+  if (isOutsideConfiguredDateRange(record.date, invoiceDateRangeConfig)) {
+    flags.push({
+      icon: <CalendarIcon className="w-2.5 h-2.5 shrink-0" />,
+      label: 'Outside Date Range',
+      title: `Outside allowed invoice date range. Allowed: ${formatDateRangeLabel(invoiceDateRangeConfig!.from)} to ${formatDateRangeLabel(invoiceDateRangeConfig!.to)}`,
+      className: 'bg-white border-slate-200',
+      iconWrapClassName: 'bg-blue-50 border border-blue-200',
+      iconClassName: 'text-blue-600',
+      textClassName: 'text-slate-700',
+    });
+  }
+
+  if (supplierFilterConfig?.enabled && supplierFilterConfig.blockedGstins.includes(normalizeGstValue(record.vendorGst))) {
+    flags.push({
+      icon: <Users className="w-2.5 h-2.5 shrink-0" />,
+      label: 'Supplier Blocked',
+      title: `Matched supplier filter. GST: ${String(record.vendorGst || '').trim().toUpperCase() || 'Unknown'}`,
+      className: 'bg-white border-slate-200',
+      iconWrapClassName: 'bg-rose-50 border border-rose-200',
+      iconClassName: 'text-rose-600',
+      textClassName: 'text-slate-700',
+    });
+  }
+
+  if (
+    itemFilterConfig?.enabled &&
+    String(record.docTypeLabel || '').toLowerCase().includes('goods') &&
+    (record.itemDescriptions || []).some((description) =>
+      itemFilterConfig.blockedItemNames.some((itemName) => itemDescriptionMatches(description, itemName))
+    )
+  ) {
+    flags.push({
+      icon: <Layers className="w-2.5 h-2.5 shrink-0" />,
+      label: 'Item Blocked',
+      title: 'Matched item filter on goods line items.',
+      className: 'bg-white border-slate-200',
+      iconWrapClassName: 'bg-emerald-50 border border-emerald-200',
+      iconClassName: 'text-emerald-600',
+      textClassName: 'text-slate-700',
+    });
+  }
+
+  if (flags.length === 0) return <span className="text-slate-300 text-[11px] select-none">-</span>;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {flags.map((flag, i) => (
+        <div key={i} className={`flex items-center gap-1.5 w-fit border rounded-full px-2 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.05)] ${flag.className}`} title={flag.title}>
+          <span className={`flex h-4 w-4 items-center justify-center rounded-full ${flag.iconWrapClassName}`}>
+            <span className={flag.iconClassName}>{flag.icon}</span>
+          </span>
+          <span className={`text-[9px] font-semibold tracking-[0.02em] leading-none whitespace-nowrap ${flag.textClassName}`}>{flag.label}</span>
         </div>
       ))}
     </div>
@@ -139,6 +269,9 @@ export default function APWorkspace() {
   });
   const [pageSize, setPageSize] = useState(10);
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
+  const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
+  const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
+  const [itemFilterConfig, setItemFilterConfig] = useState<{ enabled: boolean; blockedItemNames: string[] } | null>(null);
 
   // Advanced Filter State (Received Tab)
   const [selectedDocTypes, setSelectedDocTypes] = useState<string[]>([]);
@@ -207,6 +340,13 @@ export default function APWorkspace() {
           };
 
           const raw = parseJSON(inv.ocr_raw_payload);
+          const rawLineItems: any[] =
+            (Array.isArray(raw?.line_items) && raw.line_items) ||
+            (Array.isArray(raw?.__ap_workspace?.line_items) && raw.__ap_workspace.line_items) ||
+            [];
+          const itemDescriptions = rawLineItems
+            .map((line: any) => String(line?.description ?? line?.item_description ?? '').trim())
+            .filter(Boolean);
 
           // Normalize keys to match labels and database keys
           Object.keys(raw).forEach(key => {
@@ -314,6 +454,8 @@ export default function APWorkspace() {
             fileName: inv.file_name || 'N/A',
             date: inv.date ? new Date(inv.date).toISOString() : (inv.created_at ? new Date(inv.created_at).toISOString() : 'Unknown'),
             supplier: inv.vendor_name || 'Unknown',
+            vendorGst: String(inv.vendor_gst || ''),
+            itemDescriptions,
             amount: Number(inv.total || inv.grand_total || 0),
             taxPct: (inv.gst && inv.amount) ? (Number(inv.gst) / Number(inv.amount)) * 100 : 0,
             status: status,
@@ -383,7 +525,50 @@ export default function APWorkspace() {
         } else {
           setValueLimitConfig({ enabled: false, limit: 0 });
         }
-      } catch { setValueLimitConfig(null); }
+
+        if (rules?.criteria?.filter_invoice_date_enabled) {
+          setInvoiceDateRangeConfig({
+            enabled: true,
+            from: normalizeDateOnly(rules.criteria.filter_invoice_date_from),
+            to: normalizeDateOnly(rules.criteria.filter_invoice_date_to)
+          });
+        } else {
+          setInvoiceDateRangeConfig({ enabled: false, from: '', to: '' });
+        }
+
+        const selectedSupplierIds = Array.isArray(rules?.criteria?.filter_supplier_ids) ? rules.criteria.filter_supplier_ids : [];
+        if (rules?.criteria?.filter_supplier_enabled && selectedSupplierIds.length) {
+          // Resolve selected vendor IDs to GSTs so the routing badge matches the backend GST-based rule.
+          // @ts-ignore
+          const vendors = await window.api.invoke('vendors:get-all');
+          const blockedGstins = Array.from(new Set((vendors || [])
+            .filter((vendor: any) => selectedSupplierIds.includes(vendor.id))
+            .map((vendor: any) => normalizeGstValue(vendor.gstin))
+            .filter(Boolean)));
+          setSupplierFilterConfig({ enabled: blockedGstins.length > 0, blockedGstins });
+        } else {
+          setSupplierFilterConfig({ enabled: false, blockedGstins: [] });
+        }
+
+        const selectedItemIds = Array.isArray(rules?.criteria?.filter_item_ids) ? rules.criteria.filter_item_ids : [];
+        if (rules?.criteria?.filter_item_enabled && selectedItemIds.length) {
+          // Resolve selected item IDs to names so the routing badge stays aligned with backend name-based matching.
+          // @ts-ignore
+          const items = await window.api.invoke('items:get-all');
+          const blockedItemNames = Array.from(new Set((items || [])
+            .filter((item: any) => item?.is_active !== false && selectedItemIds.includes(item.id))
+            .map((item: any) => normalizeItemText(item.item_name))
+            .filter(Boolean)));
+          setItemFilterConfig({ enabled: blockedItemNames.length > 0, blockedItemNames });
+        } else {
+          setItemFilterConfig({ enabled: false, blockedItemNames: [] });
+        }
+      } catch {
+        setValueLimitConfig(null);
+        setInvoiceDateRangeConfig(null);
+        setSupplierFilterConfig(null);
+        setItemFilterConfig(null);
+      }
     })();
   }, []);
 
@@ -1248,7 +1433,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
+                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-col items-end gap-1">
@@ -1421,7 +1606,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
+                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1569,7 +1754,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
+                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1714,7 +1899,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
+                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
@@ -1849,7 +2034,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <RoutingFlags record={record} valueLimitConfig={valueLimitConfig} />
+                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
