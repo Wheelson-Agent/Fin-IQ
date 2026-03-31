@@ -913,10 +913,6 @@ export async function runStage4(jobId: string): Promise<void> {
             return { angle: bestAngle, confidence, bestScore, secondScore };
         }
 
-        let docOrientationAngle: number | null = null; // degrees clockwise to rotate to upright (0/90/180/270)
-        let docOrientationConfidence: number | null = null; // 0..1
-        let docOrientationMethod: string | null = null;
-
         const tessdataDir = path.resolve(__dirname, '../../tools/tesseract/tessdata');
         const osdDataGz = path.join(tessdataDir, 'osd.traineddata.gz');
         const engDataGz = path.join(tessdataDir, 'eng.traineddata.gz');
@@ -1043,42 +1039,51 @@ export async function runStage4(jobId: string): Promise<void> {
             }
         };
 
-        try {
-            const firstFilePath = job.inputKind === 'image'
-                ? path.join(dir, pageFiles[0])
-                : path.join(pagesDir, pageFiles[0]);
-            const firstBuf = fs.readFileSync(firstFilePath);
+        const detectPageOrientation = async (img: Buffer): Promise<{ angle: number; confidence: number; method: string }> => {
+            let orientationAngle = 0;
+            let orientationConfidence = 0;
+            let orientationMethod = 'none';
 
-            const osd = await detectOrientationOsd(firstBuf).catch((e: any) => {
-                docOrientationMethod = `tesseract_osd_failed:${String(e?.message || e)}`;
-                return null;
-            });
-
-            if (osd) {
-                docOrientationAngle = osd.angle;
-                docOrientationConfidence = osd.confidence;
-                docOrientationMethod = osd.method;
-            }
-
-            // Strict confirmation only when OSD is missing/low-confidence or suggests rotation.
-            const shouldRunStrict = fs.existsSync(engDataGz) && (!osd || osd.angle !== 0 || osd.confidence < 0.2);
-            if (shouldRunStrict) {
-                const strictCandidates: number[] = [0, 180];
-                if (!osd || osd.confidence < 0.4 || [90, 270].includes(osd.angle)) strictCandidates.push(90, 270);
-
-                const strict = await detectOrientationStrict(firstBuf, strictCandidates).catch((e: any) => {
-                    docOrientationMethod = `ocr_strict_failed:${String(e?.message || e)}`;
+            try {
+                const osd = await detectOrientationOsd(img).catch((e: any) => {
+                    orientationMethod = `tesseract_osd_failed:${String(e?.message || e)}`;
                     return null;
                 });
-                if (strict) {
-                    docOrientationAngle = strict.angle;
-                    docOrientationConfidence = strict.confidence;
-                    docOrientationMethod = strict.method;
+
+                if (osd) {
+                    orientationAngle = osd.angle;
+                    orientationConfidence = osd.confidence;
+                    orientationMethod = osd.method;
+                }
+
+                // Strict confirmation only when OSD is missing/low-confidence or suggests rotation.
+                const shouldRunStrict = fs.existsSync(engDataGz) && (!osd || osd.angle !== 0 || osd.confidence < 0.2);
+                if (shouldRunStrict) {
+                    const strictCandidates: number[] = [0, 180];
+                    if (!osd || osd.confidence < 0.4 || [90, 270].includes(osd.angle)) strictCandidates.push(90, 270);
+
+                    const strict = await detectOrientationStrict(img, strictCandidates).catch((e: any) => {
+                        orientationMethod = `ocr_strict_failed:${String(e?.message || e)}`;
+                        return null;
+                    });
+                    if (strict) {
+                        orientationAngle = strict.angle;
+                        orientationConfidence = strict.confidence;
+                        orientationMethod = strict.method;
+                    }
+                }
+            } catch (e: any) {
+                if (!orientationMethod || orientationMethod === 'none') {
+                    orientationMethod = `orientation_detection_failed:${String(e?.message || e)}`;
                 }
             }
-        } catch (e: any) {
-            if (!docOrientationMethod) docOrientationMethod = `orientation_detection_failed:${String(e?.message || e)}`;
-        }
+
+            return {
+                angle: orientationAngle,
+                confidence: orientationConfidence,
+                method: orientationMethod || 'none',
+            };
+        };
 
         const qualityResults: any[] = [];
         const pagesDetailed: any[] = [];
@@ -1165,9 +1170,10 @@ export async function runStage4(jobId: string): Promise<void> {
             const skewDelta = Math.abs(skewLeft.angle - skewRight.angle);
             const skewType = skewDelta <= SKEW_DELTA_THRESHOLD ? 'GLOBAL' : 'NON_UNIFORM';
 
-            const orientationAngle = docOrientationAngle ?? 0;
-            const orientationConfidence = docOrientationConfidence ?? 0;
-            const orientationMethod = docOrientationMethod ?? 'none';
+            const orientation = await detectPageOrientation(imgBuf);
+            const orientationAngle = orientation.angle;
+            const orientationConfidence = orientation.confidence;
+            const orientationMethod = orientation.method;
 
             const isBlurry = blurStatus !== 'OK';
             const blurScore = Math.round(combinedBlurNorm * 1000) / 1000;
@@ -1215,10 +1221,25 @@ export async function runStage4(jobId: string): Promise<void> {
         s4.metrics.totalPages = pageFiles.length;
         s4.metrics.blurryPages = qualityResults.filter(q => q.isBlurry).length;
         s4.metrics.blankPages = qualityResults.filter(q => q.isBlank).length;
+        const ORIENTATION_CONF_THRESH = 0.6;
+        const confidentPageAngles = Array.from(new Set(
+            pagesDetailed
+                .filter((p) => Number(p.orientationConfidence || 0) >= ORIENTATION_CONF_THRESH)
+                .map((p) => Number(p.orientationAngle || 0) || 0)
+        ));
+        const mixedOrientation = confidentPageAngles.length > 1;
+        const firstPageOrientation = pagesDetailed[0] || {};
         s4.metrics.aggregate = {
-            orientationAngle: docOrientationAngle ?? 0,
-            orientationConfidence: docOrientationConfidence ?? 0,
-            orientationMethod: docOrientationMethod ?? 'none',
+            orientationAngle: mixedOrientation
+                ? 0
+                : (Number(firstPageOrientation.orientationAngle || 0) || 0),
+            orientationConfidence: mixedOrientation
+                ? 0
+                : (Number(firstPageOrientation.orientationConfidence || 0) || 0),
+            orientationMethod: pagesDetailed.length <= 1
+                ? String(firstPageOrientation.orientationMethod || 'none')
+                : (mixedOrientation ? 'per_page_mixed' : 'per_page_consensus'),
+            mixedOrientation,
         };
 
         const allBlank = qualityResults.every(q => q.isBlank);
@@ -1267,12 +1288,15 @@ export async function runStage5(jobId: string): Promise<void> {
 
     const s4 = job.stages['Image Quality Assessment'];
     const pagesDetailed: any[] = (s4.metrics?.pages as any[]) || [];
-    const agg = (s4.metrics?.aggregate as any) || {};
-
-    const orientationAngle = Number(agg.orientationAngle || 0) || 0; // degrees CW to rotate to upright
-    const orientationConfidence = Number(agg.orientationConfidence || 0) || 0; // 0..1
     const ORIENTATION_CONF_THRESH = 0.6;
-    const shouldRotateDoc = orientationConfidence >= ORIENTATION_CONF_THRESH && [90, 180, 270].includes(orientationAngle);
+    const isMultiPagePdf = job.inputKind !== 'image' && pagesDetailed.length > 1;
+    const getPageOrientationDecision = (p: any) => {
+        const angle = Number(p?.orientationAngle || 0) || 0;
+        const confidence = Number(p?.orientationConfidence || 0) || 0;
+        const shouldRotate = confidence >= ORIENTATION_CONF_THRESH && [90, 180, 270].includes(angle);
+        return { angle, confidence, shouldRotate };
+    };
+    const firstPageOrientation = pagesDetailed[0] ? getPageOrientationDecision(pagesDetailed[0]) : { angle: 0, confidence: 0, shouldRotate: false };
 
     const BLUR_GOOD_THRESHOLD = 0.15;
     const SKEW_CONF_THRESH = 0.25;
@@ -1288,7 +1312,7 @@ export async function runStage5(jobId: string): Promise<void> {
         const skewOk = Number(p.skewConfidence || 0) >= SKEW_CONF_THRESH && skew >= SKEW_MIN_ABS_DEG;
         const lowInk = Number(p.inkRatio || 0) > 0 && Number(p.inkRatio || 0) < LOW_CONTENT_INK_RATIO;
         const blank = Boolean(p.blankFlag);
-        return (!blank && (blurBad || skewOk || lowInk)) || shouldRotateDoc;
+        return (!blank && (blurBad || skewOk || lowInk)) || getPageOrientationDecision(p).shouldRotate;
     });
 
     if (!needsAny || pagesDetailed.length === 0) {
@@ -1508,6 +1532,7 @@ export async function runStage5(jobId: string): Promise<void> {
         const operationsByFile: Record<string, string[]> = {};
         const afterPages: any[] = [];
         const afterQualities: any[] = [];
+        const perPageOrientationApplied: Record<string, { angle: number; confidence: number } | null> = {};
 
         for (const p of pagesDetailed) {
             const file = String(p.file);
@@ -1526,10 +1551,14 @@ export async function runStage5(jobId: string): Promise<void> {
 
             let buf = fs.readFileSync(srcPath);
             const ops: string[] = [];
+            const pageOrientation = getPageOrientationDecision(p);
 
-            if (shouldRotateDoc) {
-                buf = await sharp(buf).rotate(orientationAngle, { background: whiteBg }).png().toBuffer();
-                ops.push(`rotate:${orientationAngle}deg_cw`);
+            if (pageOrientation.shouldRotate) {
+                buf = await sharp(buf).rotate(pageOrientation.angle, { background: whiteBg }).png().toBuffer();
+                ops.push(`rotate:${pageOrientation.angle}deg_cw`);
+                perPageOrientationApplied[file] = { angle: pageOrientation.angle, confidence: pageOrientation.confidence };
+            } else {
+                perPageOrientationApplied[file] = null;
             }
 
             // Deskew decisions (based on precomputed Stage4 metrics)
@@ -1596,7 +1625,10 @@ export async function runStage5(jobId: string): Promise<void> {
         }
 
         s5.metrics.enhancedPages = enhanced;
-        s5.metrics.orientationApplied = shouldRotateDoc ? { angle: orientationAngle, confidence: orientationConfidence } : null;
+        s5.metrics.orientationApplied = isMultiPagePdf
+            ? null
+            : (firstPageOrientation.shouldRotate ? { angle: firstPageOrientation.angle, confidence: firstPageOrientation.confidence } : null);
+        s5.metrics.perPageOrientationApplied = perPageOrientationApplied;
         s5.metrics.operationsByFile = operationsByFile;
         s5.metrics.afterPages = afterPages;
         s5.metrics.afterPageQualities = afterQualities;

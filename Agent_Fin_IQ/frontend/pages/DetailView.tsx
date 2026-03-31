@@ -122,6 +122,21 @@ const findMatchingOption = (value: any, options: string[]): string => {
   return options.find((option) => String(option ?? '').trim().toLowerCase() === normalized) || '';
 };
 
+const getOptionalBooleanFlag = (...values: any[]): boolean | undefined => {
+  for (const value of values) {
+    if (value === true || value === false) return value;
+    if (typeof value === 'number' && (value === 0 || value === 1)) {
+      return value === 1;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+  }
+  return undefined;
+};
+
 const GST_STATE_MAP: Record<string, string> = {
   "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
   "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar",
@@ -403,16 +418,16 @@ export default function DetailView() {
             n8nValidation = {};
           }
         }
-        const companyVerifiedFromN8n =
-          n8nValidation?.buyer_verification === true ||
-          String(n8nValidation?.buyer_verification).toLowerCase() === 'true';
+        const companyVerifiedFromN8n = getOptionalBooleanFlag(n8nValidation?.buyer_verification) === true;
 
         setRawPayload(raw);
 
-        const vendorVerified =
-          Boolean(raw?.__ap_workspace?.validation?.vendor_verification) ||
-          Boolean(raw?.vendor_verification) ||
-          Boolean(invoiceRecord.is_mapped);
+        const vendorVerified = getOptionalBooleanFlag(
+          n8nValidation?.vendor_verification,
+          raw?.__ap_workspace?.validation?.vendor_verification,
+          raw?.vendor_verification,
+          invoiceRecord.is_mapped,
+        ) === true;
         setIsVendorMapped(vendorVerified);
 
         // Prefill vendor slideout fields from raw payload (best-effort)
