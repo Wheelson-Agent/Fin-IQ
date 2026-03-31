@@ -103,56 +103,144 @@ function RadioPill({
 interface SelectOption { id: string; label: string; }
 function MultiSelect({ options, selectedIds, onToggle, placeholder }: { options: SelectOption[], selectedIds: string[], onToggle: (id: string) => void, placeholder: string }) {
     const [searchTerm, setSearchTerm] = useState('');
-    const filtered = options.filter(opt => opt.label.toLowerCase().includes(searchTerm.toLowerCase()));
+    const [showAllSelected, setShowAllSelected] = useState(false);
+    const selectedOptions = selectedIds
+        .map(id => options.find(option => option.id === id))
+        .filter(Boolean) as SelectOption[];
+    const visibleSelectedOptions = showAllSelected ? selectedOptions : selectedOptions.slice(0, 4);
+    const hiddenSelectedCount = Math.max(0, selectedOptions.length - visibleSelectedOptions.length);
+    const filtered = options
+        .filter(opt => opt.label.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => {
+            const aSelected = selectedIds.includes(a.id) ? 1 : 0;
+            const bSelected = selectedIds.includes(b.id) ? 1 : 0;
+            if (aSelected !== bSelected) return bSelected - aSelected;
+            return a.label.localeCompare(b.label);
+        });
 
     return (
-        <div className="flex flex-col gap-[10px] bg-white border border-[#E2E8F0] rounded-[12px] p-[12px] shadow-sm">
-            <div className="relative">
-                <Search size={14} className="absolute left-[12px] top-1/2 -translate-y-1/2 text-[#94A3B8]" />
-                <input
-                    type="text"
-                    placeholder={placeholder}
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-[#F8FAFC] border-none rounded-[8px] pl-[34px] pr-[12px] py-[8px] text-[12px] font-bold outline-none focus:ring-2 focus:ring-[#1E6FD91A]"
-                />
-            </div>
-            
-            <div className="max-h-[160px] overflow-y-auto flex flex-col gap-[4px] pr-[4px]">
-                {filtered.length === 0 ? (
-                    <div className="text-center py-[20px] text-[11px] text-[#94A3B8]">No matches found</div>
-                ) : (
-                    filtered.map(opt => {
-                        const isSelected = selectedIds.includes(opt.id);
-                        return (
-                            <button
-                                key={opt.id}
-                                onClick={() => onToggle(opt.id)}
-                                className={`flex items-center justify-between p-[8px_12px] rounded-[8px] text-left transition-all ${isSelected ? 'bg-[#1E6FD910] text-[#1E6FD9]' : 'hover:bg-[#F1F5F9] text-[#64748B]'}`}
-                            >
-                                <span className="text-[12px] font-bold truncate">{opt.label}</span>
-                                {isSelected && <Check size={14} />}
-                            </button>
-                        );
-                    })
-                )}
+        <div className="overflow-hidden rounded-[16px] border border-[#D9E4F2] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FBFF_100%)] shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+            <div className="border-b border-[#E8EEF7] bg-[linear-gradient(135deg,rgba(30,111,217,0.06),rgba(16,185,129,0.05))] px-[14px] py-[12px]">
+                <div className="flex items-center justify-between gap-[12px]">
+                    <div>
+                        <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[#64748B]">Selected Items</div>
+                        <div className="text-[12px] font-semibold text-[#1A2640] mt-[2px]">
+                            {selectedOptions.length ? `${selectedOptions.length} chosen for routing control` : 'Choose one or more entries to keep matching invoices in Ready to Post'}
+                        </div>
+                    </div>
+                    {selectedOptions.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => selectedIds.forEach(id => onToggle(id))}
+                            className="rounded-full border border-[#D7E3F4] bg-white px-[10px] py-[5px] text-[10px] font-black uppercase tracking-[0.12em] text-[#5B6B84] transition-colors hover:border-[#B9CCE6] hover:text-[#1A2640]"
+                        >
+                            Clear All
+                        </button>
+                    )}
+                </div>
+                <div className="mt-[12px] flex flex-wrap gap-[8px]">
+                    {selectedOptions.length > 0 ? visibleSelectedOptions.map(option => (
+                        <motion.button
+                            key={option.id}
+                            type="button"
+                            whileTap={{ scale: 0.96 }}
+                            onClick={() => onToggle(option.id)}
+                            className="group flex items-center gap-[8px] rounded-full border border-[#B9D3F8] bg-white px-[12px] py-[7px] text-left shadow-[0_4px_10px_rgba(30,111,217,0.10)] transition-all hover:border-[#8FB7F0] hover:shadow-[0_8px_18px_rgba(30,111,217,0.16)]"
+                        >
+                            <span className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-[#E8F1FF] text-[#1E6FD9]">
+                                <Check size={12} />
+                            </span>
+                            <span className="max-w-[260px] truncate text-[11px] font-bold text-[#1A2640]">{option.label}</span>
+                            <span className="text-[#94A3B8] transition-colors group-hover:text-[#1A2640]">
+                                <X size={12} />
+                            </span>
+                        </motion.button>
+                    )) : (
+                        <div className="rounded-[12px] border border-dashed border-[#CFE0F6] bg-white/70 px-[12px] py-[10px] text-[11px] font-medium text-[#7B8BA5]">
+                            Selected entries will appear here for quick review and removal.
+                        </div>
+                    )}
+                    {selectedOptions.length > 4 && (
+                        <button
+                            type="button"
+                            onClick={() => setShowAllSelected(!showAllSelected)}
+                            className="rounded-full border border-dashed border-[#B9CCE6] bg-white/80 px-[12px] py-[7px] text-[10px] font-black uppercase tracking-[0.12em] text-[#56739F] transition-colors hover:border-[#8FB7F0] hover:text-[#1A2640]"
+                        >
+                            {showAllSelected ? 'Show Less' : `+${hiddenSelectedCount} More`}
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {selectedIds.length > 0 && (
-                <div className="border-t border-[#F1F5F9] pt-[10px] mt-[4px] flex flex-wrap gap-[6px]">
-                    {selectedIds.map(id => {
-                        const opt = options.find(o => o.id === id);
-                        return (
-                            <div key={id} className="bg-[#1E6FD9] text-white p-[4px_10px] rounded-full text-[10px] font-bold flex items-center gap-[6px]">
-                                {opt?.label}
-                                <button onClick={() => onToggle(id)} className="bg-transparent border-none p-0 text-white/70 hover:text-white cursor-pointer">
-                                    <X size={12} />
-                                </button>
-                            </div>
-                        );
-                    })}
+            <div className="p-[14px]">
+                <div className="relative rounded-[14px] border border-[#E2E8F0] bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                    <Search size={15} className="absolute left-[14px] top-1/2 -translate-y-1/2 text-[#7C8DA6]" />
+                    <input
+                        type="text"
+                        placeholder={placeholder}
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full rounded-[14px] border-none bg-transparent pl-[40px] pr-[44px] py-[11px] text-[12px] font-bold text-[#1A2640] outline-none placeholder:text-[#94A3B8]"
+                    />
+                    {searchTerm && (
+                        <button
+                            type="button"
+                            onClick={() => setSearchTerm('')}
+                            className="absolute right-[12px] top-1/2 -translate-y-1/2 rounded-full p-[4px] text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#1A2640]"
+                        >
+                            <X size={12} />
+                        </button>
+                    )}
                 </div>
-            )}
+
+                <div className="mt-[10px] flex items-center justify-between">
+                    <div className="text-[10px] font-black uppercase tracking-[0.12em] text-[#8A99B2]">
+                        {searchTerm ? 'Matching Results' : 'Browse Active Options'}
+                    </div>
+                    <div className="rounded-full bg-[#EEF4FF] px-[8px] py-[4px] text-[10px] font-black uppercase tracking-[0.08em] text-[#4D6B9A]">
+                        {filtered.length} shown
+                    </div>
+                </div>
+
+                <div className="mt-[10px] max-h-[220px] overflow-y-auto rounded-[14px] border border-[#E8EEF7] bg-white/80 p-[6px]">
+                    {filtered.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-[28px] text-center">
+                            <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-[#EFF5FF] text-[#7C8DA6]">
+                                <Search size={16} />
+                            </div>
+                            <div className="mt-[10px] text-[12px] font-bold text-[#5F6F89]">No matches found</div>
+                            <div className="mt-[4px] text-[11px] text-[#94A3B8]">Try a different keyword or clear the search.</div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col gap-[6px]">
+                            {filtered.map(opt => {
+                                const isSelected = selectedIds.includes(opt.id);
+                                return (
+                                    <button
+                                        key={opt.id}
+                                        type="button"
+                                        onClick={() => onToggle(opt.id)}
+                                        className={`group flex items-center gap-[12px] rounded-[12px] border px-[12px] py-[11px] text-left transition-all ${
+                                            isSelected
+                                                ? 'border-[#B9D3F8] bg-[linear-gradient(135deg,rgba(30,111,217,0.12),rgba(16,185,129,0.08))] shadow-[0_8px_18px_rgba(30,111,217,0.10)]'
+                                                : 'border-transparent bg-[#FBFDFF] hover:border-[#DCE8F7] hover:bg-[#F7FAFE]'
+                                        }`}
+                                    >
+                                        <span className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border ${
+                                            isSelected ? 'border-[#93C5FD] bg-white text-[#1E6FD9]' : 'border-[#D5E0EF] bg-white text-transparent group-hover:text-[#9AAAC2]'
+                                        }`}>
+                                            <Check size={12} />
+                                        </span>
+                                        <span className={`min-w-0 flex-1 text-[12px] font-bold ${isSelected ? 'text-[#1A2640]' : 'text-[#526884]'}`}>
+                                            <span className="block truncate">{opt.label}</span>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
@@ -2498,6 +2586,72 @@ export default function Config() {
                     </motion.div>
                 </AnimatePresence>
             </div>
+
+            {/* ─── Sticky Bottom Save Bar ─────────────────────────────── */}
+            <AnimatePresence>
+                {(hasChanges || saved) && (
+                    <motion.div
+                        key="sticky-save-bar"
+                        initial={{ y: 80, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: 80, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+                        className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-3 border-t border-slate-200/80"
+                        style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)' }}
+                    >
+                        <div className="flex items-center gap-2 text-[13px] text-slate-500 font-medium">
+                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                            {saved ? 'All changes saved' : 'You have unsaved changes'}
+                        </div>
+                        <div className="flex items-center gap-3">
+                            {hasChanges && !saved && (
+                                <button
+                                    onClick={() => {
+                                        setPostingMode(committedConfig.postingMode);
+                                        setSources(committedConfig.sources);
+                                        setDestination(committedConfig.destination);
+                                        setReports(committedConfig.reports);
+                                        setCriteria(committedConfig.criteria);
+                                        setCriteriaExtended(committedConfig.criteriaExtended);
+                                        setSourceConfigs(committedConfig.sourceConfigs);
+                                        setDestConfigs(committedConfig.destConfigs);
+                                        setReportConfigs(committedConfig.reportConfigs);
+                                        setStorage(committedConfig.storage);
+                                    }}
+                                    className="text-[13px] font-semibold text-slate-500 hover:text-slate-700 px-4 py-2 rounded-[10px] hover:bg-slate-100 transition-colors"
+                                >
+                                    Discard
+                                </button>
+                            )}
+                            <motion.button
+                                onClick={handleSave}
+                                whileHover={{ scale: 1.03 }}
+                                whileTap={{ scale: 0.97 }}
+                                animate={{ scale: saved ? [1, 1.06, 1] : 1 }}
+                                className="flex items-center gap-2 text-white font-bold text-[13px] px-6 py-2 rounded-[10px] border-none cursor-pointer"
+                                style={{
+                                    background: saved ? 'linear-gradient(135deg,#059669,#10B981)' : 'linear-gradient(135deg,#1E6FD9,#7C3AED)',
+                                    boxShadow: saved ? '0 4px 16px rgba(5,150,105,0.35)' : '0 4px 16px rgba(30,111,217,0.35)',
+                                }}
+                            >
+                                <AnimatePresence mode="wait">
+                                    {saved ? (
+                                        <motion.span key="saved" className="flex items-center gap-2"
+                                            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                                            <CheckCircle size={14} /> Saved!
+                                        </motion.span>
+                                    ) : (
+                                        <motion.span key="save" className="flex items-center gap-2"
+                                            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                                            <Save size={14} /> Save Changes
+                                        </motion.span>
+                                    )}
+                                </AnimatePresence>
+                            </motion.button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
