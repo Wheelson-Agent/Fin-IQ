@@ -980,23 +980,59 @@ export function registerIpcHandlers() {
         }
 
         try {
-            const response = await fetch(syncUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    timestamp: new Date().toISOString(),
-                    action: 'manual_sync',
-                    source: 'Agent_Fin_IQ_Desktop'
-                })
-            });
+            const requestPayload = {
+                timestamp: new Date().toISOString(),
+                action: 'manual_sync',
+                source: 'Agent_Fin_IQ_Desktop'
+            };
 
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            const executeSyncRequest = async (method: 'POST' | 'GET') => {
+                const response = await fetch(syncUrl, method === 'POST'
+                    ? {
+                        method,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Cache-Control': 'no-cache',
+                        },
+                        body: JSON.stringify(requestPayload),
+                    }
+                    : {
+                        method,
+                        headers: {
+                            'Cache-Control': 'no-cache',
+                        },
+                    });
+
+                const rawBody = await response.text();
+                return { method, response, rawBody };
+            };
+
+            let requestResult = await executeSyncRequest('POST');
+
+            if (
+                !requestResult.response.ok &&
+                requestResult.response.status === 404 &&
+                /GET requests?/i.test(requestResult.rawBody)
+            ) {
+                console.warn('[IPC] ERP Sync POST rejected because webhook expects GET. Retrying with GET.');
+                requestResult = await executeSyncRequest('GET');
             }
 
-            const data = await response.json();
-            console.log('[IPC] ERP Sync successful:', data);
-            return { success: true, data };
+            if (!requestResult.response.ok) {
+                throw new Error(`ERP sync request failed (${requestResult.response.status}): ${requestResult.rawBody || requestResult.response.statusText}`);
+            }
+
+            const rawBody = requestResult.rawBody;
+            let data: any = null;
+
+            try {
+                data = rawBody ? JSON.parse(rawBody) : null;
+            } catch {
+                data = { message: rawBody || 'ERP sync request accepted' };
+            }
+
+            console.log(`[IPC] ERP Sync successful via ${requestResult.method}:`, data);
+            return { success: true, data, method: requestResult.method };
         } catch (err: any) {
             console.error('[IPC] ERP Sync failed:', err.message);
             return { success: false, error: err.message };
