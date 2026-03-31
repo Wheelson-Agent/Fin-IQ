@@ -180,7 +180,7 @@ export default function DetailView() {
   const [searchParams] = useSearchParams();
   const isFromReceived = searchParams.get('from') === 'received';
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [documentView, setDocumentView] = useState<{ path: string | null; source: 'preocr' | 'original' | 'missing' } | null>(null);
+  const [documentView, setDocumentView] = useState<{ path: string | null; source: 'preocr' | 'original' | 'missing'; totalPages?: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [zoom, setZoom] = useState(100);
