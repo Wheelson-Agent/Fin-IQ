@@ -266,7 +266,7 @@ const TABLE_TABS: TableTab[] = ['received', 'ready', 'input', 'handoff', 'posted
 
 const TAB_LABELS: Record<TableTab, string> = {
   received: 'Received',
-  ready: 'Review for post',
+  ready: 'For Review',
   input: 'Awaiting Input',
   handoff: 'Handoff',
   posted: 'Posted',
@@ -274,7 +274,7 @@ const TAB_LABELS: Record<TableTab, string> = {
 
 const STATUS_FILTER_OPTIONS: { value: RecordStatus; label: string }[] = [
   { value: 'received', label: 'Received' },
-  { value: 'ready', label: 'Review for post' },
+  { value: 'ready', label: 'For Review' },
   { value: 'input', label: 'Awaiting Input' },
   { value: 'handoff', label: 'Handoff' },
   { value: 'posted', label: 'Posted' },
@@ -1740,7 +1740,7 @@ export default function APWorkspace() {
                   </span>
                 </TabsTrigger>
                 <TabsTrigger value="ready" className={tabClass}>
-                  Review for post
+                  For Review
                   <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-emerald-100 group-data-[state=active]:text-emerald-700">
                     {counts.ready}
                   </span>
