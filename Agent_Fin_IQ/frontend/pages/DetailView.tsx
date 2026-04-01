@@ -59,6 +59,7 @@ const getCanonicalKey = (key: string): string => {
   if (normalized === 'date' || normalized === 'inv_date' || normalized === 'bill_date' || normalized === 'invoice_date') return 'date';
   if (normalized === 'amount' || normalized === 'taxable_value' || normalized === 'taxable_amount' || normalized === 'sub_total') return 'sub_total';
   if (normalized === 'gst' || normalized === 'tax' || normalized === 'tax_amount' || normalized === 'tax_total') return 'tax_total';
+  if (normalized === 'sum_of_gst_amount') return 'tax_total';
   if (normalized === 'total' || normalized === 'grand_total' || normalized === 'total_amount' || normalized === 'total_invoice_amount') return 'grand_total';
   if (normalized === 'status' || normalized === 'processing_status') return 'status';
   if (normalized === 'remarks' || normalized === 'fail_reason' || normalized === 'failure_reason') return 'remarks';
@@ -73,6 +74,7 @@ const getCanonicalKey = (key: string): string => {
   if (normalized === 'cgst_pct' || normalized === 'cgst_%' || normalized === 'cgst_percentage') return 'cgst_pct';
   if (normalized === 'sgst_pct' || normalized === 'sgst_%' || normalized === 'sgst_percentage') return 'sgst_pct';
   if (normalized === 'igst_pct' || normalized === 'igst_%' || normalized === 'igst_percentage') return 'igst_pct';
+  if (normalized === 'e-way_bill_no' || normalized === 'e_way_bill_no') return 'eway_bill_no';
   if (normalized === 'buyer_name' || normalized === 'buyer') return 'buyer_name';
   if (normalized === 'buyer_gst' || normalized === 'customer_gst') return 'buyer_gst';
   if (normalized === 'round_off') return 'round_off';
@@ -109,6 +111,194 @@ const normalizeSelectableNames = (value: any): string[] => {
     return [trimmed];
   }
   return [];
+};
+
+const PREFERRED_RAW_KEYS: Record<string, string> = {
+  irn: 'IRN',
+  ack_no: 'Ack No',
+  ack_date: 'Ack Date',
+  eway_bill_no: 'E-Way Bill No',
+  invoice_no: 'Invoice No',
+  date: 'Invoice Date',
+  vendor_name: 'Seller Name',
+  vendor_gst: 'Supplier GST',
+  supplier_pan: 'Supplier PAN',
+  supplier_address: 'Supplier Address',
+  buyer_name: 'Buyer Name',
+  buyer_gst: 'Buyer GST',
+  sub_total: 'Taxable Value',
+  round_off: 'Round Off',
+  grand_total: 'Total Invoice Amount',
+  cgst: 'CGST',
+  sgst: 'SGST',
+  igst: 'IGST',
+  cgst_pct: 'CGST %',
+  sgst_pct: 'SGST %',
+  igst_pct: 'IGST %',
+  tax_total: 'Sum of GST Amount',
+  remarks: 'remarks',
+  doc_type: 'doc_type',
+  buyer_verification: 'buyer_verification',
+  gst_validation_status: 'gst_validation_status',
+  invoice_ocr_data_validation: 'invoice_ocr_data_validation',
+  vendor_verification: 'vendor_verification',
+  duplicate_check: 'duplicate_check',
+  line_item_match_status: 'line_item_match_status',
+};
+
+const deepCloneJson = <T,>(value: T): T => {
+  if (value === null || value === undefined) return value;
+  return JSON.parse(JSON.stringify(value));
+};
+
+const coerceToExistingShape = (existingValue: any, nextValue: any): any => {
+  if (Array.isArray(existingValue)) {
+    return Array.isArray(nextValue) ? nextValue : normalizeSelectableNames(nextValue);
+  }
+  if (typeof existingValue === 'number') {
+    const parsed = Number(nextValue);
+    return Number.isFinite(parsed) ? parsed : existingValue;
+  }
+  if (typeof existingValue === 'boolean') {
+    if (typeof nextValue === 'string') {
+      const normalized = nextValue.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+    return Boolean(nextValue);
+  }
+  if (typeof existingValue === 'string') {
+    if (typeof nextValue === 'boolean') {
+      const normalized = existingValue.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'false') {
+        return existingValue === 'True' || existingValue === 'False'
+          ? (nextValue ? 'True' : 'False')
+          : (nextValue ? 'true' : 'false');
+      }
+    }
+    if (Array.isArray(nextValue)) {
+      return nextValue.join(', ');
+    }
+    return nextValue === null || nextValue === undefined ? '' : String(nextValue);
+  }
+  return nextValue;
+};
+
+const setStructuredField = (target: Record<string, any>, canonicalKey: string, nextValue: any) => {
+  const existingKey = Object.keys(target || {}).find((key) => getCanonicalKey(key) === canonicalKey);
+  const outputKey = existingKey || PREFERRED_RAW_KEYS[canonicalKey] || canonicalKey;
+  const existingValue = existingKey ? target[existingKey] : undefined;
+  target[outputKey] = coerceToExistingShape(existingValue, nextValue);
+};
+
+const setStructuredLineField = (
+  target: Record<string, any>,
+  candidateKeys: string[],
+  nextValue: any,
+  fallbackKey: string
+) => {
+  const existingKey = candidateKeys.find((key) => target[key] !== undefined);
+  const outputKey = existingKey || fallbackKey;
+  const existingValue = existingKey ? target[existingKey] : undefined;
+  target[outputKey] = coerceToExistingShape(existingValue, nextValue);
+};
+
+const buildStructuredLineItem = (baseItem: any, uiItem: any, index: number) => {
+  const structured = (baseItem && typeof baseItem === 'object' && !Array.isArray(baseItem))
+    ? { ...baseItem }
+    : {};
+
+  const qty = Number(uiItem?.qty ?? uiItem?.quantity ?? 1);
+  const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+  const rate = Number(uiItem?.rate ?? uiItem?.unit_price ?? uiItem?.rate_per_pcs ?? 0);
+  const safeRate = Number.isFinite(rate) ? rate : 0;
+  const discount = Number(uiItem?.discount ?? 0);
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+  const explicitAmount = Number(uiItem?.amount);
+  const computedAmount = Number.isFinite(explicitAmount) && explicitAmount !== 0
+    ? explicitAmount
+    : safeQty * safeRate * (1 - safeDiscount / 100);
+
+  setStructuredLineField(structured, ['description', 'item_description'], uiItem?.description ?? '', 'description');
+  setStructuredLineField(structured, ['ledger', 'gl_account_id'], uiItem?.ledger ?? '', structured.gl_account_id !== undefined ? 'gl_account_id' : 'ledger');
+  setStructuredLineField(structured, ['matched_stock_item'], String(uiItem?.matched_stock_item ?? '').trim(), 'matched_stock_item');
+  setStructuredLineField(structured, ['matched_id'], uiItem?.matched_id ?? '', 'matched_id');
+  setStructuredLineField(structured, ['mapped_ledger', 'gl_mapped'], String(uiItem?.mapped_ledger ?? '').trim(), structured.gl_mapped !== undefined ? 'gl_mapped' : 'mapped_ledger');
+  setStructuredLineField(structured, ['possible_gl_names'], normalizeSelectableNames(uiItem?.possible_gl_names), 'possible_gl_names');
+  setStructuredLineField(structured, ['match_status'], uiItem?.match_status ?? '', 'match_status');
+  setStructuredLineField(structured, ['hsn_sac', 'hsn'], uiItem?.hsn_sac ?? '', structured.hsn !== undefined ? 'hsn' : 'hsn_sac');
+  setStructuredLineField(structured, ['tax', 'tax_rate'], uiItem?.tax ?? '', structured.tax_rate !== undefined ? 'tax_rate' : 'tax');
+  setStructuredLineField(structured, ['qty', 'quantity'], safeQty, structured.quantity !== undefined ? 'quantity' : 'qty');
+  setStructuredLineField(
+    structured,
+    ['rate', 'unit_price', 'unitPrice', 'rate_per_pcs'],
+    safeRate,
+    structured.rate_per_pcs !== undefined
+      ? 'rate_per_pcs'
+      : structured.unit_price !== undefined
+        ? 'unit_price'
+        : structured.unitPrice !== undefined
+          ? 'unitPrice'
+          : 'rate'
+  );
+  setStructuredLineField(structured, ['discount'], safeDiscount, 'discount');
+  setStructuredLineField(
+    structured,
+    ['amount', 'total_amount', 'line_amount'],
+    computedAmount,
+    structured.total_amount !== undefined
+      ? 'total_amount'
+      : structured.line_amount !== undefined
+        ? 'line_amount'
+        : 'amount'
+  );
+
+  if (structured.id === undefined) {
+    structured.id = uiItem?.id ?? `${Date.now()}_${index}`;
+  }
+
+  return structured;
+};
+
+const buildSavePayloadPreservingStructure = (
+  rawPayload: Record<string, any> | null,
+  docFields: Record<string, any>,
+  originalDocFields: Record<string, any>,
+  lineItems: any[],
+  originalLineItems: any[]
+) => {
+  const nextPayload = deepCloneJson(
+    rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload) ? rawPayload : {}
+  ) || {};
+
+  Object.keys(docFields || {}).forEach((key) => {
+    if (key === 'doc_type_label' || key === 'file_name') return;
+    if (JSON.stringify(docFields[key]) === JSON.stringify(originalDocFields[key])) return;
+    setStructuredField(nextPayload, key, docFields[key]);
+  });
+
+  const lineItemsChanged = JSON.stringify(lineItems) !== JSON.stringify(originalLineItems);
+  const sourceLineItems: any[] =
+    (Array.isArray(nextPayload.line_items) && nextPayload.line_items) ||
+    (Array.isArray(rawPayload?.line_items) && rawPayload?.line_items) ||
+    (Array.isArray(rawPayload?.__ap_workspace?.line_items) && rawPayload.__ap_workspace.line_items) ||
+    [];
+
+  const savedLineItems = lineItemsChanged
+    ? (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index))
+    : sourceLineItems;
+
+  if (lineItemsChanged || sourceLineItems.length > 0) {
+    nextPayload.line_items = savedLineItems;
+  }
+
+  nextPayload.__ap_workspace = {
+    ...(nextPayload.__ap_workspace || {}),
+    line_items: savedLineItems,
+    last_saved_at: new Date().toISOString(),
+  };
+
+  return nextPayload;
 };
 
 const isGenericGoodsMarker = (value: any): boolean => {
@@ -307,40 +497,13 @@ export default function DetailView() {
     setChangedFieldsList(diff);
 
     const savePromise = (async () => {
-      const normalizedLineItems = (lineItems || []).map((li: any, idx: number) => {
-        const qty = Number(li?.qty ?? li?.quantity ?? 1);
-        const rate = Number(li?.rate ?? li?.unit_price ?? 0);
-        const discountPct = Number(li?.discount ?? 0);
-        const amount = qty * rate * (1 - discountPct / 100);
-        return {
-          id: li?.id ?? `${Date.now()}_${idx}`,
-          description: li?.description ?? '',
-          ledger: li?.ledger ?? '',
-          matched_stock_item: String(li?.matched_stock_item ?? '').trim(),
-          matched_id: li?.matched_id ?? '',
-          mapped_ledger: String(li?.mapped_ledger ?? '').trim(),
-          possible_gl_names: normalizeSelectableNames(li?.possible_gl_names),
-          match_status: li?.match_status ?? '',
-          hsn_sac: li?.hsn_sac ?? '',
-          tax: li?.tax ?? '',
-          qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
-          rate: Number.isFinite(rate) ? rate : 0,
-          discount: Number.isFinite(discountPct) ? discountPct : 0,
-          amount: Number.isFinite(amount) ? amount : 0,
-        };
-      });
-
-      const payloadPatch: Record<string, any> = {
-        ...docFields,
-        line_items: normalizedLineItems,
-        __ap_workspace: {
-          ...(rawPayload?.__ap_workspace || {}),
-          line_items: normalizedLineItems,
-          last_saved_at: new Date().toISOString(),
-        },
-      };
-
-      delete payloadPatch.doc_type_label;
+      const payloadPatch = buildSavePayloadPreservingStructure(
+        rawPayload,
+        docFields,
+        originalDocFields,
+        lineItems,
+        originalLineItems
+      );
 
       // Workspace-only save: update ONLY `ap_invoices.ocr_raw_payload`
       await saveAllInvoiceData(id, { __workspace_only: true, ocr_raw_payload: payloadPatch }, [], 'Admin');
@@ -598,7 +761,7 @@ export default function DetailView() {
         if (rawLineItems.length > 0) {
           const mappedItems = rawLineItems.map((item, idx) => {
             const qty = Number(item?.qty ?? item?.quantity ?? 1);
-            const rate = Number(item?.rate ?? item?.unit_price ?? item?.unitPrice ?? 0);
+            const rate = Number(item?.rate ?? item?.unit_price ?? item?.unitPrice ?? item?.rate_per_pcs ?? 0);
             const discount = Number(item?.discount ?? 0);
             return {
               id: item?.id ?? `${Date.now()}_${idx}`,

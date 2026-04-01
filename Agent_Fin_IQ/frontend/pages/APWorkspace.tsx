@@ -1,25 +1,29 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, Filter, FilterX, MoreVertical,
+import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, MoreVertical, Filter,
   Calendar as CalendarIcon, Layers, FileText, ArrowRight, Download, Eye, Clock, ShieldCheck, Mail, Info, Trash2, X, RefreshCw,
   FileSearch, Archive, Check, Percent, ReceiptText, Upload, UploadCloud, TrendingUp, Users
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Input } from '../components/ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
-import { Calendar } from '../components/ui/calendar';
-import { Label } from '../components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '../components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../components/ui/sheet';
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '../components/ui/drawer';
 import { Progress } from '../components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
+import { Calendar } from '../components/ui/calendar';
+import { Label } from '../components/ui/label';
+import { ScrollArea } from '../components/ui/scroll-area';
+import { Separator } from '../components/ui/separator';
+import { useIsMobile } from '../components/ui/use-mobile';
 import { useDateFilter } from '../context/DateContext';
 import { getInvoices, uploadInvoice, runPipeline, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice } from '../lib/api';
 import { toast } from 'sonner';
@@ -28,6 +32,10 @@ import { Checkbox } from '../components/ui/checkbox';
 
 // --- Types ---
 type RecordStatus = 'received' | 'ready' | 'input' | 'handoff' | 'posted' | 'processing';
+type TableTab = Exclude<RecordStatus, 'processing'>;
+type RoutingFilterMode = 'all' | 'routed' | 'not_routed';
+type RemarksFilterMode = 'all' | 'has' | 'none';
+type ErpReferenceFilterMode = 'all' | 'has' | 'missing';
 
 interface APRecord {
   id: string;
@@ -70,6 +78,29 @@ interface APRecord {
     duplication: boolean;
     ledger: boolean;
   };
+}
+
+interface APWorkspaceStructuredFilters {
+  supplier: string;
+  amountMin: string;
+  amountMax: string;
+  routing: RoutingFilterMode;
+  remarks: RemarksFilterMode;
+  docTypes: string[];
+  statuses: RecordStatus[];
+  uploadDateFrom?: Date;
+  uploadDateTo?: Date;
+  requiredInputs: string[];
+  failureReasons: string[];
+  erpReference: ErpReferenceFilterMode;
+  postedDateFrom?: Date;
+  postedDateTo?: Date;
+}
+
+interface FilterChip {
+  key: string;
+  label: string;
+  onRemove: () => void;
 }
 
 
@@ -231,17 +262,55 @@ function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, s
   );
 }
 
-const DOC_TYPE_OPTIONS = ['Invoice (Goods)', 'Invoice (Service)', 'Unknown'];
-const STATUS_OPTIONS = [
-  { value: 'ready', label: 'FOR REVIEW' },
-  { value: 'input', label: 'AWAITING INPUT' },
-  { value: 'handoff', label: 'HANDOFF' },
-  { value: 'posted', label: 'POSTED' },
-  { value: 'processing', label: 'PROCESSING' }
+const TABLE_TABS: TableTab[] = ['received', 'ready', 'input', 'handoff', 'posted'];
+
+const TAB_LABELS: Record<TableTab, string> = {
+  received: 'Received',
+  ready: 'Review for post',
+  input: 'Awaiting Input',
+  handoff: 'Handoff',
+  posted: 'Posted',
+};
+
+const STATUS_FILTER_OPTIONS: { value: RecordStatus; label: string }[] = [
+  { value: 'received', label: 'Received' },
+  { value: 'ready', label: 'Review for post' },
+  { value: 'input', label: 'Awaiting Input' },
+  { value: 'handoff', label: 'Handoff' },
+  { value: 'posted', label: 'Posted' },
+  { value: 'processing', label: 'Processing' },
 ];
+
+const createDefaultStructuredFilters = (): APWorkspaceStructuredFilters => ({
+  supplier: 'all',
+  amountMin: '',
+  amountMax: '',
+  routing: 'all',
+  remarks: 'all',
+  docTypes: [],
+  statuses: [],
+  uploadDateFrom: undefined,
+  uploadDateTo: undefined,
+  requiredInputs: [],
+  failureReasons: [],
+  erpReference: 'all',
+  postedDateFrom: undefined,
+  postedDateTo: undefined,
+});
+
+const createAllTabFilters = (): Record<TableTab, APWorkspaceStructuredFilters> => ({
+  received: createDefaultStructuredFilters(),
+  ready: createDefaultStructuredFilters(),
+  input: createDefaultStructuredFilters(),
+  handoff: createDefaultStructuredFilters(),
+  posted: createDefaultStructuredFilters(),
+});
+
+const isTableTab = (tab: string): tab is TableTab => TABLE_TABS.includes(tab as TableTab);
 
 export default function APWorkspace() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [records, setRecords] = useState<APRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const { dateFilter } = useDateFilter();
@@ -258,6 +327,8 @@ export default function APWorkspace() {
     handoff: '',
     posted: '',
   });
+  const [filtersByTab, setFiltersByTab] = useState<Record<TableTab, APWorkspaceStructuredFilters>>(createAllTabFilters);
+  const [filterPanelTab, setFilterPanelTab] = useState<TableTab | null>(null);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState<Record<string, number>>({
@@ -272,29 +343,6 @@ export default function APWorkspace() {
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
   const [itemFilterConfig, setItemFilterConfig] = useState<{ enabled: boolean; blockedItemNames: string[] } | null>(null);
-
-  // Advanced Filter State (Received Tab)
-  const [selectedDocTypes, setSelectedDocTypes] = useState<string[]>([]);
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
-  const [selectedSupplier, setSelectedSupplier] = useState<string>('All');
-  const [minAmount, setMinAmount] = useState('');
-  const [maxAmount, setMaxAmount] = useState('');
-  const [receivedDateRange, setReceivedDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({ from: undefined, to: undefined });
-  
-  const suppliers = useMemo(() => {
-    const list = Array.from(new Set(records.map(r => r.supplier))).filter(Boolean);
-    return ['All', ...list.sort()];
-  }, [records]);
-  
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (selectedDocTypes.length > 0) count++;
-    if (selectedStatuses.length > 0) count++;
-    if (selectedSupplier !== 'All') count++;
-    if (minAmount !== '' || maxAmount !== '') count++;
-    if (receivedDateRange.from || receivedDateRange.to) count++;
-    return count;
-  }, [selectedDocTypes, selectedStatuses, selectedSupplier, minAmount, maxAmount, receivedDateRange]);
 
   // No preview state needed anymore
 
@@ -572,6 +620,88 @@ export default function APWorkspace() {
     })();
   }, []);
 
+  const resetAllPages = () => {
+    setCurrentPage(prev => ({
+      ...prev,
+      received: 1,
+      ready: 1,
+      input: 1,
+      handoff: 1,
+      posted: 1,
+    }));
+  };
+
+  const resetPageForTab = (tab: TableTab) => {
+    setCurrentPage(prev => (prev[tab] === 1 ? prev : { ...prev, [tab]: 1 }));
+  };
+
+  const updateTabSearch = (tab: TableTab, value: string) => {
+    setTabFilters(prev => ({ ...prev, [tab]: value }));
+    resetPageForTab(tab);
+  };
+
+  const updateStructuredFilters = (
+    tab: TableTab,
+    updater: Partial<APWorkspaceStructuredFilters> | ((prev: APWorkspaceStructuredFilters) => APWorkspaceStructuredFilters)
+  ) => {
+    setFiltersByTab(prev => ({
+      ...prev,
+      [tab]: typeof updater === 'function' ? updater(prev[tab]) : { ...prev[tab], ...updater },
+    }));
+    resetPageForTab(tab);
+  };
+
+  const clearStructuredFilters = (tab: TableTab) => {
+    setFiltersByTab(prev => ({ ...prev, [tab]: createDefaultStructuredFilters() }));
+    resetPageForTab(tab);
+  };
+
+  const toggleArrayFilterValue = (
+    tab: TableTab,
+    key: 'docTypes' | 'statuses' | 'requiredInputs' | 'failureReasons',
+    value: string
+  ) => {
+    updateStructuredFilters(tab, prev => {
+      const currentValues = prev[key] as string[];
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter(item => item !== value)
+        : [...currentValues, value];
+      return { ...prev, [key]: nextValues };
+    });
+  };
+
+  const normalizeText = (value?: string | null) => value?.trim() || '';
+  const hasRemarks = (record: APRecord) => normalizeText(record.remarks).length > 0;
+  const isRoutedRecord = (record: APRecord) => Boolean(record.isHighAmount && valueLimitConfig?.enabled);
+  const getInputRequirementLabel = (record: APRecord) => normalizeText(record.reason) || normalizeText(record.requiredField) || 'Pending Input';
+  const getFailureReasonLabel = (record: APRecord) => normalizeText(record.reason) || 'Failure';
+
+  const getRecordDate = (value?: string) => {
+    if (!value || value === 'Unknown') return undefined;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  };
+
+  const startOfDay = (date?: Date) => {
+    if (!date) return undefined;
+    const inclusive = new Date(date);
+    inclusive.setHours(0, 0, 0, 0);
+    return inclusive;
+  };
+
+  const formatFilterDate = (date?: Date) => {
+    if (!date) return 'Select date';
+    return date.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  useEffect(() => {
+    resetAllPages();
+  }, [searchQuery, dateFilter.from?.getTime(), dateFilter.to?.getTime(), pageSize]);
+
 
   const confirmUpload = async () => {
     if (!pendingUploads) return;
@@ -803,46 +933,105 @@ export default function APWorkspace() {
       );
     }
 
-    // 3. Advanced Filters (Received Tab panel)
-    if (selectedDocTypes.length > 0) {
-      result = result.filter(r => selectedDocTypes.includes(r.docTypeLabel));
-    }
-    if (selectedStatuses.length > 0) {
-      result = result.filter(r => selectedStatuses.includes(r.status));
-    }
-    if (selectedSupplier !== 'All') {
-      result = result.filter(r => r.supplier === selectedSupplier);
-    }
-    if (minAmount !== '') {
-      result = result.filter(r => r.amount >= Number(minAmount));
-    }
-    if (maxAmount !== '') {
-      result = result.filter(r => r.amount <= Number(maxAmount));
-    }
-    if (receivedDateRange.from || receivedDateRange.to) {
-      const receivedTo = toEndOfDay(receivedDateRange.to);
-      result = result.filter(record => {
-        const d = new Date(record.date);
-        if (receivedDateRange.from && d < receivedDateRange.from) return false;
-        if (receivedTo && d > receivedTo) return false;
+    return result;
+  }, [records, dateFilter, searchQuery]);
+
+  const statusMatchedRecordsByTab = useMemo<Record<TableTab, APRecord[]>>(() => ({
+    received: filteredRecords,
+    ready: filteredRecords.filter(record => record.status === 'ready'),
+    input: filteredRecords.filter(record => record.status === 'input'),
+    handoff: filteredRecords.filter(record => record.status === 'handoff'),
+    posted: filteredRecords.filter(record => record.status === 'posted'),
+  }), [filteredRecords]);
+
+  const supplierOptionsByTab = useMemo<Record<TableTab, string[]>>(() => {
+    return TABLE_TABS.reduce((acc, tab) => {
+      acc[tab] = Array.from(new Set(statusMatchedRecordsByTab[tab].map(record => record.supplier).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b));
+      return acc;
+    }, {} as Record<TableTab, string[]>);
+  }, [statusMatchedRecordsByTab]);
+
+  const receivedDocTypeOptions = useMemo(() => (
+    Array.from(new Set(statusMatchedRecordsByTab.received.map(record => record.docTypeLabel).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+  ), [statusMatchedRecordsByTab]);
+
+  const receivedStatusOptions = useMemo(() => (
+    STATUS_FILTER_OPTIONS.filter(option => statusMatchedRecordsByTab.received.some(record => record.status === option.value))
+  ), [statusMatchedRecordsByTab]);
+
+  const inputRequirementOptions = useMemo(() => (
+    Array.from(new Set(statusMatchedRecordsByTab.input.map(getInputRequirementLabel).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+  ), [statusMatchedRecordsByTab]);
+
+  const handoffReasonOptions = useMemo(() => (
+    Array.from(new Set(statusMatchedRecordsByTab.handoff.map(getFailureReasonLabel).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+  ), [statusMatchedRecordsByTab]);
+
+  const structuredRecordsByTab = useMemo<Record<TableTab, APRecord[]>>(() => {
+    return TABLE_TABS.reduce((acc, tab) => {
+      const filters = filtersByTab[tab];
+      acc[tab] = statusMatchedRecordsByTab[tab].filter(record => {
+        if (filters.supplier !== 'all' && record.supplier !== filters.supplier) return false;
+        if (filters.amountMin !== '' && record.amount < Number(filters.amountMin)) return false;
+        if (filters.amountMax !== '' && record.amount > Number(filters.amountMax)) return false;
+
+        if (filters.routing === 'routed' && !isRoutedRecord(record)) return false;
+        if (filters.routing === 'not_routed' && isRoutedRecord(record)) return false;
+
+        if (tab === 'received') {
+          if (filters.docTypes.length > 0 && !filters.docTypes.includes(record.docTypeLabel)) return false;
+          if (filters.statuses.length > 0 && !filters.statuses.includes(record.status)) return false;
+
+          const uploadDate = getRecordDate(record.createdAt || record.uploadedAt);
+          const uploadFrom = startOfDay(filters.uploadDateFrom);
+          const uploadTo = toEndOfDay(filters.uploadDateTo);
+          if (filters.uploadDateFrom && (!uploadDate || (uploadFrom && uploadDate < uploadFrom))) return false;
+          if (filters.uploadDateTo && (!uploadDate || (uploadTo && uploadDate > uploadTo))) return false;
+        }
+
+        if (tab === 'ready') {
+          if (filters.remarks === 'has' && !hasRemarks(record)) return false;
+          if (filters.remarks === 'none' && hasRemarks(record)) return false;
+        }
+
+        if (tab === 'input') {
+          if (filters.requiredInputs.length > 0 && !filters.requiredInputs.includes(getInputRequirementLabel(record))) return false;
+          if (filters.remarks === 'has' && !hasRemarks(record)) return false;
+          if (filters.remarks === 'none' && hasRemarks(record)) return false;
+        }
+
+        if (tab === 'handoff') {
+          if (filters.failureReasons.length > 0 && !filters.failureReasons.includes(getFailureReasonLabel(record))) return false;
+          if (filters.remarks === 'has' && !hasRemarks(record)) return false;
+          if (filters.remarks === 'none' && hasRemarks(record)) return false;
+        }
+
+        if (tab === 'posted') {
+          if (filters.erpReference === 'has' && !normalizeText(record.erpRef)) return false;
+          if (filters.erpReference === 'missing' && normalizeText(record.erpRef)) return false;
+
+          const postedDate = getRecordDate(record.updatedAt);
+          const postedFrom = startOfDay(filters.postedDateFrom);
+          const postedTo = toEndOfDay(filters.postedDateTo);
+          if (filters.postedDateFrom && (!postedDate || (postedFrom && postedDate < postedFrom))) return false;
+          if (filters.postedDateTo && (!postedDate || (postedTo && postedDate > postedTo))) return false;
+        }
+
         return true;
       });
-    }
-
-    return result;
-  }, [records, dateFilter, searchQuery, selectedDocTypes, selectedStatuses, selectedSupplier, minAmount, maxAmount, receivedDateRange]);
+      return acc;
+    }, {} as Record<TableTab, APRecord[]>);
+  }, [filtersByTab, statusMatchedRecordsByTab, valueLimitConfig]);
 
   const getVisibleTabRecords = (targetTab: string) => {
-    let statusMatch: RecordStatus[] = [];
-    if (targetTab === 'received') return filteredRecords; // Show all for received
-    else if (targetTab === 'ready') statusMatch = ['ready'];
-    else if (targetTab === 'input') statusMatch = ['input'];
-    else if (targetTab === 'handoff') statusMatch = ['handoff'];
-    else if (targetTab === 'posted') statusMatch = ['posted'];
+    if (!isTableTab(targetTab)) return [];
 
-    let base = filteredRecords.filter(r => statusMatch.includes(r.status));
-
-    const tabFilter = tabFilters[targetTab as keyof typeof tabFilters];
+    let base = structuredRecordsByTab[targetTab];
+    const tabFilter = tabFilters[targetTab];
     if (tabFilter) {
       const q = tabFilter.toLowerCase();
       base = base.filter(r =>
@@ -915,6 +1104,503 @@ export default function APWorkspace() {
           >
             Next
           </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDateFilterField = (
+    label: string,
+    value: Date | undefined,
+    onChange: (date: Date | undefined) => void,
+    placeholder: string
+  ) => (
+    <div className="space-y-1.5">
+      <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</Label>
+      <div className="flex items-center gap-2">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 flex-1 justify-start border-slate-200 bg-white px-3 text-left text-xs font-semibold text-slate-700"
+            >
+              <CalendarIcon className="mr-2 h-3.5 w-3.5 text-slate-400" />
+              <span>{value ? formatFilterDate(value) : placeholder}</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto rounded-xl border-slate-200 bg-white p-0 shadow-xl" align="start">
+            <Calendar
+              mode="single"
+              selected={value}
+              onSelect={onChange}
+              initialFocus
+              className="rounded-xl border border-slate-100"
+            />
+          </PopoverContent>
+        </Popover>
+        {value && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            onClick={() => onChange(undefined)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderCheckboxFilterGroup = (
+    label: string,
+    options: { value: string; label: string }[],
+    selectedValues: string[],
+    onToggle: (value: string) => void,
+    emptyMessage: string
+  ) => (
+    <div className="space-y-2.5">
+      <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</Label>
+      {options.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs font-medium text-slate-500">
+          {emptyMessage}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="space-y-2">
+            {options.map(option => (
+              <label
+                key={`${label}-${option.value}`}
+                className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-50"
+              >
+                <Checkbox
+                  checked={selectedValues.includes(option.value)}
+                  onCheckedChange={() => onToggle(option.value)}
+                />
+                <span className="text-sm font-medium text-slate-700">{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const getActiveFilterChips = (tab: TableTab): FilterChip[] => {
+    const filters = filtersByTab[tab];
+    const chips: FilterChip[] = [];
+    const statusLookup = new Map(STATUS_FILTER_OPTIONS.map(option => [option.value, option.label]));
+
+    if (filters.supplier !== 'all') {
+      chips.push({
+        key: 'supplier',
+        label: `Supplier: ${filters.supplier}`,
+        onRemove: () => updateStructuredFilters(tab, { supplier: 'all' }),
+      });
+    }
+
+    if (filters.amountMin || filters.amountMax) {
+      const amountLabel = filters.amountMin && filters.amountMax
+        ? `Amount: ${filters.amountMin} - ${filters.amountMax}`
+        : filters.amountMin
+          ? `Amount: >= ${filters.amountMin}`
+          : `Amount: <= ${filters.amountMax}`;
+      chips.push({
+        key: 'amount',
+        label: amountLabel,
+        onRemove: () => updateStructuredFilters(tab, { amountMin: '', amountMax: '' }),
+      });
+    }
+
+    if (filters.routing !== 'all') {
+      chips.push({
+        key: 'routing',
+        label: `Routing: ${filters.routing === 'routed' ? 'Routed' : 'Not routed'}`,
+        onRemove: () => updateStructuredFilters(tab, { routing: 'all' }),
+      });
+    }
+
+    if (tab === 'received') {
+      filters.docTypes.forEach(docType => {
+        chips.push({
+          key: `doc-${docType}`,
+          label: `Doc type: ${docType}`,
+          onRemove: () => toggleArrayFilterValue(tab, 'docTypes', docType),
+        });
+      });
+      filters.statuses.forEach(status => {
+        chips.push({
+          key: `status-${status}`,
+          label: `Status: ${statusLookup.get(status) || status}`,
+          onRemove: () => toggleArrayFilterValue(tab, 'statuses', status),
+        });
+      });
+      if (filters.uploadDateFrom || filters.uploadDateTo) {
+        const from = filters.uploadDateFrom ? formatFilterDate(filters.uploadDateFrom) : '...';
+        const to = filters.uploadDateTo ? formatFilterDate(filters.uploadDateTo) : '...';
+        chips.push({
+          key: 'upload-date',
+          label: `Upload: ${from} - ${to}`,
+          onRemove: () => updateStructuredFilters(tab, { uploadDateFrom: undefined, uploadDateTo: undefined }),
+        });
+      }
+    }
+
+    if ((tab === 'ready' || tab === 'input' || tab === 'handoff') && filters.remarks !== 'all') {
+      chips.push({
+        key: 'remarks',
+        label: `Remarks: ${filters.remarks === 'has' ? 'Has remarks' : 'No remarks'}`,
+        onRemove: () => updateStructuredFilters(tab, { remarks: 'all' }),
+      });
+    }
+
+    if (tab === 'input') {
+      filters.requiredInputs.forEach(requiredInput => {
+        chips.push({
+          key: `required-${requiredInput}`,
+          label: `Required: ${requiredInput}`,
+          onRemove: () => toggleArrayFilterValue(tab, 'requiredInputs', requiredInput),
+        });
+      });
+    }
+
+    if (tab === 'handoff') {
+      filters.failureReasons.forEach(reason => {
+        chips.push({
+          key: `reason-${reason}`,
+          label: `Reason: ${reason}`,
+          onRemove: () => toggleArrayFilterValue(tab, 'failureReasons', reason),
+        });
+      });
+    }
+
+    if (tab === 'posted') {
+      if (filters.erpReference !== 'all') {
+        chips.push({
+          key: 'erp-reference',
+          label: `ERP Ref: ${filters.erpReference === 'has' ? 'Has ref' : 'Missing ref'}`,
+          onRemove: () => updateStructuredFilters(tab, { erpReference: 'all' }),
+        });
+      }
+      if (filters.postedDateFrom || filters.postedDateTo) {
+        const from = filters.postedDateFrom ? formatFilterDate(filters.postedDateFrom) : '...';
+        const to = filters.postedDateTo ? formatFilterDate(filters.postedDateTo) : '...';
+        chips.push({
+          key: 'posted-date',
+          label: `Posted: ${from} - ${to}`,
+          onRemove: () => updateStructuredFilters(tab, { postedDateFrom: undefined, postedDateTo: undefined }),
+        });
+      }
+    }
+
+    return chips;
+  };
+
+  const renderFilterTrigger = (tab: TableTab) => {
+    const activeCount = getActiveFilterChips(tab).length;
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="relative h-9 gap-2 border-slate-200 bg-white hover:bg-slate-50"
+        onClick={() => setFilterPanelTab(tab)}
+      >
+        <Filter className="h-4 w-4 text-slate-500" />
+        <span className="font-semibold text-slate-700">Filters</span>
+        {activeCount > 0 && (
+          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-black text-white shadow-sm">
+            {activeCount}
+          </span>
+        )}
+      </Button>
+    );
+  };
+
+  const renderFilterChips = (tab: TableTab) => {
+    const chips = getActiveFilterChips(tab);
+    if (chips.length === 0) return null;
+
+    return (
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50/20 px-6 py-2.5">
+        {chips.map(chip => (
+          <Badge
+            key={chip.key}
+            variant="outline"
+            className="flex items-center gap-1.5 rounded-full border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 shadow-none"
+          >
+            <span>{chip.label}</span>
+            <button
+              type="button"
+              className="rounded-full p-0.5 text-blue-500 transition-colors hover:bg-blue-100 hover:text-blue-700"
+              onClick={(event) => {
+                event.stopPropagation();
+                chip.onRemove();
+              }}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+        ))}
+      </div>
+    );
+  };
+
+  const renderFilterPanelSections = (tab: TableTab) => {
+    const filters = filtersByTab[tab];
+    const supplierOptions = supplierOptionsByTab[tab];
+    const activeCount = getActiveFilterChips(tab).length;
+
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ScrollArea className="flex-1 px-4">
+          <div className="space-y-5 py-4">
+            <section className="space-y-4">
+              <div className="space-y-1">
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Common filters</p>
+                <p className="text-sm font-medium text-slate-600">Refine the {TAB_LABELS[tab]} table without leaving the page.</p>
+              </div>
+
+              <div className="space-y-2.5">
+                <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Supplier</Label>
+                <Select value={filters.supplier} onValueChange={(value) => updateStructuredFilters(tab, { supplier: value })}>
+                  <SelectTrigger className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                    <SelectValue placeholder="All suppliers" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value="all">All suppliers</SelectItem>
+                    {supplierOptions.map(supplier => (
+                      <SelectItem key={`${tab}-supplier-${supplier}`} value={supplier}>
+                        {supplier}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Min amount</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={filters.amountMin}
+                    onChange={(event) => updateStructuredFilters(tab, { amountMin: event.target.value })}
+                    className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Max amount</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={filters.amountMax}
+                    onChange={(event) => updateStructuredFilters(tab, { amountMax: event.target.value })}
+                    className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Routing</Label>
+                <Select value={filters.routing} onValueChange={(value: RoutingFilterMode) => updateStructuredFilters(tab, { routing: value })}>
+                  <SelectTrigger className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value="all">All routing</SelectItem>
+                    <SelectItem value="routed">Routed</SelectItem>
+                    <SelectItem value="not_routed">Not routed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </section>
+
+            <Separator />
+
+            {tab === 'received' && (
+              <section className="space-y-4">
+                {renderCheckboxFilterGroup(
+                  'Document type',
+                  receivedDocTypeOptions.map(docType => ({ value: docType, label: docType })),
+                  filters.docTypes,
+                  (value) => toggleArrayFilterValue(tab, 'docTypes', value),
+                  'No document types available in the current dataset.'
+                )}
+
+                {renderCheckboxFilterGroup(
+                  'Status',
+                  receivedStatusOptions.map(option => ({ value: option.value, label: option.label })),
+                  filters.statuses,
+                  (value) => toggleArrayFilterValue(tab, 'statuses', value),
+                  'No statuses available in the current dataset.'
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {renderDateFilterField(
+                    'Upload from',
+                    filters.uploadDateFrom,
+                    (date) => updateStructuredFilters(tab, prev => ({
+                      ...prev,
+                      uploadDateFrom: date,
+                      uploadDateTo: prev.uploadDateTo && date && prev.uploadDateTo < date ? date : prev.uploadDateTo,
+                    })),
+                    'Start date'
+                  )}
+                  {renderDateFilterField(
+                    'Upload to',
+                    filters.uploadDateTo,
+                    (date) => updateStructuredFilters(tab, prev => ({
+                      ...prev,
+                      uploadDateFrom: prev.uploadDateFrom && date && prev.uploadDateFrom > date ? date : prev.uploadDateFrom,
+                      uploadDateTo: date,
+                    })),
+                    'End date'
+                  )}
+                </div>
+              </section>
+            )}
+
+            {tab === 'ready' && (
+              <section className="space-y-4">
+                <div className="space-y-2.5">
+                  <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Remarks</Label>
+                  <Select value={filters.remarks} onValueChange={(value: RemarksFilterMode) => updateStructuredFilters(tab, { remarks: value })}>
+                    <SelectTrigger className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value="all">All remarks</SelectItem>
+                      <SelectItem value="has">Has remarks</SelectItem>
+                      <SelectItem value="none">No remarks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+            )}
+
+            {tab === 'input' && (
+              <section className="space-y-4">
+                {renderCheckboxFilterGroup(
+                  'Required input',
+                  inputRequirementOptions.map(option => ({ value: option, label: option })),
+                  filters.requiredInputs,
+                  (value) => toggleArrayFilterValue(tab, 'requiredInputs', value),
+                  'No input reasons available in the current dataset.'
+                )}
+
+                <div className="space-y-2.5">
+                  <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Remarks</Label>
+                  <Select value={filters.remarks} onValueChange={(value: RemarksFilterMode) => updateStructuredFilters(tab, { remarks: value })}>
+                    <SelectTrigger className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value="all">All remarks</SelectItem>
+                      <SelectItem value="has">Has remarks</SelectItem>
+                      <SelectItem value="none">No remarks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+            )}
+
+            {tab === 'handoff' && (
+              <section className="space-y-4">
+                {renderCheckboxFilterGroup(
+                  'Failure reason',
+                  handoffReasonOptions.map(option => ({ value: option, label: option })),
+                  filters.failureReasons,
+                  (value) => toggleArrayFilterValue(tab, 'failureReasons', value),
+                  'No failure reasons available in the current dataset.'
+                )}
+
+                <div className="space-y-2.5">
+                  <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Remarks</Label>
+                  <Select value={filters.remarks} onValueChange={(value: RemarksFilterMode) => updateStructuredFilters(tab, { remarks: value })}>
+                    <SelectTrigger className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value="all">All remarks</SelectItem>
+                      <SelectItem value="has">Has remarks</SelectItem>
+                      <SelectItem value="none">No remarks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </section>
+            )}
+
+            {tab === 'posted' && (
+              <section className="space-y-4">
+                <div className="space-y-2.5">
+                  <Label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">ERP reference</Label>
+                  <Select value={filters.erpReference} onValueChange={(value: ErpReferenceFilterMode) => updateStructuredFilters(tab, { erpReference: value })}>
+                    <SelectTrigger className="h-10 border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value="all">All ERP refs</SelectItem>
+                      <SelectItem value="has">Has ERP ref</SelectItem>
+                      <SelectItem value="missing">Missing ERP ref</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {renderDateFilterField(
+                    'Posted from',
+                    filters.postedDateFrom,
+                    (date) => updateStructuredFilters(tab, prev => ({
+                      ...prev,
+                      postedDateFrom: date,
+                      postedDateTo: prev.postedDateTo && date && prev.postedDateTo < date ? date : prev.postedDateTo,
+                    })),
+                    'Start date'
+                  )}
+                  {renderDateFilterField(
+                    'Posted to',
+                    filters.postedDateTo,
+                    (date) => updateStructuredFilters(tab, prev => ({
+                      ...prev,
+                      postedDateFrom: prev.postedDateFrom && date && prev.postedDateFrom > date ? date : prev.postedDateFrom,
+                      postedDateTo: date,
+                    })),
+                    'End date'
+                  )}
+                </div>
+              </section>
+            )}
+          </div>
+        </ScrollArea>
+
+        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/70 px-4 py-3">
+          <div className="text-xs font-semibold text-slate-500">
+            {activeCount} active filter{activeCount === 1 ? '' : 's'}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              disabled={activeCount === 0}
+              onClick={() => clearStructuredFilters(tab)}
+            >
+              Clear all
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-slate-200 bg-white"
+              onClick={() => setFilterPanelTab(null)}
+            >
+              Close
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -1040,6 +1726,7 @@ export default function APWorkspace() {
             onValueChange={(val) => {
               setActiveTab(val);
               setSelectedIds(new Set());
+              setFilterPanelTab(null);
               setSearchParams({ tab: val });
             }}
             className="flex-1 flex flex-col w-full h-full"
@@ -1124,203 +1811,15 @@ export default function APWorkspace() {
                   <div className="relative w-full max-w-sm">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
                     <Input
-                      placeholder="Filter by No. or Supplier..."
+                      placeholder="Search by No. or Supplier..."
                       className="pl-9 h-9 bg-white"
                       value={tabFilters.received}
-                      onChange={(e) => setTabFilters({ ...tabFilters, received: e.target.value })}
+                      onChange={(e) => updateTabSearch('received', e.target.value)}
                     />
                   </div>
 
                   <div className="flex items-center gap-4">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 gap-2 border-slate-200 bg-white hover:bg-slate-50 relative"
-                        >
-                          <Filter className="w-4 h-4 text-slate-500" />
-                          <span className="font-semibold text-slate-700">Filters</span>
-                          {activeFilterCount > 0 && (
-                            <span className="absolute -top-1.5 -right-1.5 bg-blue-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                              {activeFilterCount}
-                            </span>
-                          )}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[320px] p-4 bg-white shadow-2xl border-slate-200 rounded-xl z-50 mt-2" align="start">
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                              <Filter className="w-4 h-4 text-blue-600" /> Advanced Filters
-                            </h4>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-auto p-0 text-blue-600 hover:text-blue-700 font-bold text-xs"
-                              onClick={() => {
-                                setSelectedDocTypes([]);
-                                setSelectedStatuses([]);
-                                setSelectedSupplier('All');
-                                setMinAmount('');
-                                setMaxAmount('');
-                                setReceivedDateRange({ from: undefined, to: undefined });
-                              }}
-                            >
-                              Clear All
-                            </Button>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Document Type</Label>
-                              <div className="flex flex-wrap gap-1.5">
-                                {DOC_TYPE_OPTIONS.map(type => (
-                                  <Badge
-                                    key={type}
-                                    variant={selectedDocTypes.includes(type) ? 'default' : 'outline'}
-                                    className={`cursor-pointer text-[10px] py-0.5 px-2 font-bold ${selectedDocTypes.includes(type) ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                    onClick={() => {
-                                      setSelectedDocTypes(prev =>
-                                        prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
-                                      );
-                                    }}
-                                  >
-                                    {type}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Process Status</Label>
-                              <div className="flex flex-wrap gap-1.5">
-                                {STATUS_OPTIONS.map(opt => (
-                                  <Badge
-                                    key={opt.value}
-                                    variant={selectedStatuses.includes(opt.value) ? 'default' : 'outline'}
-                                    className={`cursor-pointer text-[10px] py-0.5 px-2 font-bold ${selectedStatuses.includes(opt.value) ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                    onClick={() => {
-                                      setSelectedStatuses(prev =>
-                                        prev.includes(opt.value) ? prev.filter(s => s !== opt.value) : [...prev, opt.value]
-                                      );
-                                    }}
-                                  >
-                                    {opt.label}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Supplier</Label>
-                              <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
-                                <SelectTrigger className="h-8 text-xs font-bold bg-slate-50 border-slate-200">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className="bg-white border-slate-200 shadow-xl overflow-hidden rounded-lg">
-                                  {suppliers.slice(0, 100).map(s => (
-                                    <SelectItem key={s} value={s} className="text-xs font-medium cursor-pointer hover:bg-slate-50">{s}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-1.5">
-                                <Label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Min Amount</Label>
-                                <div className="relative">
-                                  <span className="absolute left-2 top-1.5 text-slate-400 font-bold text-[10px]">₹</span>
-                                  <Input
-                                    className="h-8 pl-5 text-xs font-bold bg-slate-50 border-slate-200"
-                                    type="number"
-                                    placeholder="0"
-                                    value={minAmount}
-                                    onChange={(e) => setMinAmount(e.target.value)}
-                                  />
-                                </div>
-                              </div>
-                              <div className="space-y-1.5">
-                                <Label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Max Amount</Label>
-                                <div className="relative">
-                                  <span className="absolute left-2 top-1.5 text-slate-400 font-bold text-[10px]">₹</span>
-                                  <Input
-                                    className="h-8 pl-5 text-xs font-bold bg-slate-50 border-slate-200"
-                                    type="number"
-                                    placeholder="∞"
-                                    value={maxAmount}
-                                    onChange={(e) => setMaxAmount(e.target.value)}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px] font-black uppercase tracking-wider text-slate-500 flex items-center justify-between">
-                                Date Range
-                                {(receivedDateRange.from || receivedDateRange.to) && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-auto p-0 text-[10px] font-bold text-slate-400 hover:text-slate-600"
-                                    onClick={() => setReceivedDateRange({ from: undefined, to: undefined })}
-                                  >
-                                    Reset
-                                  </Button>
-                                )}
-                              </Label>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="w-full h-8 justify-start text-left font-bold text-xs bg-slate-50 border-slate-200 px-2 gap-2"
-                                  >
-                                    <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                                    {receivedDateRange.from ? (
-                                      receivedDateRange.to ? (
-                                        <>
-                                          {receivedDateRange.from.toLocaleDateString()} - {receivedDateRange.to.toLocaleDateString()}
-                                        </>
-                                      ) : (
-                                        receivedDateRange.from.toLocaleDateString()
-                                      )
-                                    ) : (
-                                      <span>Pick a date range</span>
-                                    )}
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0 bg-white shadow-2xl border-slate-200 z-[60]" align="start">
-                                  <Calendar
-                                    initialFocus
-                                    mode="range"
-                                    defaultMonth={receivedDateRange.from}
-                                    selected={{
-                                      from: receivedDateRange.from,
-                                      to: receivedDateRange.to
-                                    }}
-                                    onSelect={(range: any) => setReceivedDateRange({ from: range?.from, to: range?.to })}
-                                    numberOfMonths={1}
-                                    className="rounded-md border border-slate-100"
-                                  />
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          </div>
-
-                          <div className="border-t border-slate-100 pt-3">
-                            <Button
-                              className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg shadow-sm"
-                              onClick={() => {
-                                // Close popover - usually handled by clicking outside, but if we had a state we'd use it
-                              }}
-                            >
-                              Apply Filters
-                            </Button>
-                          </div>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
+                    {renderFilterTrigger('received')}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 whitespace-nowrap font-medium">Page Size:</span>
                       <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
@@ -1349,6 +1848,7 @@ export default function APWorkspace() {
                     )}
                   </div>
                 </div>
+                {renderFilterChips('received')}
                 <Table>
                   <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
                     <TableRow className="hover:bg-transparent">
@@ -1415,14 +1915,13 @@ export default function APWorkspace() {
                             <div className="font-bold text-slate-900 text-[14px]">{formatCurrency(record.amount)}</div>
                             <div className="text-[10px] text-slate-500 font-medium flex flex-col items-end gap-1 mt-0.5">
                               <div className="flex items-center gap-1 opacity-75">
-                                <Percent className="w-2.5 h-2.5 text-slate-400" />
                                 <span>
                                   {(() => {
                                     const { igst, cgst, sgst, igstRate, cgstRate, sgstRate } = record.taxBreakdown || {};
                                     if (igst && Number(igst) > 0 && (!cgst || Number(cgst) === 0)) {
-                                      return `IGST ${igstRate ? igstRate + '%' : ''} · ${formatCurrency(Number(igst))}`;
+                                      return `IGST ${igstRate || ''} · ${formatCurrency(Number(igst))}`;
                                     } else if (cgst && Number(cgst) > 0 && sgst && Number(sgst) > 0) {
-                                      const jointRate = (cgstRate && sgstRate) ? `${cgstRate}%+${sgstRate}%` : '';
+                                      const jointRate = (cgstRate && sgstRate) ? `${cgstRate}+${sgstRate}` : '';
                                       return `CGST+SGST ${jointRate} · ${formatCurrency(Number(cgst) + Number(sgst))}`;
                                     }
                                     return `Tax · ${formatCurrency(record.taxAmount)}`;
@@ -1493,7 +1992,7 @@ export default function APWorkspace() {
                       placeholder="Search ready invoices..."
                       className="pl-9 h-9 bg-white"
                       value={tabFilters.ready}
-                      onChange={(e) => setTabFilters({ ...tabFilters, ready: e.target.value })}
+                      onChange={(e) => updateTabSearch('ready', e.target.value)}
                     />
                   </div>
                   <div className="flex items-center gap-4">
@@ -1519,6 +2018,7 @@ export default function APWorkspace() {
                         </Button>
                       </div>
                     )}
+                    {renderFilterTrigger('ready')}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Page Size:</span>
                       <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
@@ -1536,6 +2036,7 @@ export default function APWorkspace() {
                     </div>
                   </div>
                 </div>
+                {renderFilterChips('ready')}
                 <Table>
                   <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
                     <TableRow className="hover:bg-transparent">
@@ -1670,10 +2171,11 @@ export default function APWorkspace() {
                       placeholder="Search documents needing input..."
                       className="pl-9 h-9 bg-white"
                       value={tabFilters.input}
-                      onChange={(e) => setTabFilters({ ...tabFilters, input: e.target.value })}
+                      onChange={(e) => updateTabSearch('input', e.target.value)}
                     />
                   </div>
                   <div className="flex items-center gap-4">
+                    {renderFilterTrigger('input')}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 font-medium">Page Size:</span>
                       <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
@@ -1702,6 +2204,7 @@ export default function APWorkspace() {
                     )}
                   </div>
                 </div>
+                {renderFilterChips('input')}
                 <Table>
                   <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
                     <TableRow className="hover:bg-transparent">
@@ -1807,10 +2310,11 @@ export default function APWorkspace() {
                       placeholder="Search handoffs..."
                       className="pl-9 h-9 bg-white"
                       value={tabFilters.handoff}
-                      onChange={(e) => setTabFilters({ ...tabFilters, handoff: e.target.value })}
+                      onChange={(e) => updateTabSearch('handoff', e.target.value)}
                     />
                   </div>
                   <div className="flex items-center gap-4">
+                    {renderFilterTrigger('handoff')}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 font-medium">Page Size:</span>
                       <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
@@ -1850,6 +2354,7 @@ export default function APWorkspace() {
                     )}
                   </div>
                 </div>
+                {renderFilterChips('handoff')}
                 <Table>
                   <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
                     <TableRow className="hover:bg-transparent">
@@ -1950,10 +2455,11 @@ export default function APWorkspace() {
                       placeholder="Search history..."
                       className="pl-9 h-9 bg-white"
                       value={tabFilters.posted}
-                      onChange={(e) => setTabFilters({ ...tabFilters, posted: e.target.value })}
+                      onChange={(e) => updateTabSearch('posted', e.target.value)}
                     />
                   </div>
                   <div className="flex items-center gap-4">
+                    {renderFilterTrigger('posted')}
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 font-medium">Page Size:</span>
                       <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
@@ -1982,6 +2488,7 @@ export default function APWorkspace() {
                     )}
                   </div>
                 </div>
+                {renderFilterChips('posted')}
                 <Table>
                   <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
                     <TableRow className="hover:bg-transparent">
@@ -2077,6 +2584,33 @@ export default function APWorkspace() {
               </TabsContent>
             </div>
           </Tabs>
+          {filterPanelTab && (
+            isMobile ? (
+              <Drawer open={Boolean(filterPanelTab)} onOpenChange={(open) => { if (!open) setFilterPanelTab(null); }}>
+                <DrawerContent className="max-h-[90vh] bg-white">
+                  <DrawerHeader className="border-b border-slate-200 bg-slate-50/70 text-left">
+                    <DrawerTitle className="text-base font-semibold text-slate-900">Filter {TAB_LABELS[filterPanelTab]}</DrawerTitle>
+                    <DrawerDescription className="text-sm text-slate-500">
+                      Live filters for the {TAB_LABELS[filterPanelTab]} table.
+                    </DrawerDescription>
+                  </DrawerHeader>
+                  {renderFilterPanelSections(filterPanelTab)}
+                </DrawerContent>
+              </Drawer>
+            ) : (
+              <Sheet open={Boolean(filterPanelTab)} onOpenChange={(open) => { if (!open) setFilterPanelTab(null); }}>
+                <SheetContent side="right" className="w-full gap-0 border-l border-slate-200 bg-white p-0 sm:max-w-md">
+                  <SheetHeader className="border-b border-slate-200 bg-slate-50/70 text-left">
+                    <SheetTitle className="text-base font-semibold text-slate-900">Filter {TAB_LABELS[filterPanelTab]}</SheetTitle>
+                    <SheetDescription className="text-sm text-slate-500">
+                      Live filters for the {TAB_LABELS[filterPanelTab]} table.
+                    </SheetDescription>
+                  </SheetHeader>
+                  {renderFilterPanelSections(filterPanelTab)}
+                </SheetContent>
+              </Sheet>
+            )
+          )}
         </Card>
       )}
 
