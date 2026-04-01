@@ -14,9 +14,19 @@ import {
 } from "../components/ui/resizable";
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import { Command } from 'cmdk';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
   createLedgerMaster,
   createItemMaster,
@@ -145,6 +155,8 @@ const PREFERRED_RAW_KEYS: Record<string, string> = {
   duplicate_check: 'duplicate_check',
   line_item_match_status: 'line_item_match_status',
 };
+
+type LineItemPickerMode = 'STOCK_ITEM' | 'LEDGER';
 
 const deepCloneJson = <T,>(value: T): T => {
   if (value === null || value === undefined) return value;
@@ -301,6 +313,37 @@ const buildSavePayloadPreservingStructure = (
   return nextPayload;
 };
 
+const buildWorkspaceRawPayloadSnapshot = (
+  rawPayload: Record<string, any> | null,
+  lineItems: any[],
+  nextDocType?: string
+) => {
+  const nextPayload = deepCloneJson(
+    rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload) ? rawPayload : {}
+  ) || {};
+  const sourceLineItems: any[] =
+    (Array.isArray(nextPayload.line_items) && nextPayload.line_items) ||
+    (Array.isArray(rawPayload?.line_items) && rawPayload?.line_items) ||
+    (Array.isArray(rawPayload?.__ap_workspace?.line_items) && rawPayload.__ap_workspace.line_items) ||
+    [];
+
+  const savedLineItems = (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index));
+
+  nextPayload.line_items = savedLineItems;
+  if (nextDocType) {
+    nextPayload.doc_type = nextDocType;
+  }
+
+  nextPayload.__ap_workspace = {
+    ...(nextPayload.__ap_workspace || {}),
+    line_items: lineItems,
+    last_saved_at: new Date().toISOString(),
+    ...(nextDocType ? { doc_type: nextDocType } : {}),
+  };
+
+  return nextPayload;
+};
+
 const isGenericGoodsMarker = (value: any): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
   return !normalized || normalized === 'goods';
@@ -375,6 +418,14 @@ const normalizeDateOnly = (value: string | null | undefined) => {
   return `${year}-${month}-${day}`;
 };
 
+const hasMeaningfulDisplayValue = (value: unknown) => {
+  if (value === null || value === undefined) return false;
+  const normalized = String(value).trim();
+  if (!normalized) return false;
+  const lowered = normalized.toLowerCase();
+  return lowered !== 'unknown' && lowered !== 'n/a' && lowered !== 'null' && lowered !== 'undefined';
+};
+
 const normalizeGstValue = (value: string | null | undefined) => String(value || '').trim().toUpperCase();
 const normalizeItemText = (value: string | null | undefined) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -403,7 +454,7 @@ export default function DetailView() {
   const tabNames: Record<string, string> = {
     received: 'Received',
     handoff: 'Handoff',
-    ready: 'Review for post',
+    ready: 'For Review',
     input: 'Awaiting Input',
     posted: 'Posted'
   };
@@ -441,9 +492,52 @@ export default function DetailView() {
     return JSON.stringify(docFields) !== JSON.stringify(originalDocFields) ||
       JSON.stringify(lineItems) !== JSON.stringify(originalLineItems);
   }, [docFields, originalDocFields, lineItems, originalLineItems]);
+  const isDirtyRef = React.useRef(isDirty);
+  const silentRefreshInFlightRef = React.useRef(false);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
 
   const [showSaveSummary, setShowSaveSummary] = useState(false);
   const [changedFieldsList, setChangedFieldsList] = useState<{ label: string; status: string }[]>([]);
+  const conversionDialogResolveRef = React.useRef<((confirmed: boolean) => void) | null>(null);
+  const [conversionDialog, setConversionDialog] = useState<null | {
+    title: string;
+    description: string;
+    confirmLabel: string;
+  }>(null);
+
+  const closeConversionDialog = React.useCallback((confirmed: boolean) => {
+    setConversionDialog(null);
+    const resolver = conversionDialogResolveRef.current;
+    conversionDialogResolveRef.current = null;
+    resolver?.(confirmed);
+  }, []);
+
+  const openDecisionDialog = React.useCallback((config: {
+    title: string;
+    description: string;
+    confirmLabel: string;
+  }) => {
+    if (conversionDialogResolveRef.current) {
+      conversionDialogResolveRef.current(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      conversionDialogResolveRef.current = resolve;
+      setConversionDialog(config);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (conversionDialogResolveRef.current) {
+        conversionDialogResolveRef.current(false);
+        conversionDialogResolveRef.current = null;
+      }
+    };
+  }, []);
 
   const handleRevalidate = async () => {
     if (!id || isRevalidating) return;
@@ -504,9 +598,19 @@ export default function DetailView() {
         lineItems,
         originalLineItems
       );
+      const docTypeChanged = JSON.stringify(docFields.doc_type) !== JSON.stringify(originalDocFields.doc_type);
 
-      // Workspace-only save: update ONLY `ap_invoices.ocr_raw_payload`
-      await saveAllInvoiceData(id, { __workspace_only: true, ocr_raw_payload: payloadPatch }, [], 'Admin');
+      // Workspace-only save: update `ap_invoices.ocr_raw_payload` and persist doc_type when it changes.
+      await saveAllInvoiceData(
+        id,
+        {
+          __workspace_only: true,
+          ocr_raw_payload: payloadPatch,
+          ...(docTypeChanged ? { doc_type: docFields.doc_type } : {}),
+        },
+        [],
+        'Admin'
+      );
 
       // Reset originals using deep copy to break all references
       setOriginalDocFields(JSON.parse(JSON.stringify(docFields)));
@@ -547,10 +651,15 @@ export default function DetailView() {
     setPage(1);
   }, [documentPath]);
 
-  const loadData = async () => {
-    console.log('[DetailView] Loading data for ID:', id);
-    setLoading(true);
-    setDocumentView(null);
+  const loadData = React.useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (silent && silentRefreshInFlightRef.current) return;
+    console.log('[DetailView] Loading data for ID:', id, silent ? '(silent refresh)' : '');
+    if (silent) {
+      silentRefreshInFlightRef.current = true;
+    } else {
+      setLoading(true);
+      setDocumentView(null);
+    }
     try {
       let invoiceRecord: any = null;
       let ledgersRecord: any[] = [];
@@ -599,6 +708,9 @@ export default function DetailView() {
       }
 
       if (invoiceRecord) {
+        if (silent && isDirtyRef.current) {
+          return;
+        }
         setInvoice(invoiceRecord);
         setDocumentView(prev => prev?.path ? prev : {
           path: invoiceRecord.file_path || null,
@@ -806,9 +918,13 @@ export default function DetailView() {
     } catch (err) {
       console.error('[DetailView] Critical crash in loadData:', err);
     } finally {
-      setLoading(false);
+      if (silent) {
+        silentRefreshInFlightRef.current = false;
+      } else {
+        setLoading(false);
+      }
     }
-  };
+  }, [id]);
 
 
   useEffect(() => {
@@ -817,7 +933,77 @@ export default function DetailView() {
     } else {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, loadData]);
+
+  const hasHydratedHeaderData =
+    hasMeaningfulDisplayValue(invoice?.vendor_name) ||
+    hasMeaningfulDisplayValue(invoice?.invoice_number) ||
+    hasMeaningfulDisplayValue(invoice?.invoice_no) ||
+    hasMeaningfulDisplayValue(invoice?.ack_no) ||
+    hasMeaningfulDisplayValue(invoice?.eway_bill_no);
+
+  const hasHydratedDocumentData = React.useMemo(() => {
+    const keyFields = [
+      'ack_no',
+      'ack_date',
+      'eway_bill_no',
+      'invoice_no',
+      'date',
+      'vendor_name',
+      'vendor_gst',
+      'buyer_name',
+      'buyer_gst',
+      'sub_total',
+      'grand_total',
+    ];
+
+    if (keyFields.some((key) => hasMeaningfulDisplayValue(docFields[key]))) {
+      return true;
+    }
+
+    return lineItems.some((item) => hasMeaningfulDisplayValue(item?.description));
+  }, [docFields, lineItems]);
+
+  const shouldAutoRefreshIncompleteDetail =
+    Boolean(id) &&
+    Boolean(invoice) &&
+    !isDirty &&
+    (
+      String(invoice?.status || '').toLowerCase() === 'processing' ||
+      (!hasHydratedHeaderData && !hasHydratedDocumentData)
+    );
+
+  useEffect(() => {
+    if (!shouldAutoRefreshIncompleteDetail) return;
+
+    const triggerSilentRefresh = () => {
+      if (document.hidden || isDirtyRef.current) return;
+      void loadData({ silent: true });
+    };
+
+    const timeoutId = window.setTimeout(triggerSilentRefresh, 1500);
+    const intervalId = window.setInterval(triggerSilentRefresh, 5000);
+    const handleFocus = () => {
+      if (!isDirtyRef.current) {
+        void loadData({ silent: true });
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (!document.hidden && !isDirtyRef.current) {
+        void loadData({ silent: true });
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadData, shouldAutoRefreshIncompleteDetail]);
 
   const isGoodsDocument = docFields.doc_type_label?.toLowerCase().includes('goods');
 
@@ -952,6 +1138,8 @@ export default function DetailView() {
 
   const isAutoPosted = invoice.status === 'Auto-Posted';
   const readOnly = isAutoPosted;
+  const allowCategorizedLineItemPicker = fromTab === 'input' || fromTab === 'handoff' || fromTab === 'ready';
+  const allowLineItemCreateCta = !readOnly && allowCategorizedLineItemPicker;
 
   // Determine if this record belongs to the "Handoff" tab criteria
   const isHandoff = (() => {
@@ -994,9 +1182,11 @@ export default function DetailView() {
   const getFirstGoodsLedgerSuggestion = (possibleGlNames: any) =>
     normalizeSelectableNames(possibleGlNames).find((name) => !isGenericGoodsMarker(name)) || '';
 
-  const getGoodsLineSelectionValue = (item: any) => {
+  const getGoodsLineSelectionValue = (item: any, includeLedgerFallback: boolean = true) => {
     const matchedStockItem = String(item?.matched_stock_item ?? '').trim();
     if (matchedStockItem) return matchedStockItem;
+
+    if (!includeLedgerFallback) return '';
 
     const mappedLedger = String(item?.mapped_ledger ?? '').trim();
     if (mappedLedger && !isGenericGoodsMarker(mappedLedger)) return mappedLedger;
@@ -1058,6 +1248,134 @@ export default function DetailView() {
   const cgst = subTotal * 0.09;
   const sgst = subTotal * 0.09;
   const total = subTotal + cgst + sgst;
+
+  const syncWorkspaceRawPayload = (nextLineItems: any[], nextDocType?: string) => {
+    setRawPayload((prev: any) => buildWorkspaceRawPayloadSnapshot(prev, nextLineItems, nextDocType));
+  };
+
+  const applyLineItemsAndRawPayload = (nextLineItems: any[], nextDocType?: string) => {
+    setLineItems(nextLineItems);
+    syncWorkspaceRawPayload(nextLineItems, nextDocType);
+  };
+
+  const persistGoodsToServiceConversion = async (nextLineItems: any[]) => {
+    if (!id) return false;
+
+    const nextDocFields = {
+      ...docFields,
+      doc_type: 'service',
+      doc_type_label: 'Invoice (Service)',
+    };
+    const nextRawPayload = buildWorkspaceRawPayloadSnapshot(rawPayload, nextLineItems, 'service');
+
+    setSaving(true);
+
+    const persistPromise = (async () => {
+      await saveAllInvoiceData(
+        id,
+        {
+          __workspace_only: true,
+          ocr_raw_payload: nextRawPayload,
+          doc_type: 'service',
+        },
+        [],
+        'Admin'
+      );
+
+      setDocFields(nextDocFields);
+      setLineItems(nextLineItems);
+      setRawPayload(nextRawPayload);
+      setOriginalLineItems(deepCloneJson(nextLineItems));
+      setOriginalDocFields((prev) => ({
+        ...deepCloneJson(prev || {}),
+        doc_type: 'service',
+        doc_type_label: 'Invoice (Service)',
+      }));
+      setInvoice((prev) => (prev ? { ...prev, doc_type: 'service' } : prev));
+
+      return true;
+    })();
+
+    toast.promise(persistPromise, {
+      loading: 'Converting invoice to Service...',
+      success: 'Invoice converted to Service and saved',
+      error: 'Failed to convert invoice to Service',
+    });
+
+    try {
+      return await persistPromise;
+    } catch (error) {
+      console.error('[DetailView] Goods to Service conversion save failed:', error);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyGoodsStockItemSelection = (rowIndex: number, selectedItem: string) => {
+    const nextLineItems = lineItems.map((line, index) => {
+      if (index !== rowIndex) return line;
+      const nextLine = { ...line, matched_stock_item: selectedItem };
+      if (String(line?.matched_stock_item ?? '').trim().toLowerCase() !== selectedItem.toLowerCase()) {
+        nextLine.matched_id = '';
+      }
+      return nextLine;
+    });
+
+    applyLineItemsAndRawPayload(nextLineItems);
+    return true;
+  };
+
+  const applyLedgerSelection = (rowIndex: number, ledgerLabel: string, explicitLedgerId?: string) => {
+    const resolvedId = explicitLedgerId || resolveLedgerId(ledgerLabel);
+    const nextLineItems = lineItems.map((line, index) => {
+      if (index !== rowIndex) return line;
+      return {
+        ...line,
+        ledger: resolvedId || ledgerLabel,
+        mapped_ledger: ledgerLabel,
+        matched_stock_item: '',
+        matched_id: '',
+      };
+    });
+
+    applyLineItemsAndRawPayload(nextLineItems);
+    return true;
+  };
+
+  const confirmGoodsToServiceConversion = async () => {
+    const hasMultipleLines = lineItems.length > 1;
+    return await openDecisionDialog({
+      title: hasMultipleLines ? 'Convert Invoice to Service and Apply to All?' : 'Convert Invoice to Service?',
+      description: hasMultipleLines
+        ? 'This is a Goods invoice with multiple line items. Continuing will convert the invoice to Service, apply the selected ledger to all line items, and save the change immediately. Do you want to continue?'
+        : 'This is a Goods invoice. Continuing will convert it to Service, switch the line item to Ledger mode, and save the change immediately. Do you want to continue?',
+      confirmLabel: hasMultipleLines ? 'Convert and Apply to All' : 'Convert and Save',
+    });
+  };
+
+  const convertGoodsInvoiceToService = async (rowIndex: number, ledgerLabel: string, explicitLedgerId?: string) => {
+    const resolvedId = explicitLedgerId || resolveLedgerId(ledgerLabel);
+    const applyToAll = lineItems.length > 1;
+    const nextLineItems = lineItems.map((line, index) => {
+      const shouldApplySelectedLedger = applyToAll || index === rowIndex;
+
+      return {
+        ...line,
+        ledger: shouldApplySelectedLedger ? (resolvedId || ledgerLabel) : line.ledger,
+        mapped_ledger: shouldApplySelectedLedger ? ledgerLabel : String(line?.mapped_ledger ?? '').trim(),
+        matched_stock_item: '',
+        matched_id: '',
+      };
+    });
+    return await persistGoodsToServiceConversion(nextLineItems);
+  };
+
+  const handleGoodsLedgerSelection = async (rowIndex: number, ledgerLabel: string, explicitLedgerId?: string) => {
+    const confirmed = await confirmGoodsToServiceConversion();
+    if (!confirmed) return false;
+    return await convertGoodsInvoiceToService(rowIndex, ledgerLabel, explicitLedgerId);
+  };
 
 
   return (
@@ -1355,7 +1673,7 @@ export default function DetailView() {
                           Tally Vendor Not Found.
                           {!isFromReceived && (
                             <button onClick={() => setShowVendorSlideout(true)} className="text-[#ef4444] underline decoration-2 underline-offset-4 hover:text-[#dc2626] transition-colors">
-                              Create vendor record in Tally
+                              Create vendor record in ERP
                             </button>
                           )}
                           {isFromReceived ? ' Please map vendor in workspace.' : ' to proceed.'}
@@ -1524,61 +1842,29 @@ export default function DetailView() {
                                 <td className="p-3 align-top">
                                   <CustomTableSelect
                                     value={isGoodsDocument
-                                      ? getGoodsLineSelectionValue(item)
+                                      ? getGoodsLineSelectionValue(item, !allowCategorizedLineItemPicker)
                                       : (ledgerIdToName[String(item.ledger || '')] || item.ledger)}
-                                    onChange={(val: string) => {
+                                    onChange={async (val: string, mode: LineItemPickerMode) => {
                                       const key = String(val || '').toLowerCase();
                                       const resolvedId = ledgerNameToId[key];
-                                      const selectedItem = isGoodsDocument ? findMatchingOption(val, itemOptions) : '';
                                       const selectedLedger = findMatchingOption(val, ledgerOptions) || String(val || '').trim();
 
-                                      const newLines = lineItems.map((ln, i) => {
-                                        if (i !== index) return ln;
-                                        const updated = { ...ln };
-                                        if (isGoodsDocument) {
-                                          if (selectedItem) {
-                                            updated.matched_stock_item = selectedItem;
-                                            if (String(ln?.matched_stock_item ?? '').trim().toLowerCase() !== selectedItem.toLowerCase()) {
-                                              updated.matched_id = '';
-                                            }
-                                          } else {
-                                            updated.ledger = selectedLedger;
-                                            updated.mapped_ledger = isGenericGoodsMarker(selectedLedger) ? '' : selectedLedger;
-                                            updated.matched_stock_item = '';
-                                            updated.matched_id = '';
-                                          }
-                                        } else {
-                                          updated.ledger = resolvedId || val;
+                                      if (allowCategorizedLineItemPicker && isGoodsDocument) {
+                                        if (mode === 'STOCK_ITEM') {
+                                          const selectedItem = findMatchingOption(val, itemOptions) || String(val || '').trim();
+                                          return applyGoodsStockItemSelection(index, selectedItem);
                                         }
-                                        return updated;
-                                      });
-
-                                      // Patch OCR Raw Payload (UI consistency for other consumers)
-                                      if (rawPayload && rawPayload.line_items && rawPayload.line_items[index]) {
-                                        const updatedRaw = { ...rawPayload };
-                                        const updatedArr = [...updatedRaw.line_items];
-                                        updatedArr[index] = { ...updatedArr[index] };
-
-                                        if (isGoodsDocument) {
-                                          if (selectedItem) {
-                                            updatedArr[index].matched_stock_item = selectedItem;
-                                            if (String(rawPayload.line_items[index]?.matched_stock_item ?? '').trim().toLowerCase() !== selectedItem.toLowerCase()) {
-                                              updatedArr[index].matched_id = '';
-                                            }
-                                          } else {
-                                            updatedArr[index].ledger = selectedLedger;
-                                            updatedArr[index].mapped_ledger = isGenericGoodsMarker(selectedLedger) ? '' : selectedLedger;
-                                            updatedArr[index].matched_stock_item = '';
-                                            updatedArr[index].matched_id = '';
-                                          }
-                                        } else {
-                                          updatedArr[index].gl_mapped = val;
-                                        }
-                                        updatedRaw.line_items = updatedArr;
-                                        setRawPayload(updatedRaw);
+                                        return await handleGoodsLedgerSelection(index, selectedLedger, resolvedId || undefined);
                                       }
 
-                                      setLineItems(newLines);
+                                      if (isGoodsDocument) {
+                                        const selectedItem = findMatchingOption(val, itemOptions);
+                                        if (selectedItem) {
+                                          return applyGoodsStockItemSelection(index, selectedItem);
+                                        }
+                                      }
+
+                                      return applyLedgerSelection(index, selectedLedger, resolvedId || undefined);
                                     }}
                                     options={Array.from(new Set([
                                       ...(isGoodsDocument ? itemOptions : []),
@@ -1586,14 +1872,22 @@ export default function DetailView() {
                                     ]))
                                       .filter((option) => !isGoodsDocument || !isGenericGoodsMarker(option))
                                       .sort((a, b) => a.localeCompare(b))}
+                                    stockOptions={Array.from(new Set(itemOptions)).sort((a, b) => a.localeCompare(b))}
+                                    ledgerOptions={Array.from(new Set(ledgerOptions))
+                                      .filter((option) => !isGenericGoodsMarker(option))
+                                      .sort((a, b) => a.localeCompare(b))}
+                                    useCategorizedOptions={allowCategorizedLineItemPicker}
+                                    allowStockMode={allowCategorizedLineItemPicker && isGoodsDocument}
+                                    defaultMode={allowCategorizedLineItemPicker && isGoodsDocument ? 'STOCK_ITEM' : 'LEDGER'}
+                                    emptyLabel={allowCategorizedLineItemPicker && isGoodsDocument ? 'Select stock item...' : 'Select ledger...'}
                                     disabled={readOnly}
                                     highlight
-                                    showCreate={!readOnly && (!isGoodsDocument || !String(item?.matched_stock_item ?? '').trim())}
+                                    showCreate={allowLineItemCreateCta}
                                     createLabel={isGoodsDocument ? 'Create Ledger / Stock Item' : 'Create New Ledger'}
-                                    onCreateClick={() => {
+                                    onCreateClick={(mode: LineItemPickerMode) => {
                                       setActiveLedgerIndex(index);
                                       const suggestedBuyer = rawPayload?.['Name as per Tally'] || '';
-                                      if (isGoodsDocument) {
+                                      if (isGoodsDocument && mode === 'STOCK_ITEM') {
                                         setCreationMode('STOCK_ITEM');
                                         setNewStockItem({
                                           name: (item.description || '').trim(),
@@ -1609,7 +1903,7 @@ export default function DetailView() {
                                       setShowLedgerSlideout(true);
                                     }}
                                   />
-                                  {(!isGoodsDocument && rawPayload?.line_items?.[index]?.mapped_ledger) && (
+                                  {(!isGoodsDocument && !String(item?.ledger || '').trim() && rawPayload?.line_items?.[index]?.mapped_ledger) && (
                                     <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
                                       <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">OCR Suggested Ledger</span>
                                       <span className="text-[11px] text-slate-700 font-medium truncate max-w-[200px]" title={rawPayload.line_items[index].mapped_ledger}>
@@ -1847,10 +2141,10 @@ export default function DetailView() {
                       const result = await syncVendorWithTally(payload);
                       console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
                       if (result.success) {
-                        toast.success(result.message || 'Vendor created successfully in Tally');
+                        toast.success(result.message || 'Vendor created successfully in ERP');
                         setShowVendorSlideout(false);
                       } else {
-                        toast.error(result.message || 'Vendor sync with Tally failed');
+                        toast.error(result.message || 'Vendor sync with ERP failed');
                       }
                     } catch (err) {
                       const msg = err instanceof Error ? err.message : 'Vendor sync failed';
@@ -1969,18 +2263,7 @@ export default function DetailView() {
 
                         const createdName = result.item.item_name || name;
                         setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
-
-                        setLineItems(prev => {
-                          const next = [...prev];
-                          if (next[activeLedgerIndex]) {
-                            next[activeLedgerIndex] = {
-                              ...next[activeLedgerIndex],
-                              matched_stock_item: createdName,
-                              matched_id: '',
-                            };
-                          }
-                          return next;
-                        });
+                        applyGoodsStockItemSelection(activeLedgerIndex, createdName);
                         toast.success('Stock item created and synced');
                       } else {
                         const { name, underGroup, buyerName, gstApplicable } = newLedger;
@@ -2006,22 +2289,18 @@ export default function DetailView() {
                         setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
                         setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
 
-                        setLineItems(prev => {
-                          const next = [...prev];
-                          if (next[activeLedgerIndex]) {
-                            next[activeLedgerIndex] = isGoods
-                              ? {
-                                ...next[activeLedgerIndex],
-                                ledger: createdName,
-                                mapped_ledger: createdName,
-                                matched_stock_item: '',
-                                matched_id: '',
-                              }
-                              : { ...next[activeLedgerIndex], ledger: createdId };
+                        if (isGoods && allowCategorizedLineItemPicker) {
+                          const converted = await handleGoodsLedgerSelection(activeLedgerIndex, createdName, createdId);
+                          if (converted) {
+                            // Conversion flow already surfaces its own persisted success message.
+                          } else {
+                            toast.success('Ledger created');
+                            toast.info('Goods invoice remains unchanged until you confirm the conversion');
                           }
-                          return next;
-                        });
-                        toast.success('Ledger created and synced');
+                        } else {
+                          applyLedgerSelection(activeLedgerIndex, createdName, createdId);
+                          toast.success('Ledger created and synced');
+                        }
                       }
                       setShowLedgerSlideout(false);
                     } catch (err: any) {
@@ -2033,7 +2312,7 @@ export default function DetailView() {
                   className="h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95"
                 >
                   {saving ? <RefreshCw size={16} className="animate-spin mr-2" /> : null}
-                  {creationMode === 'STOCK_ITEM' ? 'Create Stock Item' : 'Create Ledger'}
+                  {creationMode === 'STOCK_ITEM' ? 'Create' : 'Create'}
                 </Button>
               </div>
             </div>
@@ -2090,6 +2369,22 @@ export default function DetailView() {
             </div>
           </div>
         )}
+        <AlertDialog open={!!conversionDialog} onOpenChange={(open) => { if (!open && conversionDialog) closeConversionDialog(false); }}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{conversionDialog?.title}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {conversionDialog?.description}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => closeConversionDialog(false)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => closeConversionDialog(true)}>
+                {conversionDialog?.confirmLabel || 'Continue'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );
@@ -2140,17 +2435,80 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
   );
 }
 
-function CustomTableSelect({ value, onChange, options, disabled, highlight, showCreate, onCreateClick, createLabel = 'Create New Ledger' }: any) {
+function CustomTableSelect({
+  value,
+  onChange,
+  options = [],
+  stockOptions = [],
+  ledgerOptions = [],
+  useCategorizedOptions = false,
+  allowStockMode = false,
+  defaultMode = 'LEDGER',
+  disabled,
+  highlight,
+  showCreate,
+  onCreateClick,
+  createLabel = 'Create New Ledger',
+  emptyLabel = 'Select ledger...',
+}: any) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
+  const normalizedDefaultMode: LineItemPickerMode =
+    allowStockMode && defaultMode === 'STOCK_ITEM' ? 'STOCK_ITEM' : 'LEDGER';
+  const [mode, setMode] = React.useState<LineItemPickerMode>(normalizedDefaultMode);
 
-  const filteredOptions = options.filter((opt: any) => {
-    const label = (opt?.name || opt || '').toString().toLowerCase();
-    return label.includes(search.toLowerCase());
-  });
+  React.useEffect(() => {
+    setMode(normalizedDefaultMode);
+  }, [normalizedDefaultMode]);
+
+  const normalizeOptions = React.useCallback((input: any[]) => (
+    (input || []).map((opt: any) => ({
+      id: opt?.id || opt?.name || opt,
+      label: (opt?.name || opt || '').toString(),
+    })).filter((opt: any) => opt.label)
+  ), []);
+
+  const activeOptions = React.useMemo(() => {
+    if (useCategorizedOptions) {
+      return normalizeOptions(mode === 'STOCK_ITEM' ? stockOptions : ledgerOptions);
+    }
+    return normalizeOptions(options);
+  }, [ledgerOptions, mode, normalizeOptions, options, stockOptions, useCategorizedOptions]);
+
+  const filteredOptions = React.useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    if (!normalizedSearch) return activeOptions;
+    return activeOptions.filter((opt: any) => opt.label.toLowerCase().includes(normalizedSearch));
+  }, [activeOptions, search]);
+
+  const searchPlaceholder = useCategorizedOptions
+    ? (mode === 'STOCK_ITEM' ? 'Search stock items...' : 'Search ledgers...')
+    : 'Search ledgers...';
+  const listLabel = useCategorizedOptions
+    ? (mode === 'STOCK_ITEM' ? 'Stock Item List' : 'Ledger List')
+    : 'Ledger List';
+  const activeCreateLabel = useCategorizedOptions
+    ? (mode === 'STOCK_ITEM' ? 'Create ' : 'Create ')
+    : createLabel;
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setSearch('');
+      setMode(normalizedDefaultMode);
+    }
+  };
+
+  const handleSelect = async (label: string) => {
+    setOpen(false);
+    setSearch('');
+    setMode(normalizedDefaultMode);
+    const result = await Promise.resolve(onChange(label, mode));
+    return result;
+  };
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
       <Popover.Trigger asChild>
         <div
           role="button"
@@ -2168,7 +2526,7 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
           title={value ? String(value) : undefined}
         >
           <div className="min-w-0 flex-1 truncate">
-            {value || (disabled ? '—' : 'Select ledger…')}
+            {value || (disabled ? '-' : emptyLabel)}
           </div>
           {!disabled && <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />}
         </div>
@@ -2180,6 +2538,37 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
           align="start"
           className="z-[100] w-[320px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2),0_0_0_1px_rgba(0,0,0,0.05)] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         >
+          {useCategorizedOptions && allowStockMode && (
+            <div className="p-2 pb-0">
+              <div className="grid w-full grid-cols-2 rounded-xl bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setMode('STOCK_ITEM')}
+                  className={[
+                    'h-9 rounded-lg text-[12px] font-black transition-all',
+                    mode === 'STOCK_ITEM'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700',
+                  ].join(' ')}
+                >
+                  Stock Item
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode('LEDGER')}
+                  className={[
+                    'h-9 rounded-lg text-[12px] font-black transition-all',
+                    mode === 'LEDGER'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700',
+                  ].join(' ')}
+                >
+                  Ledger
+                </button>
+              </div>
+            </div>
+          )}
+
           <Command className="flex flex-col h-full">
             <div className="p-2 border-b border-slate-50">
               <div className="relative flex items-center">
@@ -2187,7 +2576,7 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
                 <Command.Input
                   value={search}
                   onValueChange={setSearch}
-                  placeholder="Search ledgers..."
+                  placeholder={searchPlaceholder}
                   className="w-full bg-slate-50 border-none h-10 pl-9 pr-3 rounded-xl text-[13px] font-bold text-slate-700 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500/10"
                 />
               </div>
@@ -2200,17 +2589,17 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
               </Command.Empty>
 
               <div className="px-2 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                Ledger List
+                {listLabel}
               </div>
 
               {filteredOptions.map((opt: any) => {
-                const label = opt?.name || opt;
+                const label = opt.label;
                 const isSelected = value && String(value).toLowerCase() === String(label).toLowerCase();
 
                 return (
                   <Command.Item
-                    key={opt?.id || label}
-                    onSelect={() => { onChange(label); setOpen(false); setSearch(''); }}
+                    key={opt.id || label}
+                    onSelect={() => { void handleSelect(label); }}
                     className={[
                       'px-3 py-2.5 rounded-xl mb-0.5',
                       'text-[13px] font-bold',
@@ -2232,11 +2621,16 @@ function CustomTableSelect({ value, onChange, options, disabled, highlight, show
               <div className="p-2 border-t border-slate-50 bg-slate-50/50">
                 <button
                   type="button"
-                  onClick={() => { onCreateClick(); setOpen(false); }}
+                  onClick={() => {
+                    onCreateClick(mode);
+                    setOpen(false);
+                    setSearch('');
+                    setMode(normalizedDefaultMode);
+                  }}
                   className="w-full h-11 px-4 flex items-center justify-center gap-2 text-[13px] font-black text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-[0.98]"
                 >
                   <Plus size={16} strokeWidth={3} />
-                  {createLabel}
+                  {activeCreateLabel}
                 </button>
               </div>
             )}

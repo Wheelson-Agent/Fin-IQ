@@ -1121,12 +1121,15 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             try { rawPayload = JSON.parse(rawPayload); } catch (e) { rawPayload = {}; }
         }
 
-        // Workspace-only save path: update ONLY `ap_invoices.ocr_raw_payload` (no column mapping, no line table writes).
+        // Workspace-only save path: update `ap_invoices.ocr_raw_payload` and optionally `doc_type` (no line table writes).
         if (data && data.__workspace_only === true) {
             let patch: any = data.ocr_raw_payload ?? {};
             if (typeof patch === 'string') {
                 try { patch = JSON.parse(patch); } catch (e) { patch = {}; }
             }
+            const nextDocType = typeof data.doc_type === 'string' && data.doc_type.trim()
+                ? data.doc_type.trim()
+                : null;
 
             const mergeObjects = (base: any, next: any) => {
                 if (!base || typeof base !== 'object') return next;
@@ -1147,8 +1150,8 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             );
 
             const invoiceRes = await client.query(
-                'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, updated_at = NOW() WHERE id = $1 RETURNING *',
-                [id, JSON.stringify(mergedPayload)]
+                'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, doc_type = COALESCE($3, doc_type), updated_at = NOW() WHERE id = $1 RETURNING *',
+                [id, JSON.stringify(mergedPayload), nextDocType]
             );
             const updatedInvoice = invoiceRes.rows[0];
 
