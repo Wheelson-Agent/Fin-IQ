@@ -1428,18 +1428,13 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             console.warn(`[DB] ingestN8nData: Canonical ocr_raw_payload missing in payload.ap_invoices[0]. File: ${invData.file_name || 'unknown'}`);
         }
 
-        // 1. Vendor Upsert (Auto-creation of vendors if missing)
+        // 1. Vendor lookup only.
+        // Do not auto-create vendors during upload/ingestion in production.
         let vendorId = invData.vendor_id;
         if (!vendorId && invData.vendor_name) {
             const vRes = await client.query('SELECT id FROM vendors WHERE LOWER(name) = LOWER($1) OR LOWER(gstin) = LOWER($2)', [invData.vendor_name, invData.vendor_gst]);
             if (vRes.rows.length > 0) {
                 vendorId = vRes.rows[0].id;
-            } else {
-                const newV = await client.query(
-                    'INSERT INTO vendors (name, gstin, company_id) VALUES ($1, $2, $3) RETURNING id',
-                    [invData.vendor_name, invData.vendor_gst, invData.company_id || null]
-                );
-                vendorId = newV.rows[0].id;
             }
         }
 

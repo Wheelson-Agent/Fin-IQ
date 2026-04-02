@@ -34,6 +34,25 @@ export interface TallyPostingResult {
     error?: string;
 }
 
+function sanitizeOcrRawPayloadForTally(ocrRawPayload: any) {
+    const parsed = typeof ocrRawPayload === 'string'
+        ? (() => {
+            try {
+                return JSON.parse(ocrRawPayload);
+            } catch {
+                return ocrRawPayload;
+            }
+        })()
+        : ocrRawPayload;
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return parsed;
+    }
+
+    const { __ap_workspace, ...sanitized } = parsed;
+    return sanitized;
+}
+
 /**
  * Sends the invoice data to the Tally posting webhook.
  */
@@ -46,7 +65,7 @@ export async function sendInvoiceToTally(invoiceId: string, ocrRawPayload: any):
     }
 
     const payload = {
-        ocr_raw_payload: ocrRawPayload,
+        ocr_raw_payload: sanitizeOcrRawPayloadForTally(ocrRawPayload),
         id: invoiceId,
         invoice_posting: true
     };
