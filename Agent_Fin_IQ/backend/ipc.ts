@@ -313,7 +313,8 @@ export function registerIpcHandlers() {
             copyCompletedAt = new Date();
             copyErrorMessage = err instanceof Error ? err.message : 'Unknown';
             console.error('[IPC] File save failed:', err);
-            batchLogger.addLog(currentBatch, fileName, 'Upload', 'Failed', `File transfer failed: ${copyErrorMessage}`);
+            batchLogger.addLog(currentBatch, fileName, 'Upload', 'Failed', `File transfer failed: ${err instanceof Error ? err.message : 'Unknown'}`);
+            throw err; // propagate so frontend marks this file as failed, not silently succeeded
         }
 
         // Step 3: Create invoice record in DB with the NEW path

@@ -1144,8 +1144,9 @@ export default function DetailView() {
     );
   }
 
-  const isAutoPosted = invoice.status === 'Auto-Posted';
-  const readOnly = isAutoPosted;
+  const bStatus = (invoice.status || '').toLowerCase();
+  const isPosted = bStatus === 'posted' || bStatus === 'auto-posted';
+  const readOnly = isPosted;
   const allowCategorizedLineItemPicker = fromTab === 'input' || fromTab === 'handoff' || fromTab === 'ready';
   const allowLineItemCreateCta = !readOnly && allowCategorizedLineItemPicker;
 
@@ -1441,8 +1442,8 @@ export default function DetailView() {
             )
           )}
 
-          {/* Re-validation Action - Visible in Awaiting Input and Handoff */}
-          {(fromTab === 'input' || fromTab === 'handoff') && (
+          {/* Re-validation Action - Visible in Awaiting Input and Handoff and NOT read-only */}
+          {!readOnly && (fromTab === 'input' || fromTab === 'handoff') && (
             <Button
               variant="ghost"
               size="icon"
@@ -1456,7 +1457,7 @@ export default function DetailView() {
           )}
 
           <div className="flex items-center gap-2 border-l border-slate-200 pl-4 ml-2">
-            {!invoice?.erp_sync_id && fromTab !== 'ready' && (
+            {!readOnly && !invoice?.erp_sync_id && fromTab !== 'ready' && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -1806,10 +1807,10 @@ export default function DetailView() {
                             value={docFields[key] === null || docFields[key] === undefined ? '' : String(docFields[key])}
                             onChange={(val: string) => {
                               setDocFields({ ...docFields, [key]: val });
-
                             }}
                             Icon={readOnly ? undefined : (label.toLowerCase().includes('date') ? Calendar : Edit2)}
                             isError={isErr}
+                            disabled={readOnly}
                           />
                         );
                       })}
@@ -2058,34 +2059,34 @@ export default function DetailView() {
                 </button>
               </div>
               <div className="p-10 flex-1 overflow-y-auto space-y-10">
-                <InputField label="Vendor Name" value={newVendor.name} required onChange={(val: string) => setNewVendor({ ...newVendor, name: val })} />
-                <InputField label="Buyer ERP Name" value={newVendor.buyerErpName} onChange={(val: string) => setNewVendor({ ...newVendor, buyerErpName: val })} />
+                <InputField label="Vendor Name" value={newVendor.name} required onChange={(val: string) => setNewVendor({ ...newVendor, name: val })} disabled={readOnly} />
+                <InputField label="Buyer ERP Name" value={newVendor.buyerErpName} onChange={(val: string) => setNewVendor({ ...newVendor, buyerErpName: val })} disabled={readOnly} />
                 <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="Vendor Code" value={newVendor.vendor_code} onChange={(val: string) => setNewVendor({ ...newVendor, vendor_code: val })} />
-                  <InputField label="Under Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} />
+                  <InputField label="Vendor Code" value={newVendor.vendor_code} onChange={(val: string) => setNewVendor({ ...newVendor, vendor_code: val })} disabled={readOnly} />
+                  <InputField label="Under Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} disabled={readOnly} />
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="GSTIN" value={newVendor.gstin} required onChange={(val: string) => setNewVendor({ ...newVendor, gstin: val })} />
-                  <InputField label="Tax ID" value={newVendor.tax_id} onChange={(val: string) => setNewVendor({ ...newVendor, tax_id: val })} />
+                  <InputField label="GSTIN" value={newVendor.gstin} required onChange={(val: string) => setNewVendor({ ...newVendor, gstin: val })} disabled={readOnly} />
+                  <InputField label="Tax ID" value={newVendor.tax_id} onChange={(val: string) => setNewVendor({ ...newVendor, tax_id: val })} disabled={readOnly} />
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="PAN" value={newVendor.pan} onChange={(val: string) => setNewVendor({ ...newVendor, pan: val })} />
-                  <InputField label="State" value={newVendor.state} required onChange={(val: string) => setNewVendor({ ...newVendor, state: val })} Icon={ChevronDown} selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']} />
+                  <InputField label="PAN" value={newVendor.pan} onChange={(val: string) => setNewVendor({ ...newVendor, pan: val })} disabled={readOnly} />
+                  <InputField label="State" value={newVendor.state} required onChange={(val: string) => setNewVendor({ ...newVendor, state: val })} Icon={ChevronDown} selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']} disabled={readOnly} />
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="City" value={newVendor.city} onChange={(val: string) => setNewVendor({ ...newVendor, city: val })} />
-                  <InputField label="Pincode" value={newVendor.pincode} onChange={(val: string) => setNewVendor({ ...newVendor, pincode: val })} />
+                  <InputField label="City" value={newVendor.city} onChange={(val: string) => setNewVendor({ ...newVendor, city: val })} disabled={readOnly} />
+                  <InputField label="Pincode" value={newVendor.pincode} onChange={(val: string) => setNewVendor({ ...newVendor, pincode: val })} disabled={readOnly} />
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="Phone" value={newVendor.phone} onChange={(val: string) => setNewVendor({ ...newVendor, phone: val })} />
-                  <InputField label="Email" value={newVendor.email} onChange={(val: string) => setNewVendor({ ...newVendor, email: val })} />
+                  <InputField label="Phone" value={newVendor.phone} onChange={(val: string) => setNewVendor({ ...newVendor, phone: val })} disabled={readOnly} />
+                  <InputField label="Email" value={newVendor.email} onChange={(val: string) => setNewVendor({ ...newVendor, email: val })} disabled={readOnly} />
                 </div>
                 <div className="space-y-6 pt-4 border-t border-slate-100">
                   <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest">Bank Details</h4>
-                  <InputField label="Bank Name" value={newVendor.bank_name} onChange={(val: string) => setNewVendor({ ...newVendor, bank_name: val })} />
+                  <InputField label="Bank Name" value={newVendor.bank_name} onChange={(val: string) => setNewVendor({ ...newVendor, bank_name: val })} disabled={readOnly} />
                   <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                    <InputField label="Account No" value={newVendor.bank_account_no} onChange={(val: string) => setNewVendor({ ...newVendor, bank_account_no: val })} />
-                    <InputField label="IFSC Code" value={newVendor.bank_ifsc} onChange={(val: string) => setNewVendor({ ...newVendor, bank_ifsc: val })} />
+                    <InputField label="Account No" value={newVendor.bank_account_no} onChange={(val: string) => setNewVendor({ ...newVendor, bank_account_no: val })} disabled={readOnly} />
+                    <InputField label="IFSC Code" value={newVendor.bank_ifsc} onChange={(val: string) => setNewVendor({ ...newVendor, bank_ifsc: val })} disabled={readOnly} />
                   </div>
                 </div>
               </div>
@@ -2221,18 +2222,18 @@ export default function DetailView() {
               <div className="p-10 flex-1 overflow-y-auto space-y-10">
                 {creationMode === 'STOCK_ITEM' ? (
                   <>
-                    <InputField label="Stock Item Name" value={newStockItem.name} required onChange={(val: string) => setNewStockItem({ ...newStockItem, name: val })} />
-                    <InputField label="Buyer Name" value={newStockItem.buyerName} onChange={(val: string) => setNewStockItem({ ...newStockItem, buyerName: val })} />
-                    <InputField label="Unit of Measure (UOM)" value={newStockItem.uom} required onChange={(val: string) => setNewStockItem({ ...newStockItem, uom: val })} Icon={ChevronDown} selectOptions={['PCS', 'NOS', 'KGS', 'BOX', 'SET']} />
-                    <InputField label="HSN/SAC Code" value={newStockItem.hsn} required onChange={(val: string) => setNewStockItem({ ...newStockItem, hsn: val })} />
-                    <InputField label="GST Tax Rate (%)" value={newStockItem.tax_rate} required onChange={(val: string) => setNewStockItem({ ...newStockItem, tax_rate: val })} Icon={ChevronDown} selectOptions={['0', '5', '12', '18', '28']} />
+                    <InputField label="Stock Item Name" value={newStockItem.name} required onChange={(val: string) => setNewStockItem({ ...newStockItem, name: val })} disabled={readOnly} />
+                    <InputField label="Buyer Name" value={newStockItem.buyerName} onChange={(val: string) => setNewStockItem({ ...newStockItem, buyerName: val })} disabled={readOnly} />
+                    <InputField label="Unit of Measure (UOM)" value={newStockItem.uom} required onChange={(val: string) => setNewStockItem({ ...newStockItem, uom: val })} Icon={ChevronDown} selectOptions={['PCS', 'NOS', 'KGS', 'BOX', 'SET']} disabled={readOnly} />
+                    <InputField label="HSN/SAC Code" value={newStockItem.hsn} required onChange={(val: string) => setNewStockItem({ ...newStockItem, hsn: val })} disabled={readOnly} />
+                    <InputField label="GST Tax Rate (%)" value={newStockItem.tax_rate} required onChange={(val: string) => setNewStockItem({ ...newStockItem, tax_rate: val })} Icon={ChevronDown} selectOptions={['0', '5', '12', '18', '28']} disabled={readOnly} />
                   </>
                 ) : (
                   <>
-                    <InputField label="Ledger Name" value={newLedger.name} required onChange={(val: string) => setNewLedger({ ...newLedger, name: val })} />
-                    <InputField label="Buyer Name" value={newLedger.buyerName} onChange={(val: string) => setNewLedger({ ...newLedger, buyerName: val })} />
-                    <InputField label="Under Group" value={newLedger.underGroup} required onChange={(val: string) => setNewLedger({ ...newLedger, underGroup: val })} Icon={ChevronDown} selectOptions={['Indirect Expenses', 'Direct Expenses', 'Fixed Assets', 'Direct Incomes', 'Indirect Incomes']} />
-                    <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} />
+                    <InputField label="Ledger Name" value={newLedger.name} required onChange={(val: string) => setNewLedger({ ...newLedger, name: val })} disabled={readOnly} />
+                    <InputField label="Buyer Name" value={newLedger.buyerName} onChange={(val: string) => setNewLedger({ ...newLedger, buyerName: val })} disabled={readOnly} />
+                    <InputField label="Under Group" value={newLedger.underGroup} required onChange={(val: string) => setNewLedger({ ...newLedger, underGroup: val })} Icon={ChevronDown} selectOptions={['Indirect Expenses', 'Direct Expenses', 'Fixed Assets', 'Direct Incomes', 'Indirect Incomes']} disabled={readOnly} />
+                    <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} disabled={readOnly} />
                   </>
                 )}
               </div>
@@ -2411,7 +2412,7 @@ export default function DetailView() {
 
 // --- Helper Components ---
 
-function InputField({ label, value, required, onChange, Icon, selectOptions, isError, style }: any) {
+function InputField({ label, value, required, onChange, Icon, selectOptions, isError, style, disabled }: any) {
   return (
     <div className="flex flex-col gap-2 group">
       <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
@@ -2427,8 +2428,9 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
 
         {selectOptions ? (
           <select
-            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black text-slate-700 transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none appearance-none ${Icon ? 'pl-11' : 'px-5'}`}
+            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black text-slate-700 transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none appearance-none disabled:opacity-60 disabled:cursor-not-allowed ${Icon ? 'pl-11' : 'px-5'}`}
             value={value}
+            disabled={disabled}
             onChange={(e) => onChange(e.target.value)}
           >
             <option value="" disabled>Select {label}</option>
@@ -2436,9 +2438,10 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
           </select>
         ) : (
           <input
-            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none ${Icon ? 'pl-11' : 'px-5'} ${isError ? 'text-red-500 border-red-100 bg-red-50/30' : 'text-slate-700'}`}
+            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none disabled:opacity-60 disabled:cursor-not-allowed ${Icon ? 'pl-11' : 'px-5'} ${isError ? 'text-red-500 border-red-100 bg-red-50/30' : 'text-slate-700'}`}
             style={style}
             value={value}
+            disabled={disabled}
             onChange={(e) => onChange(e.target.value)}
             placeholder={`Type ${label.toLowerCase()}...`}
           />

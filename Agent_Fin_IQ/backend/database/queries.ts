@@ -1149,10 +1149,42 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                 Object.keys(patch || {})
             );
 
-            const invoiceRes = await client.query(
-                'UPDATE ap_invoices SET ocr_raw_payload = $2::jsonb, doc_type = COALESCE($3, doc_type), updated_at = NOW() WHERE id = $1 RETURNING *',
-                [id, JSON.stringify(mergedPayload), nextDocType]
-            );
+            // SYNC TOP-LEVEL DATA: manual edits should update main indexed columns
+            const syncCols = ["invoice_number", "invoice_date", "vendor_name", "vendor_gst", "sub_total", "tax_total", "grand_total"];
+            const updateValues: Record<string, any> = {};
+            Object.keys(patch).forEach(key => {
+                const dbKey = getCanonicalKey(key);
+                if (syncCols.includes(dbKey)) {
+                    updateValues[dbKey] = patch[key];
+                }
+            });
+
+            const dateFields = ["invoice_date"];
+            const syncClauses = Object.keys(updateValues).map((k, i) => {
+                const pIdx = i + 4; // $1=id, $2=payload, $3=doc_type
+                if (dateFields.includes(k)) {
+                    return `${k} = CASE 
+                        WHEN $${pIdx}::text ~ '^\\d{8}$' THEN to_date($${pIdx}::text, 'DDMMYYYY')
+                        WHEN $${pIdx}::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN $${pIdx}::text::date
+                        WHEN $${pIdx}::text ~ '^\\d{2}-\\d{2}-\\d{4}$' THEN to_date($${pIdx}::text, 'DD-MM-YYYY')
+                        WHEN $${pIdx}::text ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date($${pIdx}::text, 'DD/MM/YYYY')
+                        ELSE ${k}
+                    END`;
+                }
+                return `${k} = COALESCE($${pIdx}, ${k})`;
+            });
+
+            const updateSql = `
+                UPDATE ap_invoices 
+                SET ocr_raw_payload = $2::jsonb, 
+                    doc_type = COALESCE($3, doc_type),
+                    ${syncClauses.length > 0 ? syncClauses.join(', ') + ',' : ''}
+                    updated_at = NOW() 
+                WHERE id = $1 
+                RETURNING *`;
+            
+            const updateParams = [id, JSON.stringify(mergedPayload), nextDocType, ...Object.values(updateValues)];
+            const invoiceRes = await client.query(updateSql, updateParams);
             const updatedInvoice = invoiceRes.rows[0];
 
             await client.query(
@@ -1161,9 +1193,9 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                 [
                     id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
                     'Edited', userName,
-                    'Workspace save: updated ocr_raw_payload only',
-                    JSON.stringify({}),
-                    JSON.stringify({}),
+                    'Workspace save: updated ocr_raw_payload and top-level columns',
+                    JSON.stringify({ grand_total: current.grand_total }),
+                    JSON.stringify({ grand_total: updatedInvoice.grand_total }),
                 ]
             );
 

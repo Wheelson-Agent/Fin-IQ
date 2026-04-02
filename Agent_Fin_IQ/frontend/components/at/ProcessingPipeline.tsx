@@ -25,9 +25,9 @@ export interface ProcessingPipelineProps {
     filePaths: string[];
     fileDataArrays?: number[][];  // Raw file data as byte arrays
     stages?: PipelineStage[] | null;
-    onStagesChange?: (stages: PipelineStage[]) => void;
+    onStagesChange?: (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => void;
     particles?: Record<string, boolean>;
-    onParticlesChange?: (particles: Record<string, boolean>) => void;
+    onParticlesChange?: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
     onComplete: () => void;
     onDismiss?: () => void;
     uploaderName?: string;
@@ -99,15 +99,20 @@ function getDynamicConcurrencyPlan(
         return candidate.endsWith('.pdf');
     }).length;
 
-    let pipeline = hardwareBudget >= 12 ? 3 : hardwareBudget >= 8 ? 3 : hardwareBudget >= 4 ? 2 : 1;
+    let pipeline = hardwareBudget >= 12 ? 6 : hardwareBudget >= 8 ? 5 : hardwareBudget >= 4 ? 4 : 2;
+
+    // Large batches: scale up workers so queue wait doesn't dominate total time.
+    // OCR is I/O-bound (Google API network wait), so extra workers don't tax CPU.
+    if (totalFiles >= 15) pipeline = Math.max(pipeline, 5);
+    else if (totalFiles >= 8) pipeline = Math.max(pipeline, 4);
 
     if (highestComplexity >= 3) {
-        pipeline = 1;
-    } else if (highestComplexity >= 2.5 || pdfCount >= Math.max(2, Math.ceil(totalFiles / 2))) {
         pipeline = Math.min(pipeline, 2);
+    } else if (highestComplexity >= 2.5 || pdfCount >= Math.max(2, Math.ceil(totalFiles / 2))) {
+        pipeline = Math.min(pipeline, 3);
     }
 
-    pipeline = clamp(Math.min(pipeline, totalFiles), 1, 3);
+    pipeline = clamp(Math.min(pipeline, totalFiles), 1, 6);
 
     let upload = hardwareBudget >= 12 ? 4 : hardwareBudget >= 8 ? 4 : hardwareBudget >= 4 ? 3 : 2;
     if (highestComplexity >= 3) {
@@ -294,25 +299,26 @@ export function ProcessingPipeline({
     const stages = externalStages || internalStages;
     const particles = externalParticles || internalParticles;
     
+    // Pass functional updates straight through to the external handler so the
+    // caller can use React's own functional-setState form, avoiding stale-closure
+    // issues when this component unmounts while an async pipeline is still running.
     const setStages = (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => {
-        if (typeof val === 'function') {
-            const next = val(stages);
-            if (onStagesChange) onStagesChange(next);
-            else setInternalStages(next);
+        if (onStagesChange) {
+            onStagesChange(val);
+        } else if (typeof val === 'function') {
+            setInternalStages(val);
         } else {
-            if (onStagesChange) onStagesChange(val);
-            else setInternalStages(val);
+            setInternalStages(val);
         }
     };
-    
+
     const setParticlesState = (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
-        if (typeof val === 'function') {
-            const next = val(particles);
-            if (onParticlesChange) onParticlesChange(next);
-            else setInternalParticles(next);
+        if (onParticlesChange) {
+            onParticlesChange(val);
+        } else if (typeof val === 'function') {
+            setInternalParticles(val);
         } else {
-            if (onParticlesChange) onParticlesChange(val);
-            else setInternalParticles(val);
+            setInternalParticles(val);
         }
     };
 
@@ -386,8 +392,11 @@ export function ProcessingPipeline({
     }, [batchName, pipelineStartedAt, stages, confirmedCount]);
 
     useEffect(() => {
-        if (logScrollRef.current) {
-            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        const el = logScrollRef.current;
+        if (!el) return;
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (distanceFromBottom < 80) {
+            el.scrollTop = el.scrollHeight;
         }
     }, [logs]);
 
