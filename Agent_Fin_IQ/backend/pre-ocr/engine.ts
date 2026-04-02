@@ -42,8 +42,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import type { JobState, StageState, DecisionOutput } from './types.ts';
-import { PRE_OCR_STAGES, assertValidStageStatus } from './types.ts';
+import type { JobState, StageState, DecisionOutput } from './types';
+import { PRE_OCR_STAGES, assertValidStageStatus } from './types';
 import {
     getRasterizer,
     getMutoolPath,
@@ -52,8 +52,8 @@ import {
     rasterizeWithMutool,
     rasterizeWithPdftoppm,
     getMutoolDiagnostics,
-} from './rasterizer.ts';
-import type { RasterizeResult } from './rasterizer.ts';
+} from './rasterizer';
+import type { RasterizeResult } from './rasterizer';
 
 // â”€â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -669,7 +669,8 @@ export async function runStage3(jobId: string): Promise<void> {
     const rasterizersAttempted: string[] = [];
     const exitCodeByRasterizer: Record<string, number | null> = {};
     let stderrSnippet = '';
-    let result: RasterizeResult | null = null;
+    // eslint-disable-next-line prefer-const
+    let result: RasterizeResult | null = null as unknown as RasterizeResult | null;
     const rasterizeTimeoutMs = (CONFIG.preOcr as any)?.rasterizeTimeoutMs ?? 2 * 60 * 1000;
 
     const expectedPageCount =
@@ -762,7 +763,7 @@ export async function runStage3(jobId: string): Promise<void> {
         s3.artifacts.push({ type: 'JSON', name: 'pages/index.json', createdAt: now() });
     } catch { /* ignore */ }
 
-    addEvent(job, 'Image Extraction & Normalization', `Extracted ${result.pageCount} pages`, 'INFO');
+    addEvent(job, 'Image Extraction & Normalization', `Extracted ${(result as RasterizeResult).pageCount} pages`, 'INFO');
     job.currentStage = PRE_OCR_STAGES[3];
     saveJob(jobId, job);
 }
@@ -918,19 +919,21 @@ export async function runStage4(jobId: string): Promise<void> {
         const engDataGz = path.join(tessdataDir, 'eng.traineddata.gz');
         const tesseractWorkerPath = path.resolve(__dirname, './tesseract_worker.cjs');
         const tessLangPathUrl = pathToFileURL(tessdataDir + path.sep).href;
+        // Shared cache across all jobs — traineddata is decompressed once per app session
+        // instead of per-job, eliminating ~15-30s of gz decompression overhead per file.
+        const sharedOsdCachePath = path.resolve(__dirname, '../../tools/tesseract/tess-cache-osd');
+        const sharedEngCachePath = path.resolve(__dirname, '../../tools/tesseract/tess-cache-eng');
 
         const detectOrientationOsd = async (img: Buffer): Promise<{ angle: number; confidence: number; method: string } | null> => {
             if (!fs.existsSync(osdDataGz)) return null;
             const { createWorker, OEM } = await import('tesseract.js');
-            const cachePath = path.join(getJobDir(jobId), 'tess-cache');
             const worker: any = await createWorker('osd', OEM.DEFAULT, {
                 workerPath: tesseractWorkerPath,
                 langPath: tessLangPathUrl,
-                cachePath,
+                cachePath: sharedOsdCachePath,
                 legacyCore: true,
-                logging: false,
                 errorHandler: () => {},
-            });
+            } as any);
             try {
                 await worker.reinitialize('osd', OEM.DEFAULT);
                 try { await worker.setParameters({ user_defined_dpi: '300' }); } catch { /* ignore */ }
@@ -948,34 +951,39 @@ export async function runStage4(jobId: string): Promise<void> {
         const detectOrientationStrict = async (img: Buffer, candidates: number[]): Promise<{ angle: number; confidence: number; method: string } | null> => {
             if (!fs.existsSync(engDataGz)) return null;
             const { createWorker, OEM } = await import('tesseract.js');
-            const cachePath = path.join(getJobDir(jobId), 'tess-cache-eng');
+
+            // Downscale to 1400px max — word-count orientation detection doesn't need full resolution.
+            // Cuts per-candidate OCR time from ~3s → ~0.8s on high-res scanned invoices.
+            const STRICT_MAX_DIM = 1400;
+            const meta = await sharp(img).metadata();
+            const scaledImg = ((meta.width ?? 0) > STRICT_MAX_DIM || (meta.height ?? 0) > STRICT_MAX_DIM)
+                ? await sharp(img).resize({ width: STRICT_MAX_DIM, height: STRICT_MAX_DIM, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+                : img;
+
+            const uniq = Array.from(new Set(candidates)).filter((d) => [0, 90, 180, 270].includes(d));
+
+            // One shared worker, candidates run sequentially.
+            // Parallel workers caused CPU contention when multiple pipeline workers ran simultaneously
+            // (5 workers × 4 candidates = 20 Tesseract threads, degrading all files).
+            // Sequential with downscaled image is still ~4× faster than original full-res sequential.
             const worker: any = await createWorker('eng', OEM.DEFAULT, {
                 workerPath: tesseractWorkerPath,
                 langPath: tessLangPathUrl,
-                cachePath,
-                logging: false,
+                cachePath: sharedEngCachePath,
                 errorHandler: () => {},
-            });
+            } as any);
             try {
                 await worker.reinitialize('eng', OEM.DEFAULT);
                 try { await worker.setParameters({ user_defined_dpi: '300' }); } catch { /* ignore */ }
 
-                const scoreFor = async (deg: number): Promise<{ wordCount: number; confidence: number }> => {
-                    const rotated = deg === 0 ? img : await sharp(img).rotate(deg, { background: { r: 255, g: 255, b: 255, alpha: 1 } }).png().toBuffer();
-                    const r: any = await worker.recognize(rotated);
-                    const text = String(r?.data?.text || '');
-                    const wordCount = text.split(/\s+/).filter((w: string) => w.length >= 3).length;
-                    const confidence = typeof r?.data?.confidence === 'number' ? r.data.confidence : Number(r?.data?.confidence) || 0;
-                    return { wordCount, confidence };
-                };
-
-                const uniq = Array.from(new Set(candidates)).filter((d) => [0, 90, 180, 270].includes(d));
                 const scores: Record<number, number> = {};
                 const confidences: Record<number, number> = {};
-                for (const d of uniq) {
-                    const result = await scoreFor(d);
-                    scores[d] = result.wordCount;
-                    confidences[d] = result.confidence;
+                for (const deg of uniq) {
+                    const rotated = deg === 0 ? scaledImg : await sharp(scaledImg).rotate(deg, { background: { r: 255, g: 255, b: 255, alpha: 1 } }).png().toBuffer();
+                    const r: any = await worker.recognize(rotated);
+                    const text = String(r?.data?.text || '');
+                    scores[deg] = text.split(/\s+/).filter((w: string) => w.length >= 3).length;
+                    confidences[deg] = typeof r?.data?.confidence === 'number' ? r.data.confidence : Number(r?.data?.confidence) || 0;
                 }
 
                 const baseline = scores[0] ?? 0;
@@ -1034,7 +1042,7 @@ export async function runStage4(jobId: string): Promise<void> {
                 }
                 const method = `ocr_strict baseline0=${baseline}@${baselineConfidence} best=${bestDeg}:${bestScore}@${bestConfidence} chosen=${chosen} scores=${JSON.stringify(scores)} confidences=${JSON.stringify(confidences)}`;
                 return { angle: chosen, confidence, method };
-            } finally {
+            } catch { return null; } finally {
                 try { await worker.terminate(); } catch { /* ignore */ }
             }
         };
@@ -1554,7 +1562,7 @@ export async function runStage5(jobId: string): Promise<void> {
             const pageOrientation = getPageOrientationDecision(p);
 
             if (pageOrientation.shouldRotate) {
-                buf = await sharp(buf).rotate(pageOrientation.angle, { background: whiteBg }).png().toBuffer();
+                buf = Buffer.from(await sharp(buf as any).rotate(pageOrientation.angle, { background: whiteBg }).png().toBuffer());
                 ops.push(`rotate:${pageOrientation.angle}deg_cw`);
                 perPageOrientationApplied[file] = { angle: pageOrientation.angle, confidence: pageOrientation.confidence };
             } else {
@@ -1575,10 +1583,10 @@ export async function runStage5(jobId: string): Promise<void> {
             const canPiecewise = canDeskew && skewType === 'NON_UNIFORM' && skewDelta >= NON_UNIFORM_MIN_DELTA_DEG && leftConf >= ROI_CONF_THRESH && rightConf >= ROI_CONF_THRESH;
 
             if (canPiecewise) {
-                buf = await piecewiseDeskew(buf, leftAngle, rightAngle);
+                buf = Buffer.from(await piecewiseDeskew(buf, leftAngle, rightAngle));
                 ops.push(`deskew:piecewise(left=${leftAngle}deg,right=${rightAngle}deg)`);
             } else if (canDeskew) {
-                buf = await sharp(buf).rotate(skewAngle, { background: whiteBg }).png().toBuffer();
+                buf = Buffer.from(await sharp(buf as any).rotate(skewAngle, { background: whiteBg }).png().toBuffer());
                 ops.push(`deskew:global(${skewAngle}deg)`);
             }
 
