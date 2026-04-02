@@ -25,9 +25,10 @@ import { ScrollArea } from '../components/ui/scroll-area';
 import { Separator } from '../components/ui/separator';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { useDateFilter } from '../context/DateContext';
-import { getInvoices, uploadInvoice, runPipeline, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice } from '../lib/api';
+import { useProcessing } from '../context/ProcessingContext';
+import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice } from '../lib/api';
 import { toast } from 'sonner';
-import { ProcessingPipeline, PipelineStage } from '../components/at/ProcessingPipeline';
+import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
 
 // --- Types ---
@@ -344,23 +345,24 @@ export default function APWorkspace() {
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
   const [itemFilterConfig, setItemFilterConfig] = useState<{ enabled: boolean; blockedItemNames: string[] } | null>(null);
 
-  // No preview state needed anymore
+  // Pipeline — state lives in ProcessingContext so it survives navigation
+  const {
+    isProcessing,
+    pipelineData,
+    pipelineStages,
+    pipelineParticles,
+    confirmedUploads,
+    onStagesChange,
+    onParticlesChange,
+    setConfirmedUploads,
+    startProcessing,
+    clearProcessing,
+  } = useProcessing();
 
-  // Pipeline state
-  const [showPipeline, setShowPipeline] = useState(false);
-  const [pipelineState, setPipelineState] = useState<{
-    fileNames: string[];
-    filePaths: string[];
-    fileDataArrays: number[][];
-  }>({ fileNames: [], filePaths: [], fileDataArrays: [] });
+  // Local-only dialog state
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchName, setBatchName] = useState('');
   const [pendingUploads, setPendingUploads] = useState<FileList | File[] | null>(null);
-
-  // Lifted Pipeline State
-  const [pipelineStages, setPipelineStages] = useState<PipelineStage[] | null>(null);
-  const [pipelineParticles, setPipelineParticles] = useState<Record<string, boolean>>({});
-  const [confirmedUploads, setConfirmedUploads] = useState(0);
 
   // Fetch real data on mount
   const fetchData = async (background = false) => {
@@ -592,7 +594,7 @@ export default function APWorkspace() {
           const blockedGstins = Array.from(new Set((vendors || [])
             .filter((vendor: any) => selectedSupplierIds.includes(vendor.id))
             .map((vendor: any) => normalizeGstValue(vendor.gstin))
-            .filter(Boolean)));
+            .filter(Boolean))) as string[];
           setSupplierFilterConfig({ enabled: blockedGstins.length > 0, blockedGstins });
         } else {
           setSupplierFilterConfig({ enabled: false, blockedGstins: [] });
@@ -603,9 +605,9 @@ export default function APWorkspace() {
           // Resolve selected item IDs to names so the routing badge stays aligned with backend name-based matching.
           // @ts-ignore
           const items = await window.api.invoke('items:get-all');
-          const blockedItemNames = Array.from(new Set((items || [])
+          const blockedItemNames: string[] = Array.from(new Set((items || [])
             .filter((item: any) => item?.is_active !== false && selectedItemIds.includes(item.id))
-            .map((item: any) => normalizeItemText(item.item_name))
+            .map((item: any) => String(normalizeItemText(item.item_name) ?? ''))
             .filter(Boolean)));
           setItemFilterConfig({ enabled: blockedItemNames.length > 0, blockedItemNames });
         } else {
@@ -721,12 +723,9 @@ export default function APWorkspace() {
       fileDataArrays.push(dataArray);
     }
 
-    setPipelineState({ fileNames, filePaths, fileDataArrays });
+    startProcessing({ fileNames, filePaths, fileDataArrays, batchName });
     setShowBatchDialog(false);
     setPendingUploads(null);
-    setPipelineStages(null); // Reset for new batch
-    setPipelineParticles({});
-    setShowPipeline(true);
     setActiveTab('processing');
   };
 
@@ -1763,12 +1762,12 @@ export default function APWorkspace() {
                     {counts.posted}
                   </span>
                 </TabsTrigger>
-                {(showPipeline || pipelineStages) && (
+                {isProcessing && (
                   <TabsTrigger value="processing" className={`${tabClass} data-[state=active]:border-blue-600 data-[state=active]:text-blue-700`}>
                     Processing
-                    {pipelineState.fileNames.length > 0 && (
+                    {pipelineData.fileNames.length > 0 && (
                       <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1">
-                        {confirmedUploads}/{pipelineState.fileNames.length}
+                        {confirmedUploads}/{pipelineData.fileNames.length}
                       </span>
                     )}
                   </TabsTrigger>
@@ -1778,28 +1777,27 @@ export default function APWorkspace() {
 
             <div className="flex-1 overflow-auto bg-white p-0">
               {/* --- PROCESSING TAB --- */}
-              {(showPipeline || pipelineStages) && (
+              {isProcessing && (
                 <TabsContent value="processing" className="m-0 h-full border-none p-0 outline-none">
                   <ProcessingPipeline
-                    isBatch={pipelineState.fileNames.length > 1}
-                    fileNames={pipelineState.fileNames}
-                    filePaths={pipelineState.filePaths}
-                    fileDataArrays={pipelineState.fileDataArrays}
-                    batchName={batchName}
+                    isBatch={pipelineData.fileNames.length > 1}
+                    fileNames={pipelineData.fileNames}
+                    filePaths={pipelineData.filePaths}
+                    fileDataArrays={pipelineData.fileDataArrays}
+                    batchName={pipelineData.batchName}
                     uploaderName="User"
                     stages={pipelineStages || undefined}
-                    onStagesChange={setPipelineStages}
+                    onStagesChange={onStagesChange}
                     particles={pipelineParticles}
-                    onParticlesChange={setPipelineParticles}
+                    onParticlesChange={onParticlesChange}
                     onConfirmedCountChange={setConfirmedUploads}
                     onComplete={() => {
-                      console.log('[APWorkspace] Pipeline complete!');
-                      fetchData(true); // Background refresh
+                      fetchData(true);
                     }}
                     onDismiss={() => {
-                      // Do NOT clear state here, just switch tab
                       setActiveTab('received');
                       fetchData(true);
+                      clearProcessing();
                     }}
                   />
                 </TabsContent>

@@ -23,9 +23,9 @@ export interface ProcessingPipelineProps {
     filePaths: string[];
     fileDataArrays?: number[][];  // Raw file data as byte arrays
     stages?: PipelineStage[] | null;
-    onStagesChange?: (stages: PipelineStage[]) => void;
+    onStagesChange?: (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => void;
     particles?: Record<string, boolean>;
-    onParticlesChange?: (particles: Record<string, boolean>) => void;
+    onParticlesChange?: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
     onComplete: () => void;
     onDismiss?: () => void;
     uploaderName?: string;
@@ -294,25 +294,26 @@ export function ProcessingPipeline({
     const stages = externalStages || internalStages;
     const particles = externalParticles || internalParticles;
     
+    // Pass functional updates straight through to the external handler so the
+    // caller can use React's own functional-setState form, avoiding stale-closure
+    // issues when this component unmounts while an async pipeline is still running.
     const setStages = (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => {
-        if (typeof val === 'function') {
-            const next = val(stages);
-            if (onStagesChange) onStagesChange(next);
-            else setInternalStages(next);
+        if (onStagesChange) {
+            onStagesChange(val);
+        } else if (typeof val === 'function') {
+            setInternalStages(val);
         } else {
-            if (onStagesChange) onStagesChange(val);
-            else setInternalStages(val);
+            setInternalStages(val);
         }
     };
-    
+
     const setParticlesState = (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
-        if (typeof val === 'function') {
-            const next = val(particles);
-            if (onParticlesChange) onParticlesChange(next);
-            else setInternalParticles(next);
+        if (onParticlesChange) {
+            onParticlesChange(val);
+        } else if (typeof val === 'function') {
+            setInternalParticles(val);
         } else {
-            if (onParticlesChange) onParticlesChange(val);
-            else setInternalParticles(val);
+            setInternalParticles(val);
         }
     };
 
