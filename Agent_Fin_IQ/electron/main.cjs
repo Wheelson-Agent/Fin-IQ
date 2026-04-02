@@ -8,7 +8,7 @@
  *   and serves the React frontend.
  *
  * STARTUP SEQUENCE:
- *   1. Create BrowserWindow with preload script
+ *   1. Create BrowserWindow with preload scrct
  *   2. Load React app (Vite dev server or built files)
  *   3. Handle app lifecycle events
  *
@@ -221,10 +221,10 @@ app.whenReady().then(() => {
             const ext = path.extname(normalizedPath).toLowerCase();
             const contentType =
                 ext === '.pdf' ? 'application/pdf' :
-                ext === '.png' ? 'image/png' :
-                (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' :
-                ext === '.webp' ? 'image/webp' :
-                'application/octet-stream';
+                    ext === '.png' ? 'image/png' :
+                        (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' :
+                            ext === '.webp' ? 'image/webp' :
+                                'application/octet-stream';
 
             const rangeHeader = request.headers?.get ? request.headers.get('range') : null;
             const totalLength = fileBuffer.length;
