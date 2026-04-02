@@ -97,15 +97,20 @@ function getDynamicConcurrencyPlan(
         return candidate.endsWith('.pdf');
     }).length;
 
-    let pipeline = hardwareBudget >= 12 ? 3 : hardwareBudget >= 8 ? 3 : hardwareBudget >= 4 ? 2 : 1;
+    let pipeline = hardwareBudget >= 12 ? 6 : hardwareBudget >= 8 ? 5 : hardwareBudget >= 4 ? 4 : 2;
+
+    // Large batches: scale up workers so queue wait doesn't dominate total time.
+    // OCR is I/O-bound (Google API network wait), so extra workers don't tax CPU.
+    if (totalFiles >= 15) pipeline = Math.max(pipeline, 5);
+    else if (totalFiles >= 8) pipeline = Math.max(pipeline, 4);
 
     if (highestComplexity >= 3) {
-        pipeline = 1;
-    } else if (highestComplexity >= 2.5 || pdfCount >= Math.max(2, Math.ceil(totalFiles / 2))) {
         pipeline = Math.min(pipeline, 2);
+    } else if (highestComplexity >= 2.5 || pdfCount >= Math.max(2, Math.ceil(totalFiles / 2))) {
+        pipeline = Math.min(pipeline, 3);
     }
 
-    pipeline = clamp(Math.min(pipeline, totalFiles), 1, 3);
+    pipeline = clamp(Math.min(pipeline, totalFiles), 1, 6);
 
     let upload = hardwareBudget >= 12 ? 4 : hardwareBudget >= 8 ? 4 : hardwareBudget >= 4 ? 3 : 2;
     if (highestComplexity >= 3) {
@@ -356,8 +361,11 @@ export function ProcessingPipeline({
     }, [batchName]);
 
     useEffect(() => {
-        if (logScrollRef.current) {
-            logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+        const el = logScrollRef.current;
+        if (!el) return;
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (distanceFromBottom < 80) {
+            el.scrollTop = el.scrollHeight;
         }
     }, [logs]);
 

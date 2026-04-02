@@ -82,6 +82,7 @@
         "@tailwindcss/vite": "4.1.12",
         "@types/node": "^22.0.0",
         "@types/pg": "^8.18.0",
+        "@types/pngjs": "^6.0.5",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
         "@vitejs/plugin-react": "4.7.0",
