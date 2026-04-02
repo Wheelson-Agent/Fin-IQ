@@ -20,6 +20,8 @@ export interface ProcessingPipelineProps {
     isBatch: boolean;
     fileNames: string[];
     batchName: string;
+    pipelineRunId: string;
+    pipelineStartedAt: string;
     filePaths: string[];
     fileDataArrays?: number[][];  // Raw file data as byte arrays
     stages?: PipelineStage[] | null;
@@ -271,10 +273,8 @@ function StageNode({ stage, index, showParticles }: { stage: PipelineStage; inde
 }
 
 /* ─────────────────── Main Component ─────────────────────────── */
-const processedBatches = new Set<string>();
-
 export function ProcessingPipeline({ 
-    isBatch, fileNames, batchName, filePaths, fileDataArrays, 
+    isBatch, fileNames, batchName, pipelineRunId, pipelineStartedAt, filePaths, fileDataArrays, 
     onComplete, onDismiss, uploaderName,
     stages: externalStages, onStagesChange,
     particles: externalParticles, onParticlesChange,
@@ -324,10 +324,18 @@ export function ProcessingPipeline({
     const [activeFileName, setActiveFileName] = useState<string>('');
     const timers = useRef<ReturnType<typeof setTimeout>[] | ReturnType<typeof setInterval>[]>([]);
     const logScrollRef = useRef<HTMLDivElement>(null);
+    const runStartedRef = useRef<number>(Date.now());
+    const ghostHandledRef = useRef(false);
+    const sessionGuardKey = pipelineRunId ? `apw-processing-run:${pipelineRunId}` : '';
     const concurrencyPlan = useMemo(
         () => getDynamicConcurrencyPlan(filePaths, fileNames, fileDataArrays),
         [fileDataArrays, fileNames, filePaths]
     );
+
+    useEffect(() => {
+        runStartedRef.current = pipelineStartedAt ? new Date(pipelineStartedAt).getTime() || Date.now() : Date.now();
+        ghostHandledRef.current = false;
+    }, [pipelineRunId, pipelineStartedAt]);
 
     // Periodic log and worker status fetching
     useEffect(() => {
@@ -336,23 +344,46 @@ export function ProcessingPipeline({
         const interval = setInterval(async () => {
             try {
                 console.log(`[Pipeline] Polling logs for batch: ${batchName}`);
-                const [fetchedLogs, status, debugLogs] = await Promise.all([
+                const [fetchedLogs, status, debugLogs, batchHealth] = await Promise.all([
                     getBatchLogs(batchName),
                     getWorkerStatus(),
                     getAllLogsDebug()
+                    ,
+                    // @ts-ignore - Electron preload bridge
+                    window.api.invoke('processing:get-batch-health', { batchName, startedAfter: pipelineStartedAt || null })
                 ]);
                 
                 console.log(`[Pipeline] Response: batch=${fetchedLogs?.length||0}, debug=${debugLogs?.length||0}`);
                 setLogs(fetchedLogs || []);
                 setWorkerCount(status?.activeWorkers || 0);
                 setLastUpdate(new Date().toLocaleTimeString('en-IN', { hour12: false }));
+
+                const currentStages = stages;
+                const hasFailed = currentStages.some((s) => s.status === 'error');
+                const allDone = currentStages[3]?.status === 'done';
+                const invoiceCount = Number(batchHealth?.invoiceCount || 0);
+                const hasBackendActivity =
+                    confirmedCount > 0 ||
+                    (fetchedLogs?.length || 0) > 0 ||
+                    Number(status?.activeWorkers || 0) > 0 ||
+                    invoiceCount > 0;
+
+                if (!ghostHandledRef.current && !hasFailed && !allDone && !hasBackendActivity) {
+                    const elapsedMs = Date.now() - runStartedRef.current;
+                    if (elapsedMs >= 10000) {
+                        ghostHandledRef.current = true;
+                        updateStage('uploading', 'error', 'Upload session did not start', {
+                            sublabel: 'No backend activity detected for this batch',
+                        });
+                    }
+                }
             } catch (err) {
                 console.error('[Pipeline] Failed to fetch logs/status', err);
             }
         }, 2000); // Poll every 2 seconds
 
         return () => clearInterval(interval);
-    }, [batchName]);
+    }, [batchName, pipelineStartedAt, stages, confirmedCount]);
 
     useEffect(() => {
         if (logScrollRef.current) {
@@ -377,10 +408,10 @@ export function ProcessingPipeline({
     };
 
     useEffect(() => {
-        if (!filePaths || filePaths.length === 0) return;
-        
-        // Prevent React 18 Strict Mode double-firing the pipeline for the exact same batch
-        if (batchName && processedBatches.has(batchName)) return;
+        if (!filePaths || filePaths.length === 0 || !pipelineRunId) return;
+
+        // Prevent re-running the exact same processing session on strict-mode remounts.
+        if (sessionGuardKey && window.sessionStorage.getItem(sessionGuardKey) === 'started') return;
 
         // If we have external stages already progressed beyond initial, don't restart
         const hasExternalProgress = externalStages && externalStages.some(s => 
@@ -389,11 +420,11 @@ export function ProcessingPipeline({
         );
 
         if (hasExternalProgress) {
-            if (batchName) processedBatches.add(batchName);
+            if (sessionGuardKey) window.sessionStorage.setItem(sessionGuardKey, 'started');
             return;
         }
-        
-        if (batchName) processedBatches.add(batchName);
+
+        if (sessionGuardKey) window.sessionStorage.setItem(sessionGuardKey, 'started');
 
         // Reset state on new files if not already initialized externally
         if (!externalStages) {
@@ -519,7 +550,7 @@ export function ProcessingPipeline({
         };
 
         processFiles();
-    }, [filePaths, isBatch, batchName]);
+    }, [filePaths, isBatch, batchName, externalStages, pipelineRunId, sessionGuardKey]);
 
     const hasFailed = stages.some((s: PipelineStage) => s.status === 'error');
     const allDone = stages[3].status === 'done';

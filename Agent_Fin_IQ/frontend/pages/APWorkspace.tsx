@@ -353,6 +353,8 @@ export default function APWorkspace() {
     filePaths: string[];
     fileDataArrays: number[][];
   }>({ fileNames: [], filePaths: [], fileDataArrays: [] });
+  const [pipelineRunId, setPipelineRunId] = useState('');
+  const [pipelineStartedAt, setPipelineStartedAt] = useState('');
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchName, setBatchName] = useState('');
   const [pendingUploads, setPendingUploads] = useState<FileList | File[] | null>(null);
@@ -361,6 +363,24 @@ export default function APWorkspace() {
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[] | null>(null);
   const [pipelineParticles, setPipelineParticles] = useState<Record<string, boolean>>({});
   const [confirmedUploads, setConfirmedUploads] = useState(0);
+
+  const clearPipelineSession = (nextTab: string = 'received') => {
+    setShowPipeline(false);
+    setPipelineState({ fileNames: [], filePaths: [], fileDataArrays: [] });
+    setPipelineRunId('');
+    setPipelineStartedAt('');
+    setBatchName('');
+    setPendingUploads(null);
+    setPipelineStages(null);
+    setPipelineParticles({});
+    setConfirmedUploads(0);
+    setActiveTab(nextTab);
+    setSearchParams({ tab: nextTab });
+  };
+
+  const createDefaultBatchName = () => {
+    return `Batch_${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`;
+  };
 
   // Fetch real data on mount
   const fetchData = async (background = false) => {
@@ -722,8 +742,11 @@ export default function APWorkspace() {
     }
 
     setPipelineState({ fileNames, filePaths, fileDataArrays });
+    setPipelineRunId(`pipeline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    setPipelineStartedAt(new Date().toISOString());
     setShowBatchDialog(false);
     setPendingUploads(null);
+    setConfirmedUploads(0);
     setPipelineStages(null); // Reset for new batch
     setPipelineParticles({});
     setShowPipeline(true);
@@ -732,7 +755,7 @@ export default function APWorkspace() {
 
   const handleUploadFiles = (files: FileList | File[]) => {
     setPendingUploads(files);
-    setBatchName(`Batch_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-')}`);
+    setBatchName(createDefaultBatchName());
     setShowBatchDialog(true);
   };
 
@@ -1786,6 +1809,8 @@ export default function APWorkspace() {
                     filePaths={pipelineState.filePaths}
                     fileDataArrays={pipelineState.fileDataArrays}
                     batchName={batchName}
+                    pipelineRunId={pipelineRunId}
+                    pipelineStartedAt={pipelineStartedAt}
                     uploaderName="User"
                     stages={pipelineStages || undefined}
                     onStagesChange={setPipelineStages}
@@ -1797,8 +1822,7 @@ export default function APWorkspace() {
                       fetchData(true); // Background refresh
                     }}
                     onDismiss={() => {
-                      // Do NOT clear state here, just switch tab
-                      setActiveTab('received');
+                      clearPipelineSession('received');
                       fetchData(true);
                     }}
                   />
