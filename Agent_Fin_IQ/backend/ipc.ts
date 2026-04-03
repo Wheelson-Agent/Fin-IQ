@@ -60,6 +60,31 @@ const __dirname = path.dirname(__filename);
 const envPath = path.resolve(__dirname, '../../config/.env');
 dotenv.config({ path: envPath });
 
+function buildStageMetrics(startedAt: Date, completedAt: Date, extra: Record<string, any> = {}) {
+    return {
+        duration_ms: Math.max(0, completedAt.getTime() - startedAt.getTime()),
+        started_at: startedAt.toISOString(),
+        completed_at: completedAt.toISOString(),
+        ...extra
+    };
+}
+
+async function recordStageSafe(
+    invoiceId: string,
+    stage: string,
+    status: string,
+    startedAt: Date,
+    completedAt: Date,
+    metrics?: Record<string, any>,
+    error?: string
+) {
+    try {
+        await queries.recordProcessingStage(invoiceId, stage, status, startedAt, completedAt, metrics, error);
+    } catch (recordErr: any) {
+        console.error(`[IPC] Failed to record processing stage ${stage} for ${invoiceId}:`, recordErr?.message || recordErr);
+    }
+}
+
 /**
  * Register all IPC handlers.
  * Called once during backend initialization (main.ts).
@@ -252,22 +277,35 @@ export function registerIpcHandlers() {
             const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '').substring(0, 4);
             currentBatch = `UNASSIGNED_${dateStr}_${timeStr}`;
         }
+        const folderSetupStartedAt = new Date();
         const folders = await createBatchStructure(currentBatch);
+        const folderSetupCompletedAt = new Date();
         batchLogger.addLog(currentBatch, fileName, 'Upload', 'Started', `Initiating file secure for ${fileName}`);
 
         // Step 2: Physically move/copy file to the batch 'source' folder
         const targetPath = path.join(folders.source, fileName);
+        const copyStartedAt = new Date();
+        let copyCompletedAt = copyStartedAt;
+        let copyBytes = 0;
+        let copySource = fileData ? 'memory' : 'disk';
+        let copyErrorMessage: string | undefined;
 
         try {
             if (fileData) {
-                fs.writeFileSync(targetPath, Buffer.from(fileData));
+                const buffer = Buffer.from(fileData);
+                copyBytes = buffer.length;
+                fs.writeFileSync(targetPath, buffer);
             } else if (filePath && fs.existsSync(filePath)) {
+                copyBytes = fs.statSync(filePath).size;
                 fs.copyFileSync(filePath, targetPath);
             } else {
                 throw new Error('No file data or valid path');
             }
+            copyCompletedAt = new Date();
             batchLogger.addLog(currentBatch, fileName, 'Upload', 'Completed', `File successfully moved to ${fileName} batch folder`);
         } catch (err) {
+            copyCompletedAt = new Date();
+            copyErrorMessage = err instanceof Error ? err.message : 'Unknown';
             console.error('[IPC] File save failed:', err);
             batchLogger.addLog(currentBatch, fileName, 'Upload', 'Failed', `File transfer failed: ${err instanceof Error ? err.message : 'Unknown'}`);
             throw err; // propagate so frontend marks this file as failed, not silently succeeded
@@ -291,6 +329,35 @@ export function registerIpcHandlers() {
             event_type: 'Created',
             description: `Invoice "${fileName}" uploaded to batch "${currentBatch}"`,
         });
+
+        await recordStageSafe(
+            invoice.id,
+            'FOLDER_SETUP',
+            'PASSED',
+            folderSetupStartedAt,
+            folderSetupCompletedAt,
+            buildStageMetrics(folderSetupStartedAt, folderSetupCompletedAt, {
+                batch_name: currentBatch,
+                source_folder: folders.source,
+                completed_folder: folders.completed,
+                exceptions_folder: folders.exceptions
+            })
+        );
+
+        await recordStageSafe(
+            invoice.id,
+            'UPLOAD_COPY',
+            copyErrorMessage ? 'FAILED' : 'PASSED',
+            copyStartedAt,
+            copyCompletedAt,
+            buildStageMetrics(copyStartedAt, copyCompletedAt, {
+                batch_name: currentBatch,
+                copy_source: copySource,
+                bytes: copyBytes,
+                target_path: targetPath
+            }),
+            copyErrorMessage
+        );
 
         return invoice;
     });
@@ -578,14 +645,37 @@ export function registerIpcHandlers() {
         const batchName = batchId || 'UNASSIGNED';
         try {
             batchLogger.incrementWorkers();
-            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
             if (!fs.existsSync(filePath)) {
                 await queries.updateInvoiceFailureReason(invoiceId, 'File not found on disk', 'FAILED');
                 return { success: false, error: 'File not found on disk' };
             }
 
+            let ocrInputPath = filePath;
+            let ocrInputSource = 'original-input';
+            let pipelineDecision: any = null;
+            const recordPipelineStage = async (
+                stage: string,
+                status: string,
+                startedAt: Date,
+                completedAt: Date,
+                extra: Record<string, any> = {},
+                error?: string
+            ) => recordStageSafe(
+                invoiceId,
+                stage,
+                status,
+                startedAt,
+                completedAt,
+                buildStageMetrics(startedAt, completedAt, extra),
+                error
+            );
+
+            const preOcrStartedAt = new Date();
+            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
+
             const fileBuffer = fs.readFileSync(filePath);
             const result = await runFullPipeline(fileBuffer, fileName, { invoiceId });
+            pipelineDecision = result.decision;
             console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
             // ── PRE-OCR REJECTION HANDLER [added: mapped labels for all rejection routes] ──
@@ -599,8 +689,13 @@ export function registerIpcHandlers() {
 
             // MANUAL_REVIEW — encrypted PDF, engine never routes this to FAILED
             if (result.decision.route === 'MANUAL_REVIEW') {
+                const preOcrCompletedAt = new Date();
                 batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: encrypted PDF`);
                 await queries.markInvoicePreOcrRejection(invoiceId, 'Invalid doc- encrypted', 'ENCRYPTED');
+                await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                    route: result.decision.route,
+                    reason_codes: allStageCodes
+                }, 'Invalid doc- encrypted');
                 return { success: false, error: 'Invalid doc- encrypted' };
             }
 
@@ -611,26 +706,37 @@ export function registerIpcHandlers() {
 
                 if (allStageCodes.includes('FILE_TOO_LARGE')) {
                     failureReason = 'Invalid doc- file too large';
-                    preOcrStatus  = 'FILE_TOO_LARGE';
+                    preOcrStatus = 'FILE_TOO_LARGE';
                 } else if (allStageCodes.includes('EMPTY_PDF') || allStageCodes.includes('ALL_BLANK_PAGES')) {
                     failureReason = 'Invalid doc- empty-doc';
-                    preOcrStatus  = 'EMPTY_DOC';
+                    preOcrStatus = 'EMPTY_DOC';
                 } else {
                     // Other failures (CORRUPT, RASTERIZATION_FAILED, etc.) — generic for now
                     failureReason = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
-                    preOcrStatus  = 'FAILED';
+                    preOcrStatus = 'FAILED';
                 }
 
+                const preOcrCompletedAt = new Date();
                 batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Pre-OCR failed: ${failureReason}`);
                 await queries.markInvoicePreOcrRejection(invoiceId, failureReason, preOcrStatus);
+                await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                    route: result.decision.route,
+                    pre_ocr_status: preOcrStatus,
+                    reason_codes: allStageCodes
+                }, failureReason);
                 return { success: false, error: failureReason };
             }
 
             // ENHANCE_REQUIRED — blur rejection
             // >50% of pages failed the blur quality check; route to Handoff for user re-upload
             if (result.decision.route === 'ENHANCE_REQUIRED') {
+                const preOcrCompletedAt = new Date();
                 batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: image too blurry for OCR`);
                 await queries.markInvoiceBlur(invoiceId);
+                await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                    route: result.decision.route,
+                    reason_codes: allStageCodes
+                }, 'Invalid doc- blur');
                 return { success: false, error: 'Invalid doc- blur' };
             }
             // ── END PRE-OCR REJECTION HANDLER ────────────────────────────────────
@@ -640,10 +746,10 @@ export function registerIpcHandlers() {
             await queries.updatePreOcrStatus(invoiceId, 'PASSED');
             // ── END PRE-OCR PASS STATUS ────────────────────────────────────────
 
+            const preOcrCompletedAt = new Date();
             batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
             const preOcrArtifactPath = result.outputArtifactPath;
-            let ocrInputPath = filePath;
-            let ocrInputSource = 'original-fallback';
+            ocrInputSource = 'original-fallback';
 
             if (preOcrArtifactPath && fs.existsSync(preOcrArtifactPath)) {
                 ocrInputPath = preOcrArtifactPath;
@@ -651,22 +757,41 @@ export function registerIpcHandlers() {
             } else {
                 console.warn(`[IPC] OCR fallback to original input for ${fileName}; missing Pre-OCR artifact: ${preOcrArtifactPath || 'none'}`);
             }
+            await recordPipelineStage('PRE_OCR', 'PASSED', preOcrStartedAt, preOcrCompletedAt, {
+                route: result.decision.route,
+                ocr_input_source: ocrInputSource,
+                artifact_path: preOcrArtifactPath || null
+            });
 
+            const ocrStartedAt = new Date();
             batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine (${ocrInputSource})`);
-            console.log(`[IPC] Pre-OCR passed for ${fileName}, running OCR with ${ocrInputSource}: ${ocrInputPath}`);
+            console.log(`[IPC] Running OCR for ${fileName} with ${ocrInputSource}: ${ocrInputPath}`);
 
             const mimeType = ocr.getMimeType(ocrInputPath);
             const ocrResult = await ocr.runOCR(ocrInputPath, mimeType);
             console.log(`[IPC] ocr.runOCR result for ${fileName}: success=${ocrResult.success}, error=${ocrResult.error || 'none'}`);
 
             if (!ocrResult.success) {
+                const ocrCompletedAt = new Date();
                 const errorMessage = ocrResult.error || 'OCR Processing failed';
                 batchLogger.addLog(batchName, fileName, 'OCR', 'Failed', `OCR engine returned error: ${errorMessage}`);
                 await queries.updateInvoiceFailureReason(invoiceId, errorMessage, 'OCR_FAILED');
+                await recordPipelineStage('OCR', 'FAILED', ocrStartedAt, ocrCompletedAt, {
+                    ocr_input_source: ocrInputSource,
+                    ocr_input_path: ocrInputPath,
+                    mime_type: mimeType
+                }, errorMessage);
                 return { success: false, error: errorMessage };
             }
 
+            const ocrCompletedAt = new Date();
             batchLogger.addLog(batchName, fileName, 'OCR', 'Completed', 'OCR text extraction successful');
+            await recordPipelineStage('OCR', 'PASSED', ocrStartedAt, ocrCompletedAt, {
+                ocr_input_source: ocrInputSource,
+                ocr_input_path: ocrInputPath,
+                mime_type: mimeType,
+                entities_count: Array.isArray(ocrResult.documentai_document?.entities) ? ocrResult.documentai_document.entities.length : 0
+            });
             batchLogger.addLog(batchName, fileName, 'AI-Analysis', 'Started', 'Mapping entities and validating against business rules');
 
             // Webhook payload as requested
@@ -689,17 +814,21 @@ export function registerIpcHandlers() {
                 ocr_input_path: ocrInputPath,
             };
 
+            const n8nStartedAt = new Date();
+            let n8nData: any;
+            let n8nResponse: Response | null = null;
             try {
                 console.log(`[IPC] Sending OCR entities payload to Webhook: ${webhookUrl}`);
-                const response = await fetch(webhookUrl, {
+                n8nResponse = await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
                 // IMPORTANT: n8n must be configured to "Respond to Webhook" with the final JSON structure mapped for DB insertion
-                const n8nData = await response.json();
+                n8nData = await n8nResponse.json();
                 console.log(`[IPC] Received n8nData for ${invoiceId}`);
+                const n8nCompletedAt = new Date();
 
                 // Log webhook success to debug_ocr.log and the new n8n_debug.log
                 const timestamp = new Date().toISOString();
@@ -709,26 +838,59 @@ export function registerIpcHandlers() {
                 const n8nDebugData = `\n--- N8N RESPONSE RECEIVED ${timestamp} ---\nInvoice ID: ${invoiceId}\nResponse: ${JSON.stringify(n8nData, null, 2)}\n------------------------------------------\n`;
                 fs.appendFileSync(path.resolve(__dirname, '../../n8n_debug.log'), n8nDebugData);
 
-                // Update the database with parsed N8N results using the code-level mapper
-                await queries.ingestN8nData(invoiceId, n8nData);
-                batchLogger.addLog(batchName, fileName, 'AI-Analysis', 'Completed', 'AI mapping and logic validation finished');
-                batchLogger.addLog(batchName, fileName, 'Finalizing', 'Started', 'Securing records in local ledger...');
+                await recordPipelineStage('N8N', 'PASSED', n8nStartedAt, n8nCompletedAt, {
+                    webhook_url: webhookUrl,
+                    http_status: n8nResponse.status,
+                    response_ok: n8nResponse.ok
+                });
             } catch (webhookErr: any) {
                 console.error('[IPC] Webhook delivery failed, but OCR was successful:', webhookErr.message);
+                const n8nFailureAt = new Date();
 
                 // Log webhook failure to debug_ocr.log
                 const logData = `\n--- WEBHOOK FAILED ${new Date().toISOString()} ---\nOCR Input Source: ${ocrInputSource}\nOCR Input Path: ${ocrInputPath}\nPayload: ${JSON.stringify(payload, null, 2)}\nError: ${webhookErr.message}\n--------------------------\n`;
                 fs.appendFileSync(path.resolve(__dirname, '../../debug_ocr.log'), logData);
 
+                await recordPipelineStage('N8N', 'FAILED', n8nStartedAt, n8nFailureAt, {
+                    webhook_url: webhookUrl
+                }, webhookErr.message);
+
                 // Fallback: If webhook fails, just mark as Pending
+                const dbStartedAt = new Date();
                 await queries.updateInvoiceWithOCR(invoiceId, {
                     status: 'Pending Approval',
                     ocr_raw_data: ocrResult.documentai_document,
                 });
+                const dbCompletedAt = new Date();
+                await recordPipelineStage('DB_UPDATE', 'PASSED', dbStartedAt, dbCompletedAt, {
+                    source: 'updateInvoiceWithOCR_fallback'
+                });
+                batchLogger.addLog(batchName, fileName, 'AI-Analysis', 'Completed', 'AI mapping fallback applied');
+                batchLogger.addLog(batchName, fileName, 'Finalizing', 'Started', 'Securing records in local ledger...');
+                batchLogger.addLog(batchName, fileName, 'Finalizing', 'Completed', 'Document fully processed and available.');
+                return { success: true, decision: pipelineDecision };
             }
 
+            // Update the database with parsed N8N results using the code-level mapper
+            const dbStartedAt = new Date();
+            try {
+                await queries.ingestN8nData(invoiceId, n8nData);
+                const dbCompletedAt = new Date();
+                await recordPipelineStage('DB_UPDATE', 'PASSED', dbStartedAt, dbCompletedAt, {
+                    source: 'ingestN8nData'
+                });
+            } catch (dbErr: any) {
+                const dbCompletedAt = new Date();
+                await recordPipelineStage('DB_UPDATE', 'FAILED', dbStartedAt, dbCompletedAt, {
+                    source: 'ingestN8nData'
+                }, dbErr.message);
+                throw dbErr;
+            }
+            batchLogger.addLog(batchName, fileName, 'AI-Analysis', 'Completed', 'AI mapping and logic validation finished');
+            batchLogger.addLog(batchName, fileName, 'Finalizing', 'Started', 'Securing records in local ledger...');
+
             batchLogger.addLog(batchName, fileName, 'Finalizing', 'Completed', 'Document fully processed and available.');
-            return { success: true, decision: result.decision };
+            return { success: true, decision: pipelineDecision };
         } catch (err: any) {
             console.error('[IPC] Pipeline execution error:', err);
             batchLogger.addLog(batchName, fileName, 'System', 'Failed', `Critical failure: ${err.message}`);
@@ -754,7 +916,7 @@ export function registerIpcHandlers() {
      * Connection Status Checks
      */
     ipcMain.handle('status:check-n8n', async () => {
-        const response = n8nWatcher.getStatus();
+        const response = await n8nWatcher.checkNow();
         return response.status === 'live';
     });
 
@@ -775,6 +937,17 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('processing:get-worker-status', async () => {
         return { activeWorkers: batchLogger.getWorkerCount() };
+    });
+
+    ipcMain.handle('processing:get-batch-health', async (_event, { batchName, startedAfter } = {}) => {
+        return {
+            invoiceCount: batchName ? await queries.getBatchInvoiceCount(batchName, startedAfter || null) : 0,
+        };
+    });
+
+    ipcMain.handle('processing:get-batch-stage-table', async (_event, { batchName, startedAfter } = {}) => {
+        if (!batchName) return [];
+        return await queries.getBatchStageTimingTable(batchName, startedAfter || null);
     });
 
     ipcMain.handle('processing:get-all-logs-debug', async () => {
