@@ -66,6 +66,71 @@ try { CONFIG = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { /* us
 const JOBS_DIR = path.resolve(__dirname, '../../data/jobs');
 if (!fs.existsSync(JOBS_DIR)) fs.mkdirSync(JOBS_DIR, { recursive: true });
 
+// ─── Persistent Tesseract Worker Pool (thread-level) ──────────────────────────
+// Workers are initialized once per Node.js worker thread and reused across files.
+// This eliminates the ~8-15s WASM initialization cost on every file after the first.
+const _tessdataDir = path.resolve(__dirname, '../../tools/tesseract/tessdata');
+const _osdDataGz = path.join(_tessdataDir, 'osd.traineddata.gz');
+const _engDataGz = path.join(_tessdataDir, 'eng.traineddata.gz');
+const _tesseractWorkerPath = path.resolve(__dirname, './tesseract_worker.cjs');
+const _tessLangPathUrl = pathToFileURL(_tessdataDir + path.sep).href;
+const _sharedOsdCachePath = path.resolve(__dirname, '../../tools/tesseract/tess-cache-osd');
+const _sharedEngCachePath = path.resolve(__dirname, '../../tools/tesseract/tess-cache-eng');
+
+let _tessOsdWorker: any = null;
+let _tessEngWorker: any = null;
+let _tessInitPromise: Promise<void> | null = null;
+
+async function _ensureTesseractWorkers(): Promise<void> {
+    if (_tessOsdWorker && _tessEngWorker) return;
+    if (_tessInitPromise) return _tessInitPromise;
+    _tessInitPromise = (async () => {
+        const { createWorker, OEM } = await import('tesseract.js');
+        if (!_tessOsdWorker && fs.existsSync(_osdDataGz)) {
+            _tessOsdWorker = await createWorker('osd', OEM.DEFAULT, {
+                workerPath: _tesseractWorkerPath,
+                langPath: _tessLangPathUrl,
+                cachePath: _sharedOsdCachePath,
+                legacyCore: true,
+                errorHandler: () => {},
+            } as any);
+        }
+        if (!_tessEngWorker && fs.existsSync(_engDataGz)) {
+            _tessEngWorker = await createWorker('eng', OEM.DEFAULT, {
+                workerPath: _tesseractWorkerPath,
+                langPath: _tessLangPathUrl,
+                cachePath: _sharedEngCachePath,
+                errorHandler: () => {},
+            } as any);
+        }
+    })().catch(() => { _tessInitPromise = null; });
+    return _tessInitPromise;
+}
+
+async function _resetTessWorker(workerRef: 'osd' | 'eng'): Promise<void> {
+    // If a worker gets into a bad state, recreate it.
+    const { createWorker, OEM } = await import('tesseract.js');
+    if (workerRef === 'osd') {
+        try { await _tessOsdWorker?.terminate(); } catch { /* ignore */ }
+        _tessOsdWorker = null;
+        if (fs.existsSync(_osdDataGz)) {
+            _tessOsdWorker = await createWorker('osd', OEM.DEFAULT, {
+                workerPath: _tesseractWorkerPath, langPath: _tessLangPathUrl,
+                cachePath: _sharedOsdCachePath, legacyCore: true, errorHandler: () => {},
+            } as any);
+        }
+    } else {
+        try { await _tessEngWorker?.terminate(); } catch { /* ignore */ }
+        _tessEngWorker = null;
+        if (fs.existsSync(_engDataGz)) {
+            _tessEngWorker = await createWorker('eng', OEM.DEFAULT, {
+                workerPath: _tesseractWorkerPath, langPath: _tessLangPathUrl,
+                cachePath: _sharedEngCachePath, errorHandler: () => {},
+            } as any);
+        }
+    }
+}
+
 export interface PreOcrProgressEvent {
     jobId: string;
     timestamp: string;
@@ -914,43 +979,33 @@ export async function runStage4(jobId: string): Promise<void> {
             return { angle: bestAngle, confidence, bestScore, secondScore };
         }
 
-        const tessdataDir = path.resolve(__dirname, '../../tools/tesseract/tessdata');
-        const osdDataGz = path.join(tessdataDir, 'osd.traineddata.gz');
-        const engDataGz = path.join(tessdataDir, 'eng.traineddata.gz');
-        const tesseractWorkerPath = path.resolve(__dirname, './tesseract_worker.cjs');
-        const tessLangPathUrl = pathToFileURL(tessdataDir + path.sep).href;
-        // Shared cache across all jobs — traineddata is decompressed once per app session
-        // instead of per-job, eliminating ~15-30s of gz decompression overhead per file.
-        const sharedOsdCachePath = path.resolve(__dirname, '../../tools/tesseract/tess-cache-osd');
-        const sharedEngCachePath = path.resolve(__dirname, '../../tools/tesseract/tess-cache-eng');
+        // Use module-level persistent workers (initialized once per thread, reused across files).
+        // Path constants are defined at module level as _tessdataDir, _osdDataGz, etc.
 
         const detectOrientationOsd = async (img: Buffer): Promise<{ angle: number; confidence: number; method: string } | null> => {
-            if (!fs.existsSync(osdDataGz)) return null;
-            const { createWorker, OEM } = await import('tesseract.js');
-            const worker: any = await createWorker('osd', OEM.DEFAULT, {
-                workerPath: tesseractWorkerPath,
-                langPath: tessLangPathUrl,
-                cachePath: sharedOsdCachePath,
-                legacyCore: true,
-                errorHandler: () => {},
-            } as any);
+            if (!fs.existsSync(_osdDataGz)) return null;
+            await _ensureTesseractWorkers();
+            if (!_tessOsdWorker) return null;
             try {
-                await worker.reinitialize('osd', OEM.DEFAULT);
-                try { await worker.setParameters({ user_defined_dpi: '300' }); } catch { /* ignore */ }
-                const det: any = await worker.detect(img);
+                await _tessOsdWorker.reinitialize('osd');
+                try { await _tessOsdWorker.setParameters({ user_defined_dpi: '300' }); } catch { /* ignore */ }
+                const det: any = await _tessOsdWorker.detect(img);
                 const rotate = det?.data?.rotate ?? det?.data?.orientation_degrees ?? 0;
                 const confRaw = det?.data?.orientation_confidence ?? det?.data?.confidence ?? 0;
                 const conf = typeof confRaw === 'number' ? confRaw : Number(confRaw) || 0;
                 const confNorm = conf > 1 ? Math.max(0, Math.min(1, conf / 100)) : Math.max(0, Math.min(1, conf));
                 return { angle: typeof rotate === 'number' ? rotate : Number(rotate) || 0, confidence: confNorm, method: 'tesseract_osd' };
-            } finally {
-                try { await worker.terminate(); } catch { /* ignore */ }
+            } catch (e) {
+                // Worker may be in bad state — recreate it for the next file
+                _resetTessWorker('osd').catch(() => {});
+                throw e;
             }
         };
 
         const detectOrientationStrict = async (img: Buffer, candidates: number[]): Promise<{ angle: number; confidence: number; method: string } | null> => {
-            if (!fs.existsSync(engDataGz)) return null;
-            const { createWorker, OEM } = await import('tesseract.js');
+            if (!fs.existsSync(_engDataGz)) return null;
+            await _ensureTesseractWorkers();
+            if (!_tessEngWorker) return null;
 
             // Downscale to 1400px max — word-count orientation detection doesn't need full resolution.
             // Cuts per-candidate OCR time from ~3s → ~0.8s on high-res scanned invoices.
@@ -962,25 +1017,15 @@ export async function runStage4(jobId: string): Promise<void> {
 
             const uniq = Array.from(new Set(candidates)).filter((d) => [0, 90, 180, 270].includes(d));
 
-            // One shared worker, candidates run sequentially.
-            // Parallel workers caused CPU contention when multiple pipeline workers ran simultaneously
-            // (5 workers × 4 candidates = 20 Tesseract threads, degrading all files).
-            // Sequential with downscaled image is still ~4× faster than original full-res sequential.
-            const worker: any = await createWorker('eng', OEM.DEFAULT, {
-                workerPath: tesseractWorkerPath,
-                langPath: tessLangPathUrl,
-                cachePath: sharedEngCachePath,
-                errorHandler: () => {},
-            } as any);
             try {
-                await worker.reinitialize('eng', OEM.DEFAULT);
-                try { await worker.setParameters({ user_defined_dpi: '300' }); } catch { /* ignore */ }
+                await _tessEngWorker.reinitialize('eng');
+                try { await _tessEngWorker.setParameters({ user_defined_dpi: '300' }); } catch { /* ignore */ }
 
                 const scores: Record<number, number> = {};
                 const confidences: Record<number, number> = {};
                 for (const deg of uniq) {
                     const rotated = deg === 0 ? scaledImg : await sharp(scaledImg).rotate(deg, { background: { r: 255, g: 255, b: 255, alpha: 1 } }).png().toBuffer();
-                    const r: any = await worker.recognize(rotated);
+                    const r: any = await _tessEngWorker.recognize(rotated);
                     const text = String(r?.data?.text || '');
                     scores[deg] = text.split(/\s+/).filter((w: string) => w.length >= 3).length;
                     confidences[deg] = typeof r?.data?.confidence === 'number' ? r.data.confidence : Number(r?.data?.confidence) || 0;
@@ -1042,8 +1087,10 @@ export async function runStage4(jobId: string): Promise<void> {
                 }
                 const method = `ocr_strict baseline0=${baseline}@${baselineConfidence} best=${bestDeg}:${bestScore}@${bestConfidence} chosen=${chosen} scores=${JSON.stringify(scores)} confidences=${JSON.stringify(confidences)}`;
                 return { angle: chosen, confidence, method };
-            } catch { return null; } finally {
-                try { await worker.terminate(); } catch { /* ignore */ }
+            } catch (e) {
+                // Worker may be in bad state — recreate it for the next file
+                _resetTessWorker('eng').catch(() => {});
+                return null;
             }
         };
 
@@ -1065,7 +1112,7 @@ export async function runStage4(jobId: string): Promise<void> {
                 }
 
                 // Strict confirmation only when OSD is missing/low-confidence or suggests rotation.
-                const shouldRunStrict = fs.existsSync(engDataGz) && (!osd || osd.angle !== 0 || osd.confidence < 0.2);
+                const shouldRunStrict = fs.existsSync(_engDataGz) && (!osd || osd.angle !== 0 || osd.confidence < 0.2);
                 if (shouldRunStrict) {
                     const strictCandidates: number[] = [0, 180];
                     if (!osd || osd.confidence < 0.4 || [90, 270].includes(osd.angle)) strictCandidates.push(90, 270);

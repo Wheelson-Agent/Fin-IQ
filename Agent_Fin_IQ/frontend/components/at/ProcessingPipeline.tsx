@@ -558,6 +558,7 @@ export function ProcessingPipeline({
                             isSuccess: res.success
                         });
                         setBatchCount(prev => prev + 1);
+                        window.dispatchEvent(new Event('app:refresh'));
                         return res;
                     } catch (err: any) {
                         console.error(`[Pipeline] runPipeline failed for ${data.name}:`, err);
@@ -570,6 +571,7 @@ export function ProcessingPipeline({
                             isSuccess: false
                         });
                         setBatchCount(prev => prev + 1);
+                        window.dispatchEvent(new Event('app:refresh'));
                         return { success: false, error: err.message || 'Processing error' };
                     }
                 });
