@@ -731,7 +731,7 @@ export default function APWorkspace() {
 
   const handleUploadFiles = (files: FileList | File[]) => {
     setPendingUploads(files);
-    setBatchName(`Batch_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-')}`);
+    setBatchName(`Batch_${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`);
     setShowBatchDialog(true);
   };
 
@@ -1697,7 +1697,9 @@ export default function APWorkspace() {
             multiple
             onChange={(e) => {
               if (e.target.files) {
-                handleUploadFiles(e.target.files);
+                const snapshot = Array.from(e.target.files); // snapshot before clearing — FileList is a live DOM ref
+                e.target.value = '';                          // reset so same file can be re-selected next time
+                handleUploadFiles(snapshot);
               }
             }}
           />

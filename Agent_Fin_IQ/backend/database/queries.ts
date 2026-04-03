@@ -2443,7 +2443,7 @@ export async function reEvaluateAutoPostStatuses() {
             await client.query(
                 `UPDATE ap_invoices
                  SET is_high_amount = (grand_total > $1), updated_at = NOW()
-                 WHERE processing_status IN ('Processing', 'Ready to Post', 'Awaiting Input', 'Auto-Posted')
+                 WHERE processing_status IN ('Processing', 'Ready to Post', 'Awaiting Input', 'Auto-Posted', 'Handoff')
                    AND grand_total IS NOT NULL AND grand_total > 0`,
                 [valueLimit]
             );
