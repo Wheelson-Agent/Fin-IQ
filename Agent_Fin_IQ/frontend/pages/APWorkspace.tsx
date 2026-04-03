@@ -309,6 +309,10 @@ const createAllTabFilters = (): Record<TableTab, APWorkspaceStructuredFilters> =
 
 const isTableTab = (tab: string): tab is TableTab => TABLE_TABS.includes(tab as TableTab);
 
+const createDefaultBatchName = () => {
+  return `Batch_${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`;
+};
+
 export default function APWorkspace() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -351,9 +355,11 @@ export default function APWorkspace() {
     pipelineData,
     pipelineStages,
     pipelineParticles,
+    pipelineLogs,
     confirmedUploads,
     onStagesChange,
     onParticlesChange,
+    setPipelineLogs,
     setConfirmedUploads,
     startProcessing,
     clearProcessing,
@@ -731,7 +737,7 @@ export default function APWorkspace() {
 
   const handleUploadFiles = (files: FileList | File[]) => {
     setPendingUploads(files);
-    setBatchName(`Batch_${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`);
+    setBatchName(createDefaultBatchName());
     setShowBatchDialog(true);
   };
 
@@ -1787,11 +1793,16 @@ export default function APWorkspace() {
                     filePaths={pipelineData.filePaths}
                     fileDataArrays={pipelineData.fileDataArrays}
                     batchName={pipelineData.batchName}
+                    pipelineRunId={pipelineData.pipelineRunId}
+                    pipelineStartedAt={pipelineData.pipelineStartedAt}
                     uploaderName="User"
                     stages={pipelineStages || undefined}
                     onStagesChange={onStagesChange}
                     particles={pipelineParticles}
                     onParticlesChange={onParticlesChange}
+                    logs={pipelineLogs}
+                    onLogsChange={setPipelineLogs}
+                    confirmedCount={confirmedUploads}
                     onConfirmedCountChange={setConfirmedUploads}
                     onComplete={() => {
                       fetchData(true);

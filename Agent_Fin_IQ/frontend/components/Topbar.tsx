@@ -82,10 +82,15 @@ function ensureBlinkStyle() {
 }
 
 function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
+    const HEALTHY_POLL_MS = 30_000;
+    const UNHEALTHY_POLL_MS = 10_000;
     const [n8nStatus, setN8nStatus] = useState<ServiceStatus>('connecting');
     const [ocrStatus, setOcrStatus] = useState<ServiceStatus>('connecting');
     const [n8nRetries, setN8nRetries] = useState(0);
     const [ocrRetries, setOcrRetries] = useState(0);
+    const n8nStatusRef = useRef<ServiceStatus>('connecting');
+    const ocrStatusRef = useRef<ServiceStatus>('connecting');
+    const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         ensureBlinkStyle();
@@ -94,67 +99,117 @@ function ConnectionStatusIndicator({ isMono }: { isMono: boolean }) {
     // Listen for pushed updates and perform initial check
     useEffect(() => {
         const api = (window as any).api;
+        let cancelled = false;
+
+        const clearPollTimer = () => {
+            if (pollTimerRef.current) {
+                clearTimeout(pollTimerRef.current);
+                pollTimerRef.current = null;
+            }
+        };
+
+        const getPollInterval = (nextN8nStatus: ServiceStatus, nextOcrStatus: ServiceStatus) =>
+            nextN8nStatus === 'connected' && nextOcrStatus === 'connected'
+                ? HEALTHY_POLL_MS
+                : UNHEALTHY_POLL_MS;
+
+        const scheduleNextPoll = (nextN8nStatus = n8nStatusRef.current, nextOcrStatus = ocrStatusRef.current) => {
+            clearPollTimer();
+            pollTimerRef.current = setTimeout(() => {
+                void runHealthChecks(false);
+            }, getPollInterval(nextN8nStatus, nextOcrStatus));
+        };
 
         const applyN8nStatus = (rawStatus: unknown, isInitial = false) => {
             const mapped = mapN8nHealthToServiceStatus(rawStatus);
+            n8nStatusRef.current = mapped;
             setN8nStatus(mapped);
             setN8nRetries((prev) => {
                 if (mapped === 'connected') return 0;
                 if (isInitial) return 1;
                 return Math.min(prev + 1, 5);
             });
+            return mapped;
+        };
+
+        const applyOcrStatus = (mapped: ServiceStatus, isInitial = false) => {
+            ocrStatusRef.current = mapped;
+            setOcrStatus(mapped);
+            setOcrRetries((prev) => {
+                if (mapped === 'connected') return 0;
+                if (isInitial) return 1;
+                return Math.min(prev + 1, 5);
+            });
+            return mapped;
+        };
+
+        const checkN8nStatus = async (isInitial = false) => {
+            try {
+                if (!api?.invoke) return n8nStatusRef.current;
+                const n8nOk = await api.invoke('status:check-n8n');
+                return applyN8nStatus(n8nOk ? 'live' : 'offline', isInitial);
+            } catch (err) {
+                return applyN8nStatus('offline', isInitial);
+            }
         };
 
         const checkOcrStatus = async (isInitial = false) => {
             try {
-                if (!api?.invoke) return;
+                if (!api?.invoke) return ocrStatusRef.current;
                 const ocrOk = await api.invoke('status:check-ocr');
-                const mapped: ServiceStatus = ocrOk ? 'connected' : 'disconnected';
-                setOcrStatus(mapped);
-                setOcrRetries((prev) => {
-                    if (mapped === 'connected') return 0;
-                    if (isInitial) return 1;
-                    return Math.min(prev + 1, 5);
-                });
+                return applyOcrStatus(ocrOk ? 'connected' : 'disconnected', isInitial);
             } catch (err) {
-                setOcrStatus('disconnected');
-                setOcrRetries((prev) => isInitial ? 1 : Math.min(prev + 1, 5));
+                return applyOcrStatus('disconnected', isInitial);
+            }
+        };
+
+        const runHealthChecks = async (isInitial = false) => {
+            try {
+                if (!api?.invoke) return;
+                const [nextN8nStatus, nextOcrStatus] = await Promise.all([
+                    checkN8nStatus(isInitial),
+                    checkOcrStatus(isInitial)
+                ]);
+                if (!cancelled) {
+                    scheduleNextPoll(nextN8nStatus, nextOcrStatus);
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    scheduleNextPoll('disconnected', 'disconnected');
+                }
             }
         };
 
         async function initialCheck() {
             try {
                 if (api?.invoke) {
-                    // Initial n8n status
-                    const n8nFull = await api.invoke('status:get-n8n-full');
-                    const n8nRawStatus = typeof n8nFull === 'string' ? n8nFull : n8nFull?.status;
-                    applyN8nStatus(n8nRawStatus, true);
-
-                    // Initial OCR check
-                    await checkOcrStatus(true);
+                    await runHealthChecks(true);
                 }
             } catch (err) {
                 console.warn('[Topbar] Initial status check failed', err);
+                if (!cancelled) {
+                    scheduleNextPoll('disconnected', 'disconnected');
+                }
             }
         }
 
         initialCheck();
 
-        const ocrPoller = setInterval(() => {
-            void checkOcrStatus(false);
-        }, 30_000);
-
         if (api?.on) {
             // Listen for background pushes
             api.on('n8n:status-update', (data: any) => {
                 if (data.service === 'n8n') {
-                    applyN8nStatus(data.status, false);
+                    const nextN8nStatus = applyN8nStatus(data.status, false);
+                    if (!cancelled) {
+                        scheduleNextPoll(nextN8nStatus, ocrStatusRef.current);
+                    }
                 }
             });
         }
 
         return () => {
-            clearInterval(ocrPoller);
+            cancelled = true;
+            clearPollTimer();
         };
     }, []);
 

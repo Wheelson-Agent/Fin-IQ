@@ -16,16 +16,31 @@ export interface PipelineStage {
     errorMsg?: string;
 }
 
+export interface BatchActivityLog {
+    id: string;
+    batchName: string;
+    fileName: string;
+    stage: 'Upload' | 'Pre-OCR' | 'OCR' | 'AI-Analysis' | 'Finalizing' | 'System';
+    status: 'Started' | 'Completed' | 'Failed' | 'Info';
+    message: string;
+    timestamp: string;
+}
+
 export interface ProcessingPipelineProps {
     isBatch: boolean;
     fileNames: string[];
     batchName: string;
+    pipelineRunId: string;
+    pipelineStartedAt: string;
     filePaths: string[];
     fileDataArrays?: number[][];  // Raw file data as byte arrays
     stages?: PipelineStage[] | null;
     onStagesChange?: (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => void;
     particles?: Record<string, boolean>;
     onParticlesChange?: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
+    logs?: BatchActivityLog[];
+    onLogsChange?: (logs: BatchActivityLog[]) => void;
+    confirmedCount?: number;
     onComplete: () => void;
     onDismiss?: () => void;
     uploaderName?: string;
@@ -120,6 +135,10 @@ function getDynamicConcurrencyPlan(
     upload = clamp(Math.min(Math.max(upload, pipeline), totalFiles), 1, 4);
 
     return { upload, pipeline };
+}
+
+function resolveNextState<T>(current: T, val: T | ((prev: T) => T)): T {
+    return typeof val === 'function' ? (val as (prev: T) => T)(current) : val;
 }
 
 /* ─────────────────────── Particle component ─────────────────── */
@@ -276,13 +295,14 @@ function StageNode({ stage, index, showParticles }: { stage: PipelineStage; inde
 }
 
 /* ─────────────────── Main Component ─────────────────────────── */
-const processedBatches = new Set<string>();
-
 export function ProcessingPipeline({ 
-    isBatch, fileNames, batchName, filePaths, fileDataArrays, 
+    isBatch, fileNames, batchName, pipelineRunId, pipelineStartedAt, filePaths, fileDataArrays, 
     onComplete, onDismiss, uploaderName,
     stages: externalStages, onStagesChange,
     particles: externalParticles, onParticlesChange,
+    logs: externalLogs,
+    onLogsChange,
+    confirmedCount: externalConfirmedCount,
     onConfirmedCountChange
 }: ProcessingPipelineProps) {
     const STAGES_INIT: PipelineStage[] = [
@@ -294,46 +314,72 @@ export function ProcessingPipeline({
 
     const [internalStages, setInternalStages] = useState<PipelineStage[]>(STAGES_INIT);
     const [internalParticles, setInternalParticles] = useState<Record<string, boolean>>({});
+    const [internalConfirmedCount, setInternalConfirmedCount] = useState(externalConfirmedCount ?? 0);
+    const [internalLogs, setInternalLogs] = useState<BatchActivityLog[]>(externalLogs || []);
     
     // Sync with external state
     const stages = externalStages || internalStages;
     const particles = externalParticles || internalParticles;
+    const confirmedCount = externalConfirmedCount ?? internalConfirmedCount;
+    const logs = externalLogs || internalLogs;
     
     // Pass functional updates straight through to the external handler so the
     // caller can use React's own functional-setState form, avoiding stale-closure
     // issues when this component unmounts while an async pipeline is still running.
     const setStages = (val: PipelineStage[] | ((prev: PipelineStage[]) => PipelineStage[])) => {
+        const next = resolveNextState(stages, val);
         if (onStagesChange) {
-            onStagesChange(val);
-        } else if (typeof val === 'function') {
-            setInternalStages(val);
-        } else {
-            setInternalStages(val);
+            onStagesChange(next);
         }
+        if (!externalStages) setInternalStages(next);
     };
 
     const setParticlesState = (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
+        const next = resolveNextState(particles, val);
         if (onParticlesChange) {
-            onParticlesChange(val);
-        } else if (typeof val === 'function') {
-            setInternalParticles(val);
-        } else {
-            setInternalParticles(val);
+            onParticlesChange(next);
         }
+        if (!externalParticles) setInternalParticles(next);
     };
 
     const [batchCount, setBatchCount] = useState(0);
-    const [confirmedCount, setConfirmedCount] = useState(0);
-    const [logs, setLogs] = useState<any[]>([]);
     const [workerCount, setWorkerCount] = useState(0);
     const [lastUpdate, setLastUpdate] = useState<string>('');
     const [activeFileName, setActiveFileName] = useState<string>('');
     const timers = useRef<ReturnType<typeof setTimeout>[] | ReturnType<typeof setInterval>[]>([]);
     const logScrollRef = useRef<HTMLDivElement>(null);
+    const runStartedRef = useRef<number>(Date.now());
+    const ghostHandledRef = useRef(false);
+    const sessionGuardKey = pipelineRunId ? `apw-processing-run:${pipelineRunId}` : '';
     const concurrencyPlan = useMemo(
         () => getDynamicConcurrencyPlan(filePaths, fileNames, fileDataArrays),
         [fileDataArrays, fileNames, filePaths]
     );
+
+    const setConfirmedCount = (val: number | ((prev: number) => number)) => {
+        const next = resolveNextState(confirmedCount, val);
+        if (externalConfirmedCount === undefined) {
+            setInternalConfirmedCount(next);
+        }
+        if (onConfirmedCountChange) {
+            onConfirmedCountChange(next);
+        }
+    };
+
+    const setLogsState = (val: BatchActivityLog[] | ((prev: BatchActivityLog[]) => BatchActivityLog[])) => {
+        const next = resolveNextState(logs, val);
+        if (!externalLogs) {
+            setInternalLogs(next);
+        }
+        if (onLogsChange) {
+            onLogsChange(next);
+        }
+    };
+
+    useEffect(() => {
+        runStartedRef.current = pipelineStartedAt ? new Date(pipelineStartedAt).getTime() || Date.now() : Date.now();
+        ghostHandledRef.current = false;
+    }, [pipelineRunId, pipelineStartedAt]);
 
     // Periodic log and worker status fetching
     useEffect(() => {
@@ -342,23 +388,55 @@ export function ProcessingPipeline({
         const interval = setInterval(async () => {
             try {
                 console.log(`[Pipeline] Polling logs for batch: ${batchName}`);
-                const [fetchedLogs, status, debugLogs] = await Promise.all([
+                const [fetchedLogsResult, statusResult, debugLogsResult, batchHealthResult] = await Promise.allSettled([
                     getBatchLogs(batchName),
                     getWorkerStatus(),
-                    getAllLogsDebug()
+                    getAllLogsDebug(),
+                    // @ts-ignore - Electron preload bridge
+                    window.api.invoke('processing:get-batch-health', { batchName, startedAfter: pipelineStartedAt || null })
                 ]);
-                
-                console.log(`[Pipeline] Response: batch=${fetchedLogs?.length||0}, debug=${debugLogs?.length||0}`);
-                setLogs(fetchedLogs || []);
-                setWorkerCount(status?.activeWorkers || 0);
+
+                const fetchedLogs = fetchedLogsResult.status === 'fulfilled' ? fetchedLogsResult.value : null;
+                const status = statusResult.status === 'fulfilled' ? statusResult.value : null;
+                const debugLogs = debugLogsResult.status === 'fulfilled' ? debugLogsResult.value : [];
+                const batchHealth = batchHealthResult.status === 'fulfilled' ? batchHealthResult.value : { invoiceCount: 0 };
+
+                console.log(`[Pipeline] Response: batch=${fetchedLogs?.length || logs.length || 0}, debug=${debugLogs?.length || 0}`);
+
+                if (Array.isArray(fetchedLogs)) {
+                    setLogsState(prev => (fetchedLogs.length > 0 || prev.length === 0 ? fetchedLogs : prev));
+                }
+                if (status) {
+                    setWorkerCount(status.activeWorkers || 0);
+                }
                 setLastUpdate(new Date().toLocaleTimeString('en-IN', { hour12: false }));
+
+                const currentStages = stages;
+                const hasFailed = currentStages.some((s) => s.status === 'error');
+                const allDone = currentStages[3]?.status === 'done';
+                const invoiceCount = Number(batchHealth?.invoiceCount || 0);
+                const hasBackendActivity =
+                    confirmedCount > 0 ||
+                    (fetchedLogs?.length || logs.length || 0) > 0 ||
+                    Number(status?.activeWorkers || workerCount || 0) > 0 ||
+                    invoiceCount > 0;
+
+                if (!ghostHandledRef.current && !hasFailed && !allDone && !hasBackendActivity) {
+                    const elapsedMs = Date.now() - runStartedRef.current;
+                    if (elapsedMs >= 10000) {
+                        ghostHandledRef.current = true;
+                        updateStage('uploading', 'error', 'Upload session did not start', {
+                            sublabel: 'No backend activity detected for this batch',
+                        });
+                    }
+                }
             } catch (err) {
                 console.error('[Pipeline] Failed to fetch logs/status', err);
             }
         }, 2000); // Poll every 2 seconds
 
         return () => clearInterval(interval);
-    }, [batchName]);
+    }, [batchName, pipelineStartedAt, stages, confirmedCount, logs.length, workerCount]);
 
     useEffect(() => {
         const el = logScrollRef.current;
@@ -370,10 +448,16 @@ export function ProcessingPipeline({
     }, [logs]);
 
     useEffect(() => {
-        if (onConfirmedCountChange) {
-            onConfirmedCountChange(confirmedCount);
+        if (externalConfirmedCount !== undefined) {
+            setInternalConfirmedCount(externalConfirmedCount);
         }
-    }, [confirmedCount, onConfirmedCountChange]);
+    }, [externalConfirmedCount]);
+
+    useEffect(() => {
+        if (externalLogs !== undefined) {
+            setInternalLogs(externalLogs);
+        }
+    }, [externalLogs]);
 
     const updateStage = (id: string, status: StageStatus, errorMsg?: string, overrides: Partial<PipelineStage> = {}) => {
         setStages(prev =>
@@ -386,10 +470,10 @@ export function ProcessingPipeline({
     };
 
     useEffect(() => {
-        if (!filePaths || filePaths.length === 0) return;
-        
-        // Prevent React 18 Strict Mode double-firing the pipeline for the exact same batch
-        if (batchName && processedBatches.has(batchName)) return;
+        if (!filePaths || filePaths.length === 0 || !pipelineRunId) return;
+
+        // Prevent re-running the exact same processing session on strict-mode remounts.
+        if (sessionGuardKey && window.sessionStorage.getItem(sessionGuardKey) === 'started') return;
 
         // If we have external stages already progressed beyond initial, don't restart
         const hasExternalProgress = externalStages && externalStages.some(s => 
@@ -398,11 +482,11 @@ export function ProcessingPipeline({
         );
 
         if (hasExternalProgress) {
-            if (batchName) processedBatches.add(batchName);
+            if (sessionGuardKey) window.sessionStorage.setItem(sessionGuardKey, 'started');
             return;
         }
-        
-        if (batchName) processedBatches.add(batchName);
+
+        if (sessionGuardKey) window.sessionStorage.setItem(sessionGuardKey, 'started');
 
         // Reset state on new files if not already initialized externally
         if (!externalStages) {
@@ -530,10 +614,19 @@ export function ProcessingPipeline({
         };
 
         processFiles();
-    }, [filePaths, isBatch, batchName]);
+    }, [filePaths, isBatch, batchName, externalStages, pipelineRunId, sessionGuardKey]);
 
     const hasFailed = stages.some((s: PipelineStage) => s.status === 'error');
     const allDone = stages[3].status === 'done';
+    const hasLogFailures = logs.some((log) => log.status === 'Failed');
+
+    useEffect(() => {
+        if (!allDone || hasFailed || hasLogFailures || !onDismiss) return;
+        const timer = window.setTimeout(() => {
+            onDismiss();
+        }, 1500);
+        return () => window.clearTimeout(timer);
+    }, [allDone, hasFailed, hasLogFailures, onDismiss]);
 
     return (
         <div className="w-full h-full flex flex-col pt-4">

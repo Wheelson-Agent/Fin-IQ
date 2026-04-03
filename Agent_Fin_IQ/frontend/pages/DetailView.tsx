@@ -406,6 +406,14 @@ const parseAddress = (address: string) => {
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
+const fmtExactCurrency = (n: number) =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+
 const normalizeDateOnly = (value: string | null | undefined) => {
   if (!value) return '';
   const directMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -1406,6 +1414,9 @@ export default function DetailView() {
             <p className="text-[11px] font-bold text-slate-400 mt-0.5 tracking-tight">
               {invoice.vendor_name || 'Razorpay Software'} · {invoice.invoice_no || 'RZP-NOV-2024-7821'}
             </p>
+            <p className="mt-1 font-mono text-[10px] font-semibold tracking-tight text-slate-500 break-all">
+              UUID: {invoice.id}
+            </p>
           </div>
         </div>
 
@@ -1815,32 +1826,40 @@ export default function DetailView() {
 
                     <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse min-w-[900px]">
+                        <table className="w-full table-fixed text-left border-collapse min-w-[760px]">
+                          <colgroup>
+                            <col style={{ width: '24%' }} />
+                            <col style={{ width: '26%' }} />
+                            <col style={{ width: '110px' }} />
+                            <col style={{ width: '88px' }} />
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '96px' }} />
+                            {!readOnly && <col style={{ width: '52px' }} />}
+                          </colgroup>
                           <thead className="bg-slate-50/80 border-b border-slate-200">
                             <tr>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[30%]">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[20%]">{isGoodsDocument ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%]">HSN/SAC</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Quantity</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[12%] text-center">Unit Rate</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest w-[10%] text-center">Discount</th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">{isGoodsDocument ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">HSN/SAC</th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Quantity</th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Unit Rate</th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Discount</th>
                               {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {lineItems.map((item, index) => (
                               <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="p-3 align-top">
-                                  <input
-                                    readOnly
-                                    disabled={true}
-                                    className="w-full border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px] text-[13px] outline-none cursor-default"
-                                    value={item.description}
-                                    onChange={() => { }} // No-op as it's read-only
+                                <td className="p-3 align-top min-w-0">
+                                  <div
+                                    className="min-h-[38px] py-2 text-[13px] font-bold leading-5 whitespace-normal break-words"
                                     style={{ color: isGoodsDocument ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
-                                  />
+                                    title={item.description}
+                                  >
+                                    {item.description}
+                                  </div>
                                 </td>
-                                <td className="p-3 align-top">
+                                <td className="p-3 align-top min-w-0">
                                   <CustomTableSelect
                                     value={isGoodsDocument
                                       ? getGoodsLineSelectionValue(item, !allowCategorizedLineItemPicker)
@@ -1907,13 +1926,13 @@ export default function DetailView() {
                                   {(!isGoodsDocument && !String(item?.ledger || '').trim() && rawPayload?.line_items?.[index]?.mapped_ledger) && (
                                     <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
                                       <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">OCR Suggested Ledger</span>
-                                      <span className="text-[11px] text-slate-700 font-medium truncate max-w-[200px]" title={rawPayload.line_items[index].mapped_ledger}>
+                                      <span className="text-[11px] text-slate-700 font-medium leading-4 whitespace-normal break-words" title={rawPayload.line_items[index].mapped_ledger}>
                                         {rawPayload.line_items[index].mapped_ledger}
                                       </span>
                                     </div>
                                   )}
                                 </td>
-                                <td className="p-3 align-top">
+                                <td className="p-3 align-top min-w-[110px]">
                                   <input
                                     disabled={readOnly}
                                     className={`w-full border p-2 rounded-[6px] text-[13px] outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[38px]'}`}
@@ -1924,7 +1943,7 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top">
+                                <td className="p-3 align-top min-w-[88px]">
                                   <input
                                     disabled={readOnly}
                                     type="number"
@@ -1936,7 +1955,7 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top">
+                                <td className="p-3 align-top min-w-[120px]">
                                   <input
                                     disabled={readOnly}
                                     type="number"
@@ -1948,7 +1967,7 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top">
+                                <td className="p-3 align-top min-w-[96px]">
                                   <div className="relative flex items-center">
                                     <input
                                       disabled={readOnly}
@@ -1990,33 +2009,33 @@ export default function DetailView() {
                       <div className="w-full max-w-[400px] space-y-3 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
                         <div className="flex justify-between items-center">
                           <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Taxable Value</span>
-                          <span className="text-[15px] font-black text-slate-900">{fmt(docFields.sub_total || 0)}</span>
+                          <span className="text-[15px] font-black text-slate-900">{fmtExactCurrency(Number(docFields.sub_total || 0))}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Sum of GST</span>
-                          <span className="text-[15px] font-black text-slate-900">{fmt(docFields.tax_total || 0)}</span>
+                          <span className="text-[15px] font-black text-slate-900">{fmtExactCurrency(Number(docFields.tax_total || 0))}</span>
                         </div>
                         {(docFields.cgst > 0 || docFields.sgst > 0) ? (
                           <>
                             <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
                               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">CGST</span>
-                              <span className="text-[13px] font-bold text-slate-700">{fmt(docFields.cgst || 0)}</span>
+                              <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.cgst || 0))}</span>
                             </div>
                             <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
                               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SGST</span>
-                              <span className="text-[13px] font-bold text-slate-700">{fmt(docFields.sgst || 0)}</span>
+                              <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.sgst || 0))}</span>
                             </div>
                           </>
                         ) : docFields.igst > 0 && (
                           <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
                             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">IGST</span>
-                            <span className="text-[13px] font-bold text-slate-700">{fmt(docFields.igst || 0)}</span>
+                            <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.igst || 0))}</span>
                           </div>
                         )}
                         <div className="h-[1px] bg-slate-200 my-2" />
                         <div className="flex justify-between items-center">
                           <span className="text-[13px] font-extrabold text-slate-900 uppercase tracking-widest">Total Invoice Amount</span>
-                          <span className="text-[20px] font-black text-blue-600">{fmt(docFields.grand_total || 0)}</span>
+                          <span className="text-[20px] font-black text-blue-600">{fmtExactCurrency(Number(docFields.grand_total || 0))}</span>
                         </div>
                       </div>
                     </div>
@@ -2517,8 +2536,8 @@ function CustomTableSelect({
           role="button"
           tabIndex={disabled ? -1 : 0}
           className={[
-            'w-full h-[38px] px-3 rounded-xl border-2',
-            'flex items-center justify-between gap-2',
+            'w-full min-h-[38px] px-3 py-2 rounded-xl border-2',
+            'flex items-start justify-between gap-2',
             'text-[13px] font-bold',
             'transition-all select-none outline-none',
             disabled
@@ -2528,10 +2547,10 @@ function CustomTableSelect({
           ].join(' ')}
           title={value ? String(value) : undefined}
         >
-          <div className="min-w-0 flex-1 truncate">
+          <div className="min-w-0 flex-1 text-left leading-5 whitespace-normal break-words">
             {value || (disabled ? '-' : emptyLabel)}
           </div>
-          {!disabled && <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />}
+          {!disabled && <ChevronDown size={14} className={`text-slate-400 shrink-0 mt-1 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />}
         </div>
       </Popover.Trigger>
 
