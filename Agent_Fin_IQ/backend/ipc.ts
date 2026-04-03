@@ -60,12 +60,6 @@ const __dirname = path.dirname(__filename);
 const envPath = path.resolve(__dirname, '../../config/.env');
 dotenv.config({ path: envPath });
 
-function isPreOcrEnabled(): boolean {
-    const rawValue = String(process.env.PRE_OCR || '').trim().toLowerCase();
-    if (!rawValue) return true;
-    return !['off', 'false', '0', 'no', 'disabled'].includes(rawValue);
-}
-
 function buildStageMetrics(startedAt: Date, completedAt: Date, extra: Record<string, any> = {}) {
     return {
         duration_ms: Math.max(0, completedAt.getTime() - startedAt.getTime()),
@@ -659,7 +653,6 @@ export function registerIpcHandlers() {
             let ocrInputPath = filePath;
             let ocrInputSource = 'original-input';
             let pipelineDecision: any = null;
-            const preOcrEnabled = isPreOcrEnabled();
             const recordPipelineStage = async (
                 stage: string,
                 status: string,
@@ -677,14 +670,13 @@ export function registerIpcHandlers() {
                 error
             );
 
-            if (preOcrEnabled) {
-                const preOcrStartedAt = new Date();
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
+            const preOcrStartedAt = new Date();
+            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
 
-                const fileBuffer = fs.readFileSync(filePath);
-                const result = await runFullPipeline(fileBuffer, fileName, { invoiceId });
-                pipelineDecision = result.decision;
-                console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
+            const fileBuffer = fs.readFileSync(filePath);
+            const result = await runFullPipeline(fileBuffer, fileName, { invoiceId });
+            pipelineDecision = result.decision;
+            console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
             // ── PRE-OCR REJECTION HANDLER [added: mapped labels for all rejection routes] ──
             // Reads actual reason codes from job stages (not the vague decision.reasons strings)
@@ -714,14 +706,14 @@ export function registerIpcHandlers() {
 
                 if (allStageCodes.includes('FILE_TOO_LARGE')) {
                     failureReason = 'Invalid doc- file too large';
-                    preOcrStatus  = 'FILE_TOO_LARGE';
+                    preOcrStatus = 'FILE_TOO_LARGE';
                 } else if (allStageCodes.includes('EMPTY_PDF') || allStageCodes.includes('ALL_BLANK_PAGES')) {
                     failureReason = 'Invalid doc- empty-doc';
-                    preOcrStatus  = 'EMPTY_DOC';
+                    preOcrStatus = 'EMPTY_DOC';
                 } else {
                     // Other failures (CORRUPT, RASTERIZATION_FAILED, etc.) — generic for now
                     failureReason = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
-                    preOcrStatus  = 'FAILED';
+                    preOcrStatus = 'FAILED';
                 }
 
                 const preOcrCompletedAt = new Date();
@@ -754,31 +746,22 @@ export function registerIpcHandlers() {
             await queries.updatePreOcrStatus(invoiceId, 'PASSED');
             // ── END PRE-OCR PASS STATUS ────────────────────────────────────────
 
-                const preOcrCompletedAt = new Date();
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
-                const preOcrArtifactPath = result.outputArtifactPath;
-                ocrInputSource = 'original-fallback';
+            const preOcrCompletedAt = new Date();
+            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
+            const preOcrArtifactPath = result.outputArtifactPath;
+            ocrInputSource = 'original-fallback';
 
-                if (preOcrArtifactPath && fs.existsSync(preOcrArtifactPath)) {
-                    ocrInputPath = preOcrArtifactPath;
-                    ocrInputSource = 'preocr-artifact';
-                } else {
-                    console.warn(`[IPC] OCR fallback to original input for ${fileName}; missing Pre-OCR artifact: ${preOcrArtifactPath || 'none'}`);
-                }
-                await recordPipelineStage('PRE_OCR', 'PASSED', preOcrStartedAt, preOcrCompletedAt, {
-                    route: result.decision.route,
-                    ocr_input_source: ocrInputSource,
-                    artifact_path: preOcrArtifactPath || null
-                });
+            if (preOcrArtifactPath && fs.existsSync(preOcrArtifactPath)) {
+                ocrInputPath = preOcrArtifactPath;
+                ocrInputSource = 'preocr-artifact';
             } else {
-                const skippedAt = new Date();
-                await queries.updatePreOcrStatus(invoiceId, 'SKIPPED');
-                console.log(`[IPC] PRE_OCR=OFF, skipping pre-OCR for ${fileName} and using original input for OCR.`);
-                await recordPipelineStage('PRE_OCR', 'SKIPPED', skippedAt, skippedAt, {
-                    enabled: false,
-                    ocr_input_source: ocrInputSource
-                });
+                console.warn(`[IPC] OCR fallback to original input for ${fileName}; missing Pre-OCR artifact: ${preOcrArtifactPath || 'none'}`);
             }
+            await recordPipelineStage('PRE_OCR', 'PASSED', preOcrStartedAt, preOcrCompletedAt, {
+                route: result.decision.route,
+                ocr_input_source: ocrInputSource,
+                artifact_path: preOcrArtifactPath || null
+            });
 
             const ocrStartedAt = new Date();
             batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine (${ocrInputSource})`);
