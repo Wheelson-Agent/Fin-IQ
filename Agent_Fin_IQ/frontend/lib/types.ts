@@ -170,11 +170,23 @@ export interface AuditEvent {
     invoice_id: string | null;
     invoice_no: string | null;
     vendor_name: string | null;
-    event_type: 'Created' | 'Validated' | 'Auto-Posted' | 'Edited' | 'Revalidated' | 'Rejected' | 'Approved';
+    company_id?: string | null;
+    batch_id?: string | null;
+    entity_type?: string | null;
+    entity_id?: string | null;
+    event_type: 'Created' | 'Validated' | 'Auto-Posted' | 'Edited' | 'Revalidated' | 'Rejected' | 'Approved' | 'Deleted' | string;
+    event_code?: string | null;
     user_name: string;
+    created_by_display_name?: string | null;
     description: string;
+    summary?: string | null;
     before_data: Record<string, any> | null;
     after_data: Record<string, any> | null;
+    details?: Record<string, any> | null;
+    status_from?: string | null;
+    status_to?: string | null;
+    severity?: 'info' | 'success' | 'warning' | 'error' | string | null;
+    is_user_visible?: boolean | null;
     timestamp: string;
 }
 

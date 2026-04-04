@@ -19,6 +19,15 @@
 
 import { query, pool } from './connection';
 import { sendInvoiceToTally } from '../sync/tally_posting';
+import type { AuditWriteInput } from '../audit/events';
+import {
+    buildRevalidatedOutcomeAudit,
+    buildRoutingMatchedAudit,
+    buildSaveAllAudit,
+    buildValidationOutcomeAudit,
+    buildWorkspaceOnlyAudit,
+    insertAuditLogWithExecutor,
+} from '../audit/persistence';
 
 type InvoiceDateRangeConfig = {
     filter_invoice_date_enabled?: boolean;
@@ -1110,11 +1119,17 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        const nextItems = Array.isArray(items) ? items : [];
 
         // 1. Fetch current for comparison and base payload
         const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
         const current = currentRes.rows[0];
         if (!current) throw new Error('Invoice not found');
+        const currentLinesRes = await client.query(
+            'SELECT description, gl_account_id, tax, quantity, unit_price, discount, line_amount, hsn_sac FROM ap_invoice_lines WHERE ap_invoice_id = $1 ORDER BY id ASC',
+            [id]
+        );
+        const currentLines = currentLinesRes.rows || [];
 
         let rawPayload = current.ocr_raw_payload || {};
         if (typeof rawPayload === 'string') {
@@ -1149,8 +1164,17 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                 Object.keys(patch || {})
             );
 
-            // SYNC TOP-LEVEL DATA: manual edits should update main indexed columns
-            const syncCols = ["invoice_number", "invoice_date", "vendor_name", "vendor_gst", "sub_total", "tax_total", "grand_total"];
+            // SYNC TOP-LEVEL DATA: workspace edits from Detail View should also persist
+            // the main invoice columns used by DB reads, filters, and audit diffs.
+            const syncCols = [
+                "invoice_number", "invoice_date", "vendor_name", "vendor_gst",
+                "sub_total", "tax_total", "grand_total",
+                "irn", "ack_no", "ack_date", "eway_bill_no",
+                "supplier_pan", "supplier_address",
+                "buyer_name", "buyer_gst",
+                "round_off", "cgst", "sgst", "igst", "cgst_pct", "sgst_pct", "igst_pct",
+                "failure_reason",
+            ];
             const updateValues: Record<string, any> = {};
             Object.keys(patch).forEach(key => {
                 const dbKey = getCanonicalKey(key);
@@ -1159,7 +1183,7 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                 }
             });
 
-            const dateFields = ["invoice_date"];
+            const dateFields = ["invoice_date", "ack_date"];
             const syncClauses = Object.keys(updateValues).map((k, i) => {
                 const pIdx = i + 4; // $1=id, $2=payload, $3=doc_type
                 if (dateFields.includes(k)) {
@@ -1187,17 +1211,20 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             const invoiceRes = await client.query(updateSql, updateParams);
             const updatedInvoice = invoiceRes.rows[0];
 
-            await client.query(
-                `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-                [
-                    id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
-                    'Edited', userName,
-                    'Workspace save: updated ocr_raw_payload and top-level columns',
-                    JSON.stringify({ grand_total: current.grand_total }),
-                    JSON.stringify({ grand_total: updatedInvoice.grand_total }),
-                ]
-            );
+            const workspaceAudit = buildWorkspaceOnlyAudit({
+                current,
+                updatedInvoice,
+                userName,
+                updateKeys: Object.keys(updateValues),
+                docTypeChanged: !!nextDocType && nextDocType !== current.doc_type,
+            });
+
+            if (workspaceAudit) {
+                await insertAuditLogWithExecutor(
+                    client.query.bind(client),
+                    workspaceAudit
+                );
+            }
 
             await client.query('COMMIT');
             return updatedInvoice;
@@ -1254,8 +1281,8 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
 
         // 2. Update Line Items
         await client.query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [id]);
-        if (items && items.length > 0) {
-            for (const item of items) {
+        if (nextItems.length > 0) {
+            for (const item of nextItems) {
                 await client.query(
                     `INSERT INTO ap_invoice_lines 
                     (ap_invoice_id, item_id, description, gl_account_id, tax, quantity, unit_price, discount, line_amount, hsn_sac)
@@ -1271,17 +1298,18 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
         }
 
         // 3. Log Audit Entry
-        await client.query(
-            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-            [
-                id, updatedInvoice.invoice_number, updatedInvoice.vendor_name,
-                'Edited', userName,
-                `Manual edit: updated header and ${items.length} line items`,
-                JSON.stringify({ status: current.processing_status }),
-                JSON.stringify({ status: updatedInvoice.processing_status })
-            ]
-        );
+        const saveAudit = buildSaveAllAudit({
+            current,
+            updatedInvoice,
+            currentLines,
+            nextItems,
+            updateKeys: Object.keys(updateValues),
+            userName,
+        });
+
+        if (saveAudit) {
+            await insertAuditLogWithExecutor(client.query.bind(client), saveAudit);
+        }
 
         await client.query('COMMIT');
         return updatedInvoice;
@@ -1394,25 +1422,14 @@ export async function applyRevalidationOutcome(
         );
         const updatedInvoice = updateRes.rows[0];
 
-        await client.query(
-            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-            [
-                id,
-                updatedInvoice?.invoice_number || current.invoice_number,
-                updatedInvoice?.vendor_name || current.vendor_name,
-                'Edited',
+        await insertAuditLogWithExecutor(
+            client.query.bind(client),
+            buildRevalidatedOutcomeAudit({
+                current,
+                updatedInvoice,
                 userName,
-                'Revalidation: updated n8n validation data and recomputed status',
-                JSON.stringify({
-                    processing_status: current.processing_status,
-                    n8n_val_json_data: current.n8n_val_json_data || null
-                }),
-                JSON.stringify({
-                    processing_status: updatedInvoice?.processing_status,
-                    n8n_val_json_data: updatedInvoice?.n8n_val_json_data || null
-                }),
-            ]
+                cleanFlags,
+            })
         );
 
         await client.query('COMMIT');
@@ -1435,6 +1452,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        const currentInvoiceRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [invoiceId]);
+        const currentInvoice = currentInvoiceRes.rows[0] || null;
 
         // 0. Handle structure mismatch (n8n might send an Array or a single Object)
         let payload: any;
@@ -1587,6 +1606,7 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         ];
 
         // 2. Invoice Main Fields (ap_invoices)
+        let updatedInvoiceForAudit: any = currentInvoice;
         if (invData) {
             invData.vendor_id = vendorId;
             invData.processing_status = finalStatus;
@@ -1613,6 +1633,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                 });
                 const updateSql = `UPDATE ap_invoices SET ${setClause}, updated_at = NOW() WHERE id = $1`;
                 await client.query(updateSql, [invoiceId, ...invParams]);
+                const refreshedInvoiceRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [invoiceId]);
+                updatedInvoiceForAudit = refreshedInvoiceRes.rows[0] || updatedInvoiceForAudit;
 
                 // If finalStatus was changed to 'Auto-Posted', trigger the actual webhook
                 if (finalStatus === 'Auto-Posted') {
@@ -1729,6 +1751,36 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             }
         }
 
+        const failedChecks: string[] = [];
+        if (!getVal('buyer_verification')) failedChecks.push('company verification');
+        if (!getVal('gst_validation_status')) failedChecks.push('GST validation');
+        if (!(getVal('invoice_ocr_data_validation') || getVal('invoice_ocr_data_valdiation'))) failedChecks.push('document validation');
+        if (!getVal('duplicate_check')) failedChecks.push('duplicate check');
+        if (!getVal('vendor_verification') || !vendorId) failedChecks.push('vendor mapping');
+        if (!getVal('line_item_match_status')) failedChecks.push('line item mapping');
+
+        await insertAuditLogWithExecutor(
+            client.query.bind(client),
+            buildValidationOutcomeAudit({
+                currentInvoice,
+                updatedInvoiceForAudit,
+                finalStatus,
+                failedChecks,
+            })
+        );
+
+        if (finalStatus === 'Ready to Post' && currentInvoice?.processing_status !== 'Auto-Posted') {
+            await insertAuditLogWithExecutor(
+                client.query.bind(client),
+                buildRoutingMatchedAudit({
+                    currentInvoice,
+                    updatedInvoiceForAudit,
+                    finalStatus,
+                    isHighAmount: !!invData.is_high_amount,
+                })
+            );
+        }
+
         await client.query('COMMIT');
         return { success: true, id: invoiceId };
     } catch (error: any) {
@@ -1841,26 +1893,8 @@ export async function getTallySyncLogs(entityId?: string) {
  *
  * @param data - Audit event data
  */
-export async function createAuditLog(data: {
-    invoice_id?: string;
-    invoice_no?: string;
-    vendor_name?: string;
-    event_type: string;
-    user_name?: string;
-    description: string;
-    before_data?: object;
-    after_data?: object;
-}) {
-    await query(
-        `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-        [
-            data.invoice_id || null, data.invoice_no || null, data.vendor_name || null,
-            data.event_type, data.user_name || 'System', data.description,
-            data.before_data ? JSON.stringify(data.before_data) : null,
-            data.after_data ? JSON.stringify(data.after_data) : null,
-        ]
-    );
+export async function createAuditLog(data: AuditWriteInput) {
+    await insertAuditLogWithExecutor(query, data);
 }
 
 /**
@@ -1872,6 +1906,7 @@ export async function createAuditLog(data: {
 export async function getAuditLogs() {
     const result = await query(`
     SELECT * FROM audit_logs 
+    WHERE COALESCE(is_user_visible, true) = true
     ORDER BY timestamp DESC 
     LIMIT 500
   `);

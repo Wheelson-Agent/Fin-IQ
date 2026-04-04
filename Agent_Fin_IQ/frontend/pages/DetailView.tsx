@@ -1388,33 +1388,33 @@ export default function DetailView() {
 
 
   return (
-    <div className="flex flex-col h-full bg-[#f8fafc] font-sans antialiased">
+    <div className="flex flex-col h-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(191,219,254,0.34),transparent_24%),radial-gradient(circle_at_top_right,rgba(167,243,208,0.18),transparent_20%),linear-gradient(180deg,#F5F9FF_0%,#F8FAFC_24%,#F8FAFC_100%)] font-sans antialiased">
       {/* Global Header */}
-      <div className="flex items-center justify-between px-8 py-4 bg-white border-b border-slate-200 shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+      <div className="flex items-center justify-between px-8 py-4 bg-[linear-gradient(180deg,rgba(255,255,255,0.94)_0%,rgba(248,251,255,0.96)_100%)] border-b border-white/70 shrink-0 shadow-[0_12px_30px_rgba(148,163,184,0.12)] backdrop-blur-xl">
         <div className="flex items-center gap-5">
           <button
             onClick={() => navigate(`/ap-workspace?tab=${fromTab}`)}
-            className="flex items-center justify-center w-10 h-10 text-slate-600 hover:text-slate-900 transition-colors bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 shadow-sm"
+            className="flex items-center justify-center w-11 h-11 text-slate-600 hover:text-slate-900 transition-all bg-[linear-gradient(180deg,#FFFFFF_0%,#F2F7FF_100%)] hover:bg-slate-100 rounded-2xl border border-[#D9E4F3] shadow-[0_10px_24px_rgba(148,163,184,0.16)] hover:-translate-y-0.5"
             title={backLabel}
           >
             <ArrowLeft size={18} strokeWidth={3} />
           </button>
 
-          <div className="h-10 w-[1px] bg-slate-200 mx-1" />
+          <div className="h-11 w-[1px] bg-[linear-gradient(180deg,rgba(203,213,225,0.1),rgba(203,213,225,0.95),rgba(203,213,225,0.1))] mx-1" />
 
           <div className="flex flex-col">
-            <h1 className="text-[17px] font-black text-slate-900 leading-tight flex items-center gap-3">
+            <h1 className="text-[18px] font-black text-slate-900 leading-tight tracking-tight flex items-center gap-3">
               {invoice.file_name}
               {invoice.tally_id && (
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-wider rounded border border-blue-100">
+                <span className="px-2.5 py-1 bg-[linear-gradient(180deg,#EFF6FF_0%,#E5F0FF_100%)] text-blue-600 text-[10px] font-black uppercase tracking-[0.14em] rounded-full border border-blue-100 shadow-sm">
                   {invoice.tally_id}
                 </span>
               )}
             </h1>
-            <p className="text-[11px] font-bold text-slate-400 mt-0.5 tracking-tight">
+            <p className="text-[11px] font-bold text-slate-500 mt-0.5 tracking-tight">
               {invoice.vendor_name || 'Razorpay Software'} · {invoice.invoice_no || 'RZP-NOV-2024-7821'}
             </p>
-            <p className="mt-1 font-mono text-[10px] font-semibold tracking-tight text-slate-500 break-all">
+            <p className="mt-1 font-mono text-[10px] font-semibold tracking-tight text-slate-400 break-all">
               UUID: {invoice.id}
             </p>
           </div>
@@ -1425,7 +1425,7 @@ export default function DetailView() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200"
+              className="h-11 w-11 text-emerald-600 bg-[linear-gradient(180deg,#F3FFF8_0%,#E8FBF1_100%)] hover:bg-emerald-100 rounded-2xl border border-emerald-200 shadow-[0_10px_24px_rgba(16,185,129,0.12)]"
               title={isHandoff ? "Approve & Post" : "Post to Tally"}
               onClick={handleApproveAndPost}
             >
@@ -1447,7 +1447,7 @@ export default function DetailView() {
             <Button
               variant="ghost"
               size="icon"
-              className={`h-10 w-10 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 transition-all ${isRevalidating ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
+              className={`h-11 w-11 text-blue-600 bg-[linear-gradient(180deg,#F5FAFF_0%,#EAF3FF_100%)] hover:bg-blue-100 rounded-2xl border border-blue-200 shadow-[0_10px_24px_rgba(59,130,246,0.12)] transition-all ${isRevalidating ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-0.5 hover:scale-[1.02] active:scale-95'}`}
               title="Re-run AI Validation"
               onClick={handleRevalidate}
               disabled={isRevalidating}
@@ -1490,7 +1490,7 @@ export default function DetailView() {
             {!readOnly && (fromTab === 'input' || fromTab === 'handoff' || fromTab === 'received' || fromTab === 'ready' || fromTab === 'processing') && isDirty && (
               <Button
                 variant="default"
-                className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
+                className="h-10 px-5 bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_55%,#4F8DFF_100%)] hover:bg-blue-700 text-white font-bold rounded-2xl shadow-[0_14px_30px_rgba(37,99,235,0.25)] flex items-center gap-2 transition-all hover:-translate-y-0.5 hover:scale-[1.01] active:scale-95"
                 title="Save Unsaved Changes"
                 disabled={saving}
                 onClick={handleSave}
@@ -1505,42 +1505,42 @@ export default function DetailView() {
       </div>
 
       {/* Main Content Workspace */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden px-6 pb-6 pt-4">
         <ResizablePanelGroup direction="horizontal" className="flex-1 h-full">
           {/* Left Panel — PDF Viewer (50% Default, Resizable) */}
-          <ResizablePanel defaultSize={50} minSize={25} className="bg-[#323639] flex flex-col overflow-hidden relative border-r border-[#E2E8F0] shadow-inner">
+          <ResizablePanel defaultSize={35} minSize={24} className="bg-[linear-gradient(180deg,#2C3239_0%,#252B32_100%)] flex flex-col overflow-hidden relative rounded-[22px] border border-[#D9E4F3] shadow-[0_18px_36px_rgba(15,23,42,0.12)]">
             {/* Doc Toolbar */}
-            <div className="bg-[#202124] px-4 py-2 flex items-center justify-between border-b border-white/5 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="p-1.5 bg-white/5 rounded-md text-white/40">
+            <div className="bg-[linear-gradient(180deg,#20262D_0%,#20242A_100%)] px-4 py-2.5 flex items-center justify-between border-b border-white/5 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-white/5 rounded-lg text-white/50 border border-white/5 shadow-[0_6px_14px_rgba(15,23,42,0.18)]">
                   <FileText size={14} />
                 </div>
-                <span className="text-[11px] font-bold text-white/60 tracking-tight truncate max-w-[120px]">
+                <span className="text-[11px] font-bold text-white/70 tracking-tight truncate max-w-[150px]">
                   {invoice.file_name}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5">
-                  <button onClick={() => setPage(Math.max(1, page - 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5 shadow-[0_6px_14px_rgba(15,23,42,0.16)]">
+                  <button onClick={() => setPage(Math.max(1, page - 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ChevronLeft size={16} />
                   </button>
                   <div className="px-2 text-[11px] font-black text-white/50 border-x border-white/5 mx-0.5">
                     {page} / {totalPages}
                   </div>
-                  <button onClick={() => setPage(Math.min(totalPages, page + 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                  <button onClick={() => setPage(Math.min(totalPages, page + 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ChevronRight size={16} />
                   </button>
                 </div>
 
-                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5">
-                  <button onClick={() => setZoom(Math.max(50, zoom - 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5 shadow-[0_6px_14px_rgba(15,23,42,0.16)]">
+                  <button onClick={() => setZoom(Math.max(50, zoom - 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ZoomOut size={16} />
                   </button>
                   <div className="px-2 text-[11px] font-black text-white/50 border-x border-white/5 mx-0.5 min-w-[45px] text-center">
                     {zoom}%
                   </div>
-                  <button onClick={() => setZoom(Math.min(300, zoom + 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                  <button onClick={() => setZoom(Math.min(300, zoom + 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ZoomIn size={16} />
                   </button>
                 </div>
@@ -1548,7 +1548,7 @@ export default function DetailView() {
             </div>
 
             {/* Document Viewer */}
-            <div className="flex-1 overflow-auto flex items-start justify-center p-0 bg-[#323639]">
+            <div className="flex-1 overflow-auto flex items-start justify-center p-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.03),transparent_18%),linear-gradient(180deg,#2C3239_0%,#2F353C_100%)]">
               {documentPath ? (
                 <div className="w-full h-full flex flex-col">
                   {documentPath.toLowerCase().endsWith('.pdf') ? (
@@ -1558,7 +1558,7 @@ export default function DetailView() {
                       title="Invoice Document"
                     />
                   ) : (
-                    <div className="flex-1 overflow-auto p-8 flex justify-center">
+                    <div className="flex-1 overflow-auto p-3 flex justify-center">
                       <div className="relative group">
                         <img
                           src={`local-file:///${documentPath.replace(/\\/g, '/')}`}
@@ -1570,14 +1570,14 @@ export default function DetailView() {
                             transition: 'width 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
                           }}
                           alt="Invoice"
-                          className="shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-sm ring-1 ring-white/10"
+                          className="rounded-[4px] ring-1 ring-white/8 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
                         />
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center p-6 bg-[#323639]">
+                <div className="flex-1 flex items-center justify-center p-3 bg-[linear-gradient(180deg,#2C3239_0%,#2F353C_100%)]">
                   <div
                     style={{ width: `${(500 * zoom) / 100}px` }}
                     className="bg-white rounded-sm shadow-2xl p-10 min-h-[600px] font-sans origin-top transition-all duration-200"
@@ -1610,15 +1610,15 @@ export default function DetailView() {
             </div>
           </ResizablePanel>
 
-          <ResizableHandle withHandle className="bg-slate-200 w-1.5 hover:bg-slate-300 transition-colors" />
+          <ResizableHandle withHandle className="mx-2 w-2 rounded-full bg-[#D9E4F3] hover:bg-[#C7D7ED] transition-colors" />
 
           {/* Right Panel — Data Entry (50% Default, Resizable) */}
-          <ResizablePanel defaultSize={50} minSize={30} className="bg-white flex flex-col relative w-full overflow-hidden">
+          <ResizablePanel defaultSize={66} minSize={40} className="bg-white/92 flex flex-col relative w-full overflow-hidden rounded-[28px] border border-white/80 shadow-[0_24px_50px_rgba(15,23,42,0.1)] backdrop-blur-xl">
             {/* Form Header */}
-            <div className="h-[72px] flex items-center justify-between px-8 bg-white border-b border-slate-100 shrink-0 sticky top-0 z-20 w-full">
+            <div className="h-[72px] flex items-center justify-between px-6 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,250,255,0.95)_100%)] border-b border-slate-100 shrink-0 sticky top-0 z-20 w-full shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
               <div className="flex items-center gap-4 flex-1 min-w-0">
-                <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest shrink-0">validation</span>
-                <div className="h-6 w-[1px] bg-slate-200 shrink-0" />
+                <span className="text-[11px] font-black text-[#6D84A3] uppercase tracking-[0.24em] shrink-0">validation</span>
+                <div className="h-7 w-[1px] bg-[linear-gradient(180deg,rgba(203,213,225,0.1),rgba(203,213,225,0.95),rgba(203,213,225,0.1))] shrink-0" />
 
                 <div className="flex items-center gap-2 flex-wrap py-1">
                   {[
@@ -1645,9 +1645,9 @@ export default function DetailView() {
                     return (
                       <div
                         key={key}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-tight whitespace-nowrap ${isSuccess
-                          ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm'
-                          : 'bg-rose-50 text-rose-600 border-rose-100 shadow-sm'
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-[0.14em] whitespace-nowrap ${isSuccess
+                          ? 'bg-[linear-gradient(180deg,#F2FFF8_0%,#E9FBF1_100%)] text-emerald-600 border-emerald-100 shadow-[0_8px_18px_rgba(16,185,129,0.10)]'
+                          : 'bg-[linear-gradient(180deg,#FFF4F6_0%,#FFE9EE_100%)] text-rose-600 border-rose-100 shadow-[0_8px_18px_rgba(244,63,94,0.10)]'
                           }`}
                       >
                         <div className={`w-1.5 h-1.5 rounded-full ${isSuccess ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-rose-500 shadow-[0_0_5px_#f43f5e]'}`} />
@@ -1659,13 +1659,13 @@ export default function DetailView() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-white p-0">
+            <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,#FFFFFF_0%,#FBFDFF_100%)] p-0">
               <div className="w-full">
                 {/* Warning Banner Column */}
-                <div className="px-8 pt-6 space-y-4">
+                <div className="px-6 pt-5 space-y-3.5">
                   {isManualReview && (
-                    <div className="bg-orange-50 border border-orange-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm mb-6">
-                      <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center shrink-0 border border-orange-200">
+                    <div className="mb-6 flex items-center gap-4 rounded-[22px] border border-orange-100 bg-[linear-gradient(135deg,#FFF9ED_0%,#FFF5E4_100%)] p-5 shadow-[0_14px_28px_rgba(251,191,36,0.10)]">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-orange-200 bg-[linear-gradient(180deg,#FFF8E7_0%,#FFEEC8_100%)] shrink-0 shadow-[0_8px_18px_rgba(251,191,36,0.12)]">
                         <AlertCircle size={20} className="text-orange-500" />
                       </div>
                       <div className="flex-1">
@@ -1676,8 +1676,8 @@ export default function DetailView() {
                     </div>
                   )}
                   {(!isVendorMapped) && (
-                    <div className="bg-[#fff1f2] border border-[#fecaca] rounded-2xl p-5 flex items-center gap-4 shadow-sm group transition-all hover:border-[#fca5a5]">
-                      <div className="w-10 h-10 bg-[#fee2e2] rounded-xl flex items-center justify-center shrink-0 border border-[#fecaca]">
+                    <div className="flex items-center gap-4 rounded-[22px] border border-[#fecaca] bg-[linear-gradient(135deg,#FFF5F6_0%,#FFF1F4_100%)] p-5 shadow-[0_14px_30px_rgba(244,63,94,0.08)] group transition-all hover:border-[#fca5a5]">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[#fecaca] bg-[linear-gradient(180deg,#FFF6F7_0%,#FFE7EB_100%)] shrink-0 shadow-[0_8px_18px_rgba(244,63,94,0.1)]">
                         <AlertCircle size={20} className="text-[#ef4444]" />
                       </div>
                       <div className="flex-1">
@@ -1695,57 +1695,65 @@ export default function DetailView() {
                   )}
 
                   {routingReasons.length > 0 && (
-                    <div className="overflow-hidden rounded-[22px] border border-[#DCE7F5] bg-[linear-gradient(135deg,#FFFFFF_0%,#F8FBFF_45%,#F6FAF8_100%)] shadow-[0_14px_32px_rgba(15,23,42,0.07)]">
-                      <div className="relative px-5 py-4">
-                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_38%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_32%)]" />
+                    <div className="overflow-hidden rounded-[20px] border border-[#DCE7F5] bg-[linear-gradient(135deg,#FFFFFF_0%,#F8FBFF_42%,#F6FAF8_100%)] shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+                      <div className="relative px-4 py-3.5">
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.08),transparent_28%)]" />
                         <div className="relative flex items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-[#D7E6F8] bg-[linear-gradient(180deg,#FFFFFF_0%,#EAF3FF_100%)] shadow-[0_8px_18px_rgba(59,130,246,0.12)]">
-                            <AlertTriangle size={16} className="text-[#D97706]" />
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border border-[#D7E6F8] bg-[linear-gradient(180deg,#FFFFFF_0%,#EAF3FF_100%)] shadow-[0_6px_14px_rgba(59,130,246,0.1)]">
+                            <AlertTriangle size={15} className="text-[#D97706]" />
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7183A1]">Routing Decision</div>
                               <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(191,219,254,0.85),rgba(226,232,240,0.25))]" />
                             </div>
-                            <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
-                              <div>
-                                <p className="text-[18px] font-black tracking-tight text-[#15233B] leading-none">Auto-post skipped</p>
-                                <p className="mt-1.5 max-w-[620px] text-[12px] font-medium leading-relaxed text-[#60708B]">
-                                  This invoice matched <span className="font-black text-[#1A2640]">{routingReasons.length}</span> active routing {routingReasons.length === 1 ? 'rule' : 'rules'}, so it stays in the manual review flow.
+                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-[15px] font-black tracking-tight text-[#15233B] leading-none">Auto-post skipped</p>
+                                  <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-2.5 py-[5px] text-[9px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_10px_rgba(59,130,246,0.06)]">
+                                    {routingReasons.length} match{routingReasons.length === 1 ? '' : 'es'}
+                                  </div>
+                                </div>
+                                <p className="mt-1 max-w-[580px] text-[11px] font-medium leading-relaxed text-[#60708B]">
+                                  This invoice matched active routing {routingReasons.length === 1 ? 'rule' : 'rules'}, so it stays in the manual review flow.
                                 </p>
                               </div>
-                              <div className="rounded-full border border-[#D8E6F8] bg-white/90 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_12px_rgba(59,130,246,0.08)]">
+                              <div className="rounded-full border border-[#D8E6F8] bg-white/90 px-3 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_12px_rgba(59,130,246,0.08)]">
                                 Review Required
                               </div>
                             </div>
                           </div>
                         </div>
-                        <div className="relative mt-4 flex flex-col gap-2.5">
-                          {routingReasons.map((reason) => {
+                        <div className="relative mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                          {routingReasons.map((reason, index) => {
                             const tone = routingReasonTone(reason.label);
                             return (
                               <div
-                                key={reason.label}
-                                className={`relative overflow-hidden rounded-[16px] border bg-white/90 px-4 py-3 shadow-[0_8px_16px_rgba(15,23,42,0.04)] backdrop-blur-sm ${tone.border}`}
+                                key={`${reason.label}-${index}`}
+                                className={`relative overflow-hidden rounded-[14px] border bg-white/88 px-3 py-2.5 shadow-[0_6px_14px_rgba(15,23,42,0.04)] backdrop-blur-sm ${tone.border}`}
+                                title={`${reason.label}${reason.matchedValue ? ` • ${reason.matchedValue}` : ''}${reason.detail ? ` • ${reason.detail}` : ''}`}
                               >
                                 <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${tone.accent}`} />
-                                <div className="relative flex items-start gap-3">
-                                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] ${tone.iconBg}`}>
-                                    <div className={`h-2.5 w-2.5 rounded-full ${tone.iconText.replace('text', 'bg')}`} />
+                                <div className="relative flex items-start gap-2.5">
+                                  <div className={`mt-0.5 flex h-6.5 w-6.5 shrink-0 items-center justify-center rounded-[9px] ${tone.iconBg}`}>
+                                    <div className={`h-2 w-2 rounded-full ${tone.iconText.replace('text', 'bg')}`} />
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="text-[11px] font-black uppercase tracking-[0.1em] text-[#21324F]">{reason.label}</div>
-                                      <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-2 py-[4px] text-[9px] font-black uppercase tracking-[0.12em] text-[#486A98]">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <div className="truncate text-[10px] font-black uppercase tracking-[0.1em] text-[#21324F]">
+                                        {reason.label}
+                                      </div>
+                                      <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-1.5 py-[3px] text-[8px] font-black uppercase tracking-[0.12em] text-[#486A98]">
                                         Matched
                                       </div>
                                       {reason.matchedValue && (
-                                        <div className="rounded-full bg-[#F6F9FD] px-2.5 py-[4px] text-[10px] font-bold text-[#27405F] ring-1 ring-[#DDE7F5]">
+                                        <div className="max-w-full truncate rounded-full bg-[#F6F9FD] px-2 py-[3px] text-[9px] font-bold text-[#27405F] ring-1 ring-[#DDE7F5]">
                                           {reason.label === 'Supplier Filter' ? `Vendor: ${reason.matchedValue}` : `Item: ${reason.matchedValue}`}
                                         </div>
                                       )}
                                     </div>
-                                    <div className="mt-1.5 text-[12px] font-medium leading-relaxed text-[#5E708B]">
+                                    <div className="mt-1 truncate text-[10px] font-medium leading-5 text-[#5E708B]">
                                       {reason.detail}
                                     </div>
                                   </div>
@@ -1754,7 +1762,7 @@ export default function DetailView() {
                             );
                           })}
                         </div>
-                        <div className="relative mt-3 flex items-center gap-2 text-[11px] font-medium text-[#7A8AA2]">
+                        <div className="relative mt-2.5 flex items-center gap-2 text-[10px] font-medium text-[#7A8AA2]">
                           <div className="h-1.5 w-1.5 rounded-full bg-[#94A3B8]" />
                           Routing rules are shown in AP Workspace as quick badges and explained here with more context.
                         </div>
@@ -1766,15 +1774,18 @@ export default function DetailView() {
 
 
                 {/* Form Body */}
-                <div className="px-8 py-8 space-y-10">
+                <div className="px-6 py-6 space-y-7">
                   {/* Document Fields Section (Dynamic from OCR & DB) */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Document Fields</h3>
-                      <div className="h-[2px] flex-1 bg-slate-50" />
+                  <div className="space-y-4 rounded-[24px] border border-[#E6EEF8] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(248,251,255,0.9)_100%)] px-4 py-4 shadow-[0_16px_34px_rgba(148,163,184,0.08)]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F3F8FF_100%)] shadow-[0_10px_20px_rgba(148,163,184,0.14)]">
+                        <FileText size={16} className="text-[#5275A4]" />
+                      </div>
+                      <h3 className="text-[17px] font-black text-slate-900 tracking-tight">Document Fields</h3>
+                      <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(203,213,225,0.15),rgba(191,219,254,0.8),rgba(203,213,225,0.15))]" />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-x-12 gap-y-8">
+                    <div className="grid grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-4.5">
                       {[
                         { label: 'IRN', key: 'irn' },
                         { label: 'Ack No', key: 'ack_no' },
@@ -1818,13 +1829,16 @@ export default function DetailView() {
                   </div>
 
                   {/* Line Items Section */}
-                  <div className="space-y-6 pb-20">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Line Items</h3>
-                      <div className="h-[2px] flex-1 bg-slate-50" />
+                  <div className="space-y-5 pb-14 rounded-[24px] border border-[#E6EEF8] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(248,251,255,0.9)_100%)] px-5 py-5 shadow-[0_16px_34px_rgba(148,163,184,0.08)]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F3F8FF_100%)] shadow-[0_10px_20px_rgba(148,163,184,0.14)]">
+                        <Database size={16} className="text-[#5275A4]" />
+                      </div>
+                      <h3 className="text-[17px] font-black text-slate-900 tracking-tight">Line Items</h3>
+                      <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(203,213,225,0.15),rgba(191,219,254,0.8),rgba(203,213,225,0.15))]" />
                     </div>
 
-                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                    <div className="overflow-hidden rounded-[22px] border border-[#DCE7F5] bg-white shadow-[0_14px_30px_rgba(148,163,184,0.1)]">
                       <div className="overflow-x-auto">
                         <table className="w-full table-fixed text-left border-collapse min-w-[760px]">
                           <colgroup>
@@ -1836,30 +1850,30 @@ export default function DetailView() {
                             <col style={{ width: '96px' }} />
                             {!readOnly && <col style={{ width: '52px' }} />}
                           </colgroup>
-                          <thead className="bg-slate-50/80 border-b border-slate-200">
+                          <thead className="border-b border-slate-200 bg-[linear-gradient(180deg,#F8FBFF_0%,#F3F7FD_100%)]">
                             <tr>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">{isGoodsDocument ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">HSN/SAC</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Quantity</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Unit Rate</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Discount</th>
-                              {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
+                              <th className="px-4 py-3.5 text-[10px] font-black uppercase tracking-widest text-slate-400">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-4 py-3.5 text-[10px] font-black uppercase tracking-widest text-slate-400">{isGoodsDocument ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-4 py-3.5 text-[10px] font-black uppercase tracking-widest text-slate-400 whitespace-nowrap">HSN/SAC</th>
+                              <th className="px-4 py-3.5 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center whitespace-nowrap">Quantity</th>
+                              <th className="px-4 py-3.5 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center whitespace-nowrap">Unit Rate</th>
+                              <th className="px-4 py-3.5 text-[10px] font-black uppercase tracking-widest text-slate-400 text-center whitespace-nowrap">Discount</th>
+                              {!readOnly && <th className="px-4 py-3.5 w-[50px]"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {lineItems.map((item, index) => (
-                              <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="p-3 align-top min-w-0">
+                              <tr key={item.id} className="transition-colors hover:bg-[#F8FBFF]">
+                                <td className="px-3 py-2.5 align-top min-w-0">
                                   <div
-                                    className="min-h-[38px] py-2 text-[13px] font-bold leading-5 whitespace-normal break-words"
+                                    className="min-h-[34px] py-1.5 text-[12px] font-bold leading-5 whitespace-normal break-words"
                                     style={{ color: isGoodsDocument ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
                                     title={item.description}
                                   >
                                     {item.description}
                                   </div>
                                 </td>
-                                <td className="p-3 align-top min-w-0">
+                                <td className="px-3 py-2.5 align-top min-w-0">
                                   <CustomTableSelect
                                     value={isGoodsDocument
                                       ? getGoodsLineSelectionValue(item, !allowCategorizedLineItemPicker)
@@ -1932,7 +1946,7 @@ export default function DetailView() {
                                     </div>
                                   )}
                                 </td>
-                                <td className="p-3 align-top min-w-[110px]">
+                                <td className="px-3 py-2.5 align-top min-w-[110px]">
                                   <input
                                     disabled={readOnly}
                                     className={`w-full border p-2 rounded-[6px] text-[13px] outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[38px]'}`}
@@ -1943,7 +1957,7 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top min-w-[88px]">
+                                <td className="px-3 py-2.5 align-top min-w-[88px]">
                                   <input
                                     disabled={readOnly}
                                     type="number"
@@ -1955,7 +1969,7 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top min-w-[120px]">
+                                <td className="px-3 py-2.5 align-top min-w-[120px]">
                                   <input
                                     disabled={readOnly}
                                     type="number"
@@ -1967,7 +1981,7 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top min-w-[96px]">
+                                <td className="px-3 py-2.5 align-top min-w-[96px]">
                                   <div className="relative flex items-center">
                                     <input
                                       disabled={readOnly}
@@ -1983,7 +1997,7 @@ export default function DetailView() {
                                   </div>
                                 </td>
                                 {!readOnly && (
-                                  <td className="p-3 text-center align-top pt-[14px]">
+                                  <td className="px-3 py-2.5 text-center align-top pt-3">
                                     <button onClick={() => handleRemoveLineItem(item.id)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-1 rounded-[6px] cursor-pointer border-none bg-transparent transition-colors">
                                       <Trash2 size={16} />
                                     </button>
@@ -1997,7 +2011,7 @@ export default function DetailView() {
                     </div>
 
                     {!readOnly && (
-                      <div className="px-5 mt-4">
+                      <div className="px-3 mt-3">
                         <button onClick={handleAddLineItem} className="flex items-center gap-2 text-[#1E6FD9] text-[13px] font-bold border-none bg-transparent hover:text-[#1557B0] cursor-pointer">
                           <Plus size={16} /> Add Line Item
                         </button>
@@ -2005,37 +2019,33 @@ export default function DetailView() {
                     )}
 
                     {/* Amount Summary Section */}
-                    <div className="mt-8 px-8 flex justify-end">
-                      <div className="w-full max-w-[400px] space-y-3 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Taxable Value</span>
-                          <span className="text-[15px] font-black text-slate-900">{fmtExactCurrency(Number(docFields.sub_total || 0))}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Sum of GST</span>
-                          <span className="text-[15px] font-black text-slate-900">{fmtExactCurrency(Number(docFields.tax_total || 0))}</span>
+                    <div className="mt-4 px-1 flex justify-end">
+                      <div className="w-full max-w-[392px] rounded-[18px] border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] px-4 py-3 shadow-[0_12px_24px_rgba(148,163,184,0.09)]">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-[14px] border border-[#E7EFFA] bg-white/80 px-3 py-2 shadow-[0_4px_10px_rgba(148,163,184,0.05)]">
+                            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400">Taxable Value</div>
+                            <div className="mt-1 text-[14px] font-black leading-none text-slate-900">{fmtExactCurrency(Number(docFields.sub_total || 0))}</div>
+                          </div>
+                          <div className="rounded-[14px] border border-[#E7EFFA] bg-white/80 px-3 py-2 shadow-[0_4px_10px_rgba(148,163,184,0.05)]">
+                            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400">Sum of GST</div>
+                            <div className="mt-1 text-[14px] font-black leading-none text-slate-900">{fmtExactCurrency(Number(docFields.tax_total || 0))}</div>
+                          </div>
                         </div>
                         {(docFields.cgst > 0 || docFields.sgst > 0) ? (
-                          <>
-                            <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">CGST</span>
-                              <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.cgst || 0))}</span>
-                            </div>
-                            <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SGST</span>
-                              <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.sgst || 0))}</span>
-                            </div>
-                          </>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold text-slate-500">
+                            <span className="uppercase tracking-[0.14em] text-slate-400">CGST <span className="ml-1 text-slate-700">{fmtExactCurrency(Number(docFields.cgst || 0))}</span></span>
+                            <span className="h-1 w-1 rounded-full bg-slate-300" />
+                            <span className="uppercase tracking-[0.14em] text-slate-400">SGST <span className="ml-1 text-slate-700">{fmtExactCurrency(Number(docFields.sgst || 0))}</span></span>
+                          </div>
                         ) : docFields.igst > 0 && (
-                          <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
-                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">IGST</span>
-                            <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.igst || 0))}</span>
+                          <div className="mt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                            IGST <span className="ml-1 text-slate-700">{fmtExactCurrency(Number(docFields.igst || 0))}</span>
                           </div>
                         )}
-                        <div className="h-[1px] bg-slate-200 my-2" />
-                        <div className="flex justify-between items-center">
-                          <span className="text-[13px] font-extrabold text-slate-900 uppercase tracking-widest">Total Invoice Amount</span>
-                          <span className="text-[20px] font-black text-blue-600">{fmtExactCurrency(Number(docFields.grand_total || 0))}</span>
+                        <div className="my-2.5 h-px bg-[linear-gradient(90deg,rgba(203,213,225,0.2),rgba(148,163,184,0.7),rgba(203,213,225,0.2))]" />
+                        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[linear-gradient(90deg,rgba(37,99,235,0.04),rgba(59,130,246,0.02))] px-3 py-2.5">
+                          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#6B84A8]">Total Invoice Amount</div>
+                          <span className="text-[17px] font-black leading-none tracking-tight text-[#2563EB]">{fmtExactCurrency(Number(docFields.grand_total || 0))}</span>
                         </div>
                       </div>
                     </div>
@@ -2414,21 +2424,21 @@ export default function DetailView() {
 
 function InputField({ label, value, required, onChange, Icon, selectOptions, isError, style, disabled }: any) {
   return (
-    <div className="flex flex-col gap-2 group">
-      <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
+    <div className="group flex flex-col gap-1.5">
+      <label className="ml-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
         {label}
         {required && <span className="text-red-500 font-black">*</span>}
       </label>
       <div className="relative flex items-center transition-all">
         {Icon && (
-          <div className="absolute left-4 text-slate-300 group-focus-within:text-blue-600 transition-colors">
-            <Icon size={18} strokeWidth={2.5} />
+          <div className="absolute left-3.5 text-slate-300 group-focus-within:text-blue-600 transition-colors">
+            <Icon size={16} strokeWidth={2.3} />
           </div>
         )}
 
         {selectOptions ? (
           <select
-            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black text-slate-700 transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none appearance-none disabled:opacity-60 disabled:cursor-not-allowed ${Icon ? 'pl-11' : 'px-5'}`}
+            className={`w-full appearance-none rounded-xl border-2 border-slate-100 bg-slate-50 h-10.5 text-[13px] font-black text-slate-700 transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none disabled:opacity-60 disabled:cursor-not-allowed ${Icon ? 'pl-10 pr-10' : 'px-4 pr-10'}`}
             value={value}
             disabled={disabled}
             onChange={(e) => onChange(e.target.value)}
@@ -2438,7 +2448,7 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
           </select>
         ) : (
           <input
-            className={`w-full bg-slate-50 border-2 border-slate-100 h-12 rounded-2xl text-[14px] font-black transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none disabled:opacity-60 disabled:cursor-not-allowed ${Icon ? 'pl-11' : 'px-5'} ${isError ? 'text-red-500 border-red-100 bg-red-50/30' : 'text-slate-700'}`}
+            className={`w-full rounded-xl border-2 border-slate-100 bg-slate-50 h-10.5 text-[13px] font-black transition-all focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/5 outline-none disabled:opacity-60 disabled:cursor-not-allowed ${Icon ? 'pl-10 pr-4' : 'px-4'} ${isError ? 'text-red-500 border-red-100 bg-red-50/30' : 'text-slate-700'}`}
             style={style}
             value={value}
             disabled={disabled}
@@ -2448,8 +2458,8 @@ function InputField({ label, value, required, onChange, Icon, selectOptions, isE
         )}
 
         {selectOptions && (
-          <div className="absolute right-4 pointer-events-none text-slate-300">
-            <ChevronDown size={18} strokeWidth={3} />
+          <div className="absolute right-3.5 pointer-events-none text-slate-300">
+            <ChevronDown size={16} strokeWidth={2.8} />
           </div>
         )}
       </div>

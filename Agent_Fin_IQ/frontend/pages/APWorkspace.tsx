@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popove
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../components/ui/sheet';
@@ -154,6 +155,24 @@ const itemDescriptionMatches = (description: string, selectedItemName: string) =
     new RegExp(`(^| )${normalizedDescription.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).test(normalizedItemName);
 };
 
+const getStatusSupportText = (record: APRecord) => {
+  if (record.reason?.trim()) return record.reason.trim();
+
+  switch (record.status) {
+    case 'ready':
+      return 'Ready for approval and posting';
+    case 'input':
+      return 'Additional information required';
+    case 'handoff':
+      return 'Escalated for manual intervention';
+    case 'posted':
+      return 'Posted to ERP successfully';
+    case 'received':
+    default:
+      return 'Freshly captured and queued';
+  }
+};
+
 /* function RoutingFlags({ record, valueLimitConfig, invoiceDateRangeConfig }: {
   record: { isHighAmount: boolean; date: string };
   valueLimitConfig: { enabled: boolean; limit: number } | null;
@@ -189,7 +208,13 @@ function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, s
   supplierFilterConfig: { enabled: boolean; blockedGstins: string[] } | null;
   itemFilterConfig: { enabled: boolean; blockedItemNames: string[] } | null;
 }) {
-  if (record.status === 'posted') return <span className="text-slate-300 text-[11px] select-none">-</span>;
+  if (record.status === 'posted') {
+    return (
+      <div className="inline-flex items-center rounded-full border border-slate-200 bg-[linear-gradient(135deg,#FFFFFF,#F8FAFC)] px-2.5 py-1 shadow-[0_6px_16px_rgba(15,23,42,0.05)]">
+        <span className="text-[10px] font-semibold text-slate-400">No routing</span>
+      </div>
+    );
+  }
 
   const flags: { icon: React.ReactNode; label: string; title: string; className: string; iconWrapClassName: string; iconClassName: string; textClassName: string }[] = [];
 
@@ -247,16 +272,22 @@ function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, s
     });
   }
 
-  if (flags.length === 0) return <span className="text-slate-300 text-[11px] select-none">-</span>;
+  if (flags.length === 0) {
+    return (
+      <div className="inline-flex items-center rounded-full border border-slate-200 bg-[linear-gradient(135deg,#FFFFFF,#F8FAFC)] px-2.5 py-1 shadow-[0_6px_16px_rgba(15,23,42,0.05)]">
+        <span className="text-[10px] font-semibold text-slate-400">No routing</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {flags.map((flag, i) => (
-        <div key={i} className={`flex items-center gap-1.5 w-fit border rounded-full px-2 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.05)] ${flag.className}`} title={flag.title}>
-          <span className={`flex h-4 w-4 items-center justify-center rounded-full ${flag.iconWrapClassName}`}>
+        <div key={i} className={`group flex items-center gap-2 w-fit border rounded-full px-2.5 py-1.5 shadow-[0_8px_20px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] ${flag.className}`} title={flag.title}>
+          <span className={`flex h-5 w-5 items-center justify-center rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${flag.iconWrapClassName}`}>
             <span className={flag.iconClassName}>{flag.icon}</span>
           </span>
-          <span className={`text-[9px] font-semibold tracking-[0.02em] leading-none whitespace-nowrap ${flag.textClassName}`}>{flag.label}</span>
+          <span className={`text-[10px] font-semibold tracking-[0.04em] leading-none whitespace-nowrap ${flag.textClassName}`}>{flag.label}</span>
         </div>
       ))}
     </div>
@@ -1073,27 +1104,27 @@ export default function APWorkspace() {
     if (total === 0) return null;
 
     return (
-      <div className="flex items-center justify-between px-6 py-3 border-t border-slate-100 bg-slate-50/20">
-        <div className="text-xs text-slate-500 font-medium">
+      <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.98))]">
+        <div className="text-[12px] text-slate-500 font-medium">
           Showing <span className="text-slate-900">{start}-{end}</span> of <span className="text-slate-900">{total}</span> documents
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 rounded-[22px] border border-white/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.9),rgba(241,245,255,0.98))] px-2.5 py-2 shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
           <Button
             variant="outline"
             size="sm"
-            className="h-8 px-2 bg-white"
+            className="h-10 rounded-xl border-slate-200/80 bg-white px-3 text-slate-600 shadow-[0_6px_18px_rgba(15,23,42,0.04)] hover:bg-slate-50"
             disabled={page === 1}
             onClick={() => setCurrentPage({ ...currentPage, [tab]: page - 1 })}
           >
             Previous
           </Button>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 rounded-2xl bg-slate-100/70 px-1.5 py-1">
             {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
               <Button
                 key={p}
                 variant={page === p ? "default" : "outline"}
                 size="sm"
-                className={`h-8 w-8 p-0 ${page === p ? "bg-primary text-white" : "bg-white text-slate-600"}`}
+                className={`h-10 w-10 rounded-xl p-0 ${page === p ? "bg-[linear-gradient(135deg,#2563EB,#3B82F6)] text-white border-transparent shadow-[0_12px_24px_rgba(37,99,235,0.28)]" : "border-slate-200/80 bg-white text-slate-600 shadow-[0_6px_18px_rgba(15,23,42,0.04)] hover:bg-slate-50"}`}
                 onClick={() => setCurrentPage({ ...currentPage, [tab]: p })}
               >
                 {p}
@@ -1103,7 +1134,7 @@ export default function APWorkspace() {
           <Button
             variant="outline"
             size="sm"
-            className="h-8 px-2 bg-white"
+            className="h-10 rounded-xl border-slate-200/80 bg-white px-3 text-slate-600 shadow-[0_6px_18px_rgba(15,23,42,0.04)] hover:bg-slate-50"
             disabled={page === totalPages}
             onClick={() => setCurrentPage({ ...currentPage, [tab]: page + 1 })}
           >
@@ -1310,17 +1341,76 @@ export default function APWorkspace() {
         type="button"
         variant="outline"
         size="sm"
-        className="relative h-9 gap-2 border-slate-200 bg-white hover:bg-slate-50"
+        className={`relative h-8 gap-1.5 text-[12px] font-semibold transition-all border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 ${activeCount > 0 ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'text-slate-600'}`}
         onClick={() => setFilterPanelTab(tab)}
       >
-        <Filter className="h-4 w-4 text-slate-500" />
-        <span className="font-semibold text-slate-700">Filters</span>
+        <Filter className="h-3.5 w-3.5" />
+        Filters
         {activeCount > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-black text-white shadow-sm">
+          <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-black text-white leading-none">
             {activeCount}
           </span>
         )}
       </Button>
+    );
+  };
+
+  const renderTabToolbar = (
+    tab: TableTab,
+    placeholder: string,
+    bulkActions?: React.ReactNode,
+  ) => {
+    const visibleCount = getVisibleTabRecords(tab).length;
+    const totalCount = statusMatchedRecordsByTab[tab].length;
+    const isFiltered = visibleCount !== totalCount || !!tabFilters[tab];
+    return (
+      <div className="px-6 py-4 border-b border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,255,0.92))] flex items-center gap-3 shadow-[inset_0_-1px_0_rgba(226,232,240,0.75)]">
+        <div className="relative flex-1 max-w-[320px]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+          <Input
+            placeholder={placeholder}
+            className="pl-9 pr-8 h-10 bg-white/90 border-slate-200 text-[13px] rounded-xl focus:bg-white focus:border-blue-300 focus:ring-4 focus:ring-blue-100/80 transition-all placeholder:text-slate-400 shadow-[0_6px_16px_rgba(15,23,42,0.04)]"
+            value={tabFilters[tab] || ''}
+            onChange={(e) => updateTabSearch(tab, e.target.value)}
+          />
+          {tabFilters[tab] && (
+            <button onClick={() => updateTabSearch(tab, '')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        {isFiltered && (
+          <span className="text-[11px] text-slate-500 whitespace-nowrap font-semibold shrink-0 bg-white border border-slate-200 px-2.5 py-1 rounded-full shadow-[0_4px_12px_rgba(15,23,42,0.04)]">
+            {visibleCount} / {totalCount}
+          </span>
+        )}
+
+        <div className="flex items-center gap-2 ml-auto">
+          {selectedIds.size > 0 && bulkActions && (
+            <div className="flex items-center gap-1 rounded-xl border border-blue-400/20 bg-[linear-gradient(135deg,#2563EB,#3B82F6)] px-3 py-1.5 shadow-[0_10px_24px_rgba(37,99,235,0.25)]">
+              <span className="text-[11px] font-bold text-white pr-2 border-r border-white/25 mr-1">
+                {selectedIds.size} selected
+              </span>
+              {bulkActions}
+            </div>
+          )}
+          {renderFilterTrigger(tab)}
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2.5 h-10 shadow-[0_6px_16px_rgba(15,23,42,0.04)]">
+            <span className="text-[11px] text-slate-400 font-semibold whitespace-nowrap">Rows</span>
+            <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
+              <SelectTrigger className="h-8 w-[44px] bg-transparent border-none shadow-none text-[12px] font-semibold text-slate-700 px-1 focus:ring-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[10, 20, 30, 40, 50].map(v => (
+                  <SelectItem key={v} value={v.toString()}>{v}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -1329,7 +1419,7 @@ export default function APWorkspace() {
     if (chips.length === 0) return null;
 
     return (
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50/20 px-6 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-[linear-gradient(180deg,rgba(249,250,251,0.75),rgba(255,255,255,0.95))] px-6 py-3">
         {chips.map(chip => (
           <Badge
             key={chip.key}
@@ -1350,6 +1440,134 @@ export default function APWorkspace() {
           </Badge>
         ))}
       </div>
+    );
+  };
+
+  const renderApprovalSnapshot = (record: APRecord) => {
+    const checks = [
+      { label: 'Company', passed: record.validations.company, show: true },
+      { label: 'GST', passed: record.validations.gst, show: true },
+      { label: 'Particulars', passed: record.validations.particulars, show: true },
+      { label: 'Supplier', passed: record.validations.supplier, show: true },
+      { label: 'Duplication', passed: record.validations.duplication, show: true },
+      { label: 'Ledger', passed: record.validations.ledger, show: record.docTypeLabel?.toLowerCase().includes('goods') },
+    ].filter(check => check.show);
+
+    const passedCount = checks.filter(check => check.passed).length;
+    const totalCount = checks.length;
+    const failedCount = totalCount - passedCount;
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="mx-auto inline-flex w-[168px] items-center justify-between rounded-[18px] border border-slate-200/80 bg-[linear-gradient(135deg,#FFFFFF,#F8FBFF)] px-3 py-2 text-left shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] hover:border-slate-300"
+          >
+            <div className="flex flex-col">
+              <span className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-500">
+                Approval
+              </span>
+              <span className="mt-1 text-[13px] font-extrabold tracking-[-0.01em] text-slate-900">
+                {passedCount}/{totalCount}
+                <span className="ml-1 text-[10px] font-semibold text-slate-400">checks</span>
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {checks.map(check => (
+                <span
+                  key={check.label}
+                  className={`h-2.5 w-2.5 rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.12)] ${
+                    check.passed ? 'bg-emerald-500' : 'bg-rose-400'
+                  }`}
+                />
+              ))}
+            </div>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={10}
+          className="w-[220px] rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))] px-4 py-3 text-white shadow-[0_22px_50px_rgba(15,23,42,0.35)]"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-white/60">Approval Snapshot</span>
+            <span className={`text-[11px] font-bold ${failedCount === 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+              {failedCount === 0 ? 'All clear' : `${failedCount} needs review`}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {checks.map(check => (
+              <div
+                key={check.label}
+                className={`flex items-center justify-between rounded-xl border px-2.5 py-2 ${
+                  check.passed
+                    ? 'border-emerald-400/20 bg-emerald-400/10'
+                    : 'border-rose-400/20 bg-rose-400/10'
+                }`}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-white/80">
+                  {check.label}
+                </span>
+                {check.passed
+                  ? <Check className="h-3.5 w-3.5 text-emerald-300 stroke-[3]" />
+                  : <X className="h-3.5 w-3.5 text-rose-300 stroke-[3]" />}
+              </div>
+            ))}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  const renderFailureReason = (reason: string | undefined) => {
+    const resolvedReason = String(reason || 'Failure').trim();
+    const words = resolvedReason.split(/\s+/).filter(Boolean);
+    const accent = words.slice(0, 2).join(' ').toUpperCase();
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="mx-auto inline-flex w-[170px] items-start justify-between gap-2 rounded-[18px] border border-rose-100 bg-[linear-gradient(135deg,#FFFFFF,#FFF5F7)] px-3 py-2 text-left shadow-[0_10px_24px_rgba(244,63,94,0.10)] transition-all duration-200 hover:-translate-y-[1px] hover:border-rose-200"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0 truncate text-[10px] font-black uppercase tracking-[0.08em] text-rose-500">
+                  {accent || 'FAILURE'}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-[11px] font-semibold text-rose-600">
+                {resolvedReason}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full bg-rose-50 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-rose-500">
+              Review
+            </span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={10}
+          className="max-w-[260px] rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))] px-4 py-3 text-white shadow-[0_22px_50px_rgba(15,23,42,0.35)]"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-rose-400/15 text-rose-300">
+              <AlertTriangle className="h-3.5 w-3.5" />
+            </span>
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-white/60">Failure Reason</span>
+          </div>
+          <div className="mt-3 text-[11px] font-semibold leading-[1.4] text-white">
+            {resolvedReason}
+          </div>
+        </TooltipContent>
+      </Tooltip>
     );
   };
 
@@ -1613,11 +1831,18 @@ export default function APWorkspace() {
 
 
 
-  const tabClass = "relative z-10 px-6 py-4 text-[14px] font-bold transition-all rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 data-[state=inactive]:text-slate-500 hover:text-slate-800 transition-colors";
+  const tabClass = "relative z-10 min-h-[58px] px-7 py-3 text-[14px] font-semibold leading-none tracking-normal transition-all duration-200 rounded-t-[22px] border border-transparent border-b-[3px] data-[state=active]:bg-[linear-gradient(180deg,#FFFFFF,#FDFEFF)] data-[state=active]:shadow-[0_-1px_0_rgba(255,255,255,0.7),0_12px_28px_rgba(37,99,235,0.08)] data-[state=active]:border-b-blue-600 data-[state=active]:text-blue-700 data-[state=inactive]:bg-white/20 data-[state=inactive]:text-slate-600 data-[state=inactive]:hover:text-slate-800 data-[state=inactive]:hover:bg-white/65";
+  const tabCountClass = "ml-2 inline-flex min-w-[22px] items-center justify-center rounded-full px-1.5 py-0.5 text-[12px] font-semibold leading-none";
+  const valueHeadClass = "font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] text-right pr-6";
+  const valueCellClass = "text-right pr-6";
+  const routingHeadClass = "font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] pl-6";
+  const routingCellClass = "pl-6";
+  const statusHeadClass = "font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] text-left pl-6";
+  const statusCellClass = "pl-6 pr-6 py-2.5 whitespace-normal align-middle";
 
   return (
     <div
-      className="flex flex-col h-full gap-6 max-w-[1400px] mx-auto w-full relative"
+      className="flex flex-col h-full gap-4 max-w-[1400px] mx-auto w-full relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1644,90 +1869,132 @@ export default function APWorkspace() {
       </AnimatePresence>
 
       <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Prepare Processing Batch</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="sm:max-w-[520px] overflow-hidden rounded-[24px] border border-white/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.98),rgba(246,249,255,0.98))] p-0 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
+          <div className="absolute inset-x-0 top-0 h-20 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_40%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.08),transparent_30%)] pointer-events-none" />
+          <DialogHeader className="relative border-b border-slate-200/70 px-6 pb-4 pt-6">
+            <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-blue-100 bg-[linear-gradient(135deg,#EFF6FF,#FFFFFF)] shadow-[0_8px_20px_rgba(37,99,235,0.10)]">
+              <UploadCloud className="h-4.5 w-4.5 text-blue-600" />
+            </div>
+            <DialogTitle className="text-[24px] font-bold tracking-[-0.03em] text-slate-900">Prepare Processing Batch</DialogTitle>
+            <DialogDescription className="max-w-[380px] pt-1 text-[15px] leading-6 text-slate-500">
               Give this batch a name to track it in logs. {pendingUploads?.length} file(s) selected.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-4 py-4">
+          <div className="relative flex flex-col gap-5 px-6 py-5">
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-slate-700">Batch Name</label>
+              <label className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Batch Name</label>
               <Input
                 value={batchName}
                 onChange={(e) => setBatchName(e.target.value)}
                 placeholder="e.g. Monthly_Vendors_March"
                 autoFocus
+                className="h-12 rounded-2xl border-slate-200 bg-white/95 px-4 text-[16px] font-semibold tracking-[-0.01em] text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.06)] focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
               />
             </div>
-            <div className="max-h-40 overflow-y-auto border rounded-md p-2 bg-slate-50">
-              <ul className="text-xs text-slate-600 space-y-1">
+            <div className="rounded-[22px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,255,0.96))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_10px_24px_rgba(15,23,42,0.04)]">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Selected Files</span>
+                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700">
+                  {pendingUploads?.length || 0} item{(pendingUploads?.length || 0) === 1 ? '' : 's'}
+                </span>
+              </div>
+              <ul className="max-h-32 space-y-2 overflow-y-auto pr-1">
                 {pendingUploads && Array.from(pendingUploads).map((f, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <FileText size={12} className="text-slate-400" />
-                    {f.name}
+                  <li key={i} className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white px-3 py-2.5 text-[14px] font-medium text-slate-700 shadow-[0_6px_14px_rgba(15,23,42,0.04)]">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500">
+                      <FileText size={15} />
+                    </span>
+                    <span className="truncate">{f.name}</span>
                   </li>
                 ))}
               </ul>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowBatchDialog(false); setPendingUploads(null); }}>Cancel</Button>
-            <Button onClick={confirmUpload} disabled={!batchName.trim()}>Start Processing</Button>
+          <DialogFooter className="border-t border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(246,249,255,0.96))] px-6 py-4">
+            <Button
+              variant="outline"
+              className="h-11 rounded-2xl border-slate-200 bg-white px-5 text-[15px] font-semibold text-slate-700 shadow-[0_8px_18px_rgba(15,23,42,0.04)] hover:bg-slate-50"
+              onClick={() => { setShowBatchDialog(false); setPendingUploads(null); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="h-11 rounded-2xl border-none bg-[linear-gradient(135deg,#2563EB,#3B82F6)] px-6 text-[16px] font-semibold text-white shadow-[0_14px_28px_rgba(37,99,235,0.24)] hover:brightness-105"
+              onClick={confirmUpload}
+              disabled={!batchName.trim()}
+            >
+              Start Processing
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Header Area */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AP Workspace</h1>
-          <p className="text-sm text-slate-500 mt-1">Accounts Payable Lifecycle Monitor & Workbench</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
-              placeholder="Search invoice or supplier..."
-              className="pl-9 bg-white"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.06)] px-6 py-4">
+        {/* Title row */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-[22px] font-bold text-slate-900 tracking-tight">AP Workspace</h1>
+              <span className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-semibold px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live
+              </span>
+            </div>
+            <p className="text-[13px] text-slate-400 mt-0.5 font-medium">Accounts Payable Lifecycle Monitor & Workbench</p>
           </div>
-          <input
-            type="file"
-            accept=".pdf,.jpeg,.jpg,.png,image/jpeg,image/png,application/pdf"
-            className="hidden"
-            id="ap-workspace-upload"
-            multiple
-            onChange={(e) => {
-              if (e.target.files) {
-                const snapshot = Array.from(e.target.files); // snapshot before clearing — FileList is a live DOM ref
-                e.target.value = '';                          // reset so same file can be re-selected next time
-                handleUploadFiles(snapshot);
-              }
-            }}
-          />
-          <Button 
-            className="bg-[#1E6FD9] hover:bg-[#165HBA] text-white flex items-center gap-2 px-4 py-2 h-9 rounded-lg shadow-[0_2px_10px_rgba(30,111,217,0.2)] transition-all border-none font-bold"
-            onClick={() => document.getElementById('ap-workspace-upload')?.click()}
-          >
-            <UploadCloud className="w-4 h-4" />
-            <span className="text-[13px] tracking-tight">Upload Invoices</span>
-          </Button>
+
+          <div className="flex items-center gap-2.5">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              <Input
+                placeholder="Search invoice or supplier..."
+                className="pl-9 pr-8 w-72 h-9 bg-slate-50 border-slate-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-lg text-[13px] placeholder:text-slate-400 transition-all"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <input
+              type="file"
+              accept=".pdf,.jpeg,.jpg,.png,image/jpeg,image/png,application/pdf"
+              className="hidden"
+              id="ap-workspace-upload"
+              multiple
+              onChange={(e) => {
+                if (e.target.files) {
+                  const snapshot = Array.from(e.target.files);
+                  e.target.value = '';
+                  handleUploadFiles(snapshot);
+                }
+              }}
+            />
+            <Button
+              className="bg-[#1E6FD9] hover:bg-[#1558BE] text-white flex items-center gap-2 px-5 h-9 rounded-lg shadow-[0_2px_12px_rgba(30,111,217,0.3)] hover:shadow-[0_4px_18px_rgba(30,111,217,0.4)] transition-all border-none font-semibold text-[13px]"
+              onClick={() => document.getElementById('ap-workspace-upload')?.click()}
+            >
+              <UploadCloud className="w-4 h-4" />
+              Upload Invoices
+            </Button>
+          </div>
         </div>
+
       </div>
 
 
 
       {/* Main Content Area */}
       {loading ? (
-        <div className="flex-1 flex items-center justify-center min-h-[500px]">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[500px] gap-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-slate-200 border-t-blue-600"></div>
+          <span className="text-[12px] text-slate-400 font-medium">Loading workspace…</span>
         </div>
       ) : (
-        <Card className="flex-1 min-h-[500px] flex flex-col overflow-hidden border-slate-200 shadow-sm">
+        <Card className="flex-1 min-h-[500px] flex flex-col overflow-hidden border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,255,0.96))] shadow-[0_24px_60px_rgba(15,23,42,0.08)] rounded-[24px] backdrop-blur-sm">
           <Tabs
             value={activeTab}
             onValueChange={(val) => {
@@ -1738,43 +2005,52 @@ export default function APWorkspace() {
             }}
             className="flex-1 flex flex-col w-full h-full"
           >
-            <div className="px-6 pt-[18px] bg-slate-50/50">
-              <TabsList className="bg-transparent border-b border-slate-200 w-full justify-start rounded-none h-auto p-0 space-x-2">
+            <div className="px-5 pt-4 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.08),transparent_34%),linear-gradient(180deg,#F4F7FF,#F8FAFF)] border-b border-slate-200/80">
+              <TabsList className="bg-white/25 w-full justify-start rounded-[24px] h-auto p-1.5 gap-1 border border-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-sm">
                 <TabsTrigger value="received" className={tabClass}>
                   Received
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1">
+                    <span className={`${tabCountClass} bg-slate-100/90 text-slate-500 data-[state=active]:bg-blue-100 data-[state=active]:text-blue-700`}>
                     {counts.received}
                   </span>
                 </TabsTrigger>
-                <TabsTrigger value="ready" className={tabClass}>
+                <TabsTrigger value="ready" className={`${tabClass} data-[state=active]:border-b-emerald-500 data-[state=active]:text-emerald-700 data-[state=active]:shadow-[0_-2px_8px_rgba(16,185,129,0.08)]`}>
                   For Review
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-emerald-100 group-data-[state=active]:text-emerald-700">
-                    {counts.ready}
-                  </span>
+                  {counts.ready > 0 && (
+                    <span className={`${tabCountClass} bg-emerald-100 text-emerald-700`}>
+                      {counts.ready}
+                    </span>
+                  )}
                 </TabsTrigger>
-                <TabsTrigger value="input" className={tabClass}>
+                <TabsTrigger value="input" className={`${tabClass} data-[state=active]:border-b-amber-500 data-[state=active]:text-amber-700 data-[state=active]:shadow-[0_-2px_8px_rgba(245,158,11,0.08)]`}>
                   Awaiting Input
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-amber-100 group-data-[state=active]:text-amber-700">
-                    {counts.input}
-                  </span>
+                  {counts.input > 0 && (
+                    <span className={`${tabCountClass} bg-amber-100 text-amber-700`}>
+                      {counts.input}
+                    </span>
+                  )}
                 </TabsTrigger>
-                <TabsTrigger value="handoff" className={tabClass}>
+                <TabsTrigger value="handoff" className={`${tabClass} data-[state=active]:border-b-rose-500 data-[state=active]:text-rose-700 data-[state=active]:shadow-[0_-2px_8px_rgba(244,63,94,0.08)]`}>
                   Handoff
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-rose-100 group-data-[state=active]:text-rose-700">
-                    {counts.handoff}
-                  </span>
+                  {counts.handoff > 0 && (
+                    <span className={`${tabCountClass} bg-rose-100 text-rose-700`}>
+                      {counts.handoff}
+                    </span>
+                  )}
                 </TabsTrigger>
-                <TabsTrigger value="posted" className={tabClass}>
+                <TabsTrigger value="posted" className={`${tabClass} data-[state=active]:border-b-slate-500 data-[state=active]:text-slate-700`}>
                   Posted
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-slate-300 group-data-[state=active]:text-slate-800">
+                  <span className={`${tabCountClass} bg-slate-100 text-slate-500`}>
                     {counts.posted}
                   </span>
                 </TabsTrigger>
                 {isProcessing && (
-                  <TabsTrigger value="processing" className={`${tabClass} data-[state=active]:border-blue-600 data-[state=active]:text-blue-700`}>
-                    Processing
+                  <TabsTrigger value="processing" className={`${tabClass} data-[state=active]:border-b-blue-500 data-[state=active]:text-blue-700`}>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                      Processing
+                    </span>
                     {pipelineData.fileNames.length > 0 && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1">
+                      <span className={`${tabCountClass} bg-blue-100 text-blue-700`}>
                         {confirmedUploads}/{pipelineData.fileNames.length}
                       </span>
                     )}
@@ -1783,7 +2059,7 @@ export default function APWorkspace() {
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-auto bg-white p-0">
+            <div className="flex-1 overflow-y-auto bg-white p-0 min-h-0">
               {/* --- PROCESSING TAB --- */}
               {isProcessing && (
                 <TabsContent value="processing" className="m-0 h-full border-none p-0 outline-none">
@@ -1818,169 +2094,128 @@ export default function APWorkspace() {
 
               {/* --- RECEIVED TAB --- */}
               <TabsContent value="received" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search by No. or Supplier..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.received}
-                      onChange={(e) => updateTabSearch('received', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('received')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 whitespace-nowrap font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('received', 'Search by No. or Supplier…',
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
                 {renderFilterChips('received')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-0 z-20 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
                           checked={getVisibleTabRecords('received').length > 0 && getVisibleTabRecords('received').every(r => selectedIds.has(r.id))}
                           onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('received'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%]">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%]">Doc Type</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[22%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Items</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[10%] text-right">Status</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[26%] bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[13%] bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Doc Type</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[20%] bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Supplier</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[7%] text-center bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Items</TableHead>
+                      <TableHead className={`${valueHeadClass} w-[14%]`}>Value (₹)</TableHead>
+                      <TableHead className={`${routingHeadClass} w-[10%]`}>Routing</TableHead>
+                      <TableHead className={`${statusHeadClass} w-[12%]`}>Status</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[5%] pr-5 text-right bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('received').length === 0 ? (
-                      <TableRow><TableCell colSpan={9} className="text-center py-12 text-slate-500">No received documents found in this range.</TableCell></TableRow>
-                    ) : getPaginatedData('received').map(record => (
+                      <TableRow><TableCell colSpan={9} className="text-center py-16 text-slate-400 text-[13px]">No received documents found in this range.</TableCell></TableRow>
+                    ) : getPaginatedData('received').map((record, idx) => (
                       <TableRow
                         key={record.id}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] ${
+                          record.status === 'handoff' ? 'border-l-rose-400 hover:bg-rose-50/30' :
+                          record.status === 'ready'   ? 'border-l-emerald-400 hover:bg-emerald-50/30' :
+                          record.status === 'input'   ? 'border-l-amber-400 hover:bg-amber-50/30' :
+                          record.status === 'posted'  ? 'border-l-slate-300 hover:bg-slate-50/60' :
+                                                        'border-l-blue-300 hover:bg-blue-50/25'
+                        } ${idx % 2 === 1 ? 'bg-[#FCFDFF]' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`}
                         onClick={() => handleRowClick(record)}
                       >
-                        <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(record.id)}
-                            onCheckedChange={(checked) => toggleSelect(record.id, !!checked)}
-                          />
+                        <TableCell className="pl-5 pr-2" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-3">
+                        <TableCell className="py-2.5 pr-3">
                           <div className="flex flex-col gap-0.5">
-                            <div className={`font-bold text-[14px] leading-tight truncate max-w-[200px] ${record.invoiceNo === 'Unknown Doc' ? 'text-slate-400 font-medium italic' : 'text-slate-900 font-black tracking-tight'}`} title={record.invoiceNo}>
+                            <span className={`text-[15px] leading-snug font-bold truncate max-w-[220px] ${record.invoiceNo === 'Unknown Doc' || record.invoiceNo === 'Unknown Invoice' ? 'text-slate-400 italic font-normal' : 'text-[#0F172A]'}`} title={record.invoiceNo}>
                               {record.invoiceNo}
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-medium truncate max-w-[180px]" title={record.fileName}>
-                              {record.fileName || '-'}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-medium tracking-tight">
-                              {record.uploadedAt !== 'Unknown' ? formatDetailedDate(record.uploadedAt) : '-'}
-                            </div>
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-medium truncate max-w-[200px]" title={record.fileName}>{record.fileName || '—'}</span>
+                            <span className="text-[10px] text-slate-400">{record.uploadedAt !== 'Unknown' ? formatDetailedDate(record.uploadedAt) : '—'}</span>
                           </div>
                         </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] font-bold shadow-none uppercase tracking-tight py-0 ${record.docTypeLabel === 'Unknown' ? 'bg-slate-100 text-slate-500 border-slate-200' : 'text-slate-600 bg-slate-50 border-slate-200'}`}
-                          >
+                        <TableCell className="pr-3">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.08em] border shadow-[0_4px_12px_rgba(15,23,42,0.04)] ${
+                            record.docTypeLabel?.toLowerCase().includes('service')
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : record.docTypeLabel === 'Unknown'
+                              ? 'bg-slate-100 text-slate-400 border-slate-200'
+                              : 'bg-violet-50 text-violet-700 border-violet-200'
+                          }`}>
                             {record.docTypeLabel}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium text-slate-800 text-[13px]">{record.supplier}</TableCell>
-                        <TableCell className="text-right">
-                          <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
-                            {record.items} items
                           </span>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col gap-0">
-                            <div className="font-bold text-slate-900 text-[14px]">{formatCurrency(record.amount)}</div>
-                            <div className="text-[10px] text-slate-500 font-medium flex flex-col items-end gap-1 mt-0.5">
-                              <div className="flex items-center gap-1 opacity-75">
-                                <span>
-                                  {(() => {
-                                    const { igst, cgst, sgst, igstRate, cgstRate, sgstRate } = record.taxBreakdown || {};
-                                    if (igst && Number(igst) > 0 && (!cgst || Number(cgst) === 0)) {
-                                      return `IGST ${igstRate || ''} · ${formatCurrency(Number(igst))}`;
-                                    } else if (cgst && Number(cgst) > 0 && sgst && Number(sgst) > 0) {
-                                      const jointRate = (cgstRate && sgstRate) ? `${cgstRate}+${sgstRate}` : '';
-                                      return `CGST+SGST ${jointRate} · ${formatCurrency(Number(cgst) + Number(sgst))}`;
-                                    }
-                                    return `Tax · ${formatCurrency(record.taxAmount)}`;
-                                  })()}
-                                </span>
-                              </div>
-                            </div>
+                        <TableCell className="pr-3">
+                          <span className="text-[13px] font-semibold text-slate-700 leading-tight">{record.supplier}</span>
+                        </TableCell>
+                        <TableCell className="text-center pr-3">
+                          <span className="text-[11px] font-bold text-slate-600 bg-slate-100 rounded-full px-3 py-0.5 whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">{record.items}</span>
+                        </TableCell>
+                        <TableCell className={valueCellClass}>
+                          <div className="flex flex-col items-end">
+                            <span className="text-[15px] font-extrabold text-[#0F172A] leading-snug tracking-[-0.01em]">{formatCurrency(record.amount)}</span>
+                            <span className="text-[10px] text-slate-400 mt-0.5">
+                              {(() => {
+                                const { igst, cgst, sgst, igstRate, cgstRate, sgstRate } = record.taxBreakdown || {};
+                                if (igst && Number(igst) > 0 && (!cgst || Number(cgst) === 0)) return `IGST ${igstRate || ''} · ${formatCurrency(Number(igst))}`;
+                                if (cgst && Number(cgst) > 0 && sgst && Number(sgst) > 0) return `CGST+SGST · ${formatCurrency(Number(cgst) + Number(sgst))}`;
+                                return `Tax · ${formatCurrency(record.taxAmount)}`;
+                              })()}
+                            </span>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={routingCellClass}>
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col items-end gap-1">
-                            <Badge
-                              variant="outline"
-                              className={`
-                                text-[10px] font-black uppercase tracking-wider py-0 shadow-none border whitespace-nowrap
-                                ${record.status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                  record.status === 'input' ? 'bg-[#FEF3C7] text-[#92400E] border-[#FCD34D]' :
-                                    record.status === 'handoff' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                                      record.status === 'posted' ? 'bg-slate-100 text-slate-600 border-slate-200' :
-                                        'bg-blue-50 text-blue-700 border-blue-200'}
-                              `}
-                            >
-                              {record.status === 'ready' ? 'FOR REVIEW' :
-                                record.status === 'input' ? 'AWAITING INPUT' :
-                                  record.status.charAt(0).toUpperCase() + record.status.slice(1)}
-                            </Badge>
-                            {(record.status === 'handoff' || record.status === 'input') && record.reason && (
-                              <div
-                                className="text-[10px] font-bold text-[#92400E] max-w-[140px] truncate leading-tight mt-0.5 opacity-80"
-                                title={record.reason}
+                        <TableCell className={statusCellClass}>
+                          <div className="flex flex-col items-start gap-1.5">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.08em] whitespace-nowrap shadow-[0_6px_14px_rgba(15,23,42,0.05)] ${
+                              record.status === 'ready'   ? 'bg-emerald-500 text-white' :
+                              record.status === 'input'   ? 'bg-amber-500 text-white' :
+                              record.status === 'handoff' ? 'bg-rose-500 text-white' :
+                              record.status === 'posted'  ? 'bg-slate-400 text-white' :
+                                                            'bg-blue-100 text-blue-700'
+                            }`}>
+                              {record.status === 'ready' ? 'For Review' : record.status === 'input' ? 'Input Needed' : record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className={`max-w-[170px] cursor-help truncate text-[10.5px] leading-none font-semibold ${
+                                  record.status === 'handoff' ? 'text-rose-600' :
+                                  record.status === 'input' ? 'text-amber-700' :
+                                  record.status === 'ready' ? 'text-emerald-600' :
+                                  record.status === 'posted' ? 'text-slate-500' :
+                                  'text-blue-600'
+                                }`}>
+                                  {getStatusSupportText(record)}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                align="start"
+                                sideOffset={8}
+                                className="max-w-[260px] rounded-2xl border border-white/70 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(30,41,59,0.96))] px-3 py-2 text-[11px] leading-[1.35] text-white shadow-[0_18px_40px_rgba(15,23,42,0.35)]"
                               >
-                                {record.reason}
-                              </div>
-                            )}
+                                {getStatusSupportText(record)}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
-                            onClick={(e) => handleDelete(e, record.id)}
-                            title="Delete Invoice"
-                          >
-                            <Trash2 className="w-4 h-4" />
+                        <TableCell className="pr-5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all" onClick={(e) => handleDelete(e, record.id)} title="Delete Invoice">
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -1992,87 +2227,47 @@ export default function APWorkspace() {
 
               {/* --- READY TO POST TAB --- */}
               <TabsContent value="ready" className="m-0 h-full border-none p-0 outline-none">
-                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-sm text-amber-800">
-                  <AlertCircle className="w-4 h-4" />
-                  <span className="font-medium">Auto-post disabled.</span> These documents require manual approval before posting to ERP.
+                <div className="bg-amber-50/80 border-b border-amber-100 px-5 py-2 flex items-center gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="text-[12px] font-semibold text-amber-800">Manual approval required</span>
+                  <span className="text-[12px] text-amber-700 opacity-80">— These documents need review before they are posted to ERP.</span>
                 </div>
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search ready invoices..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.ready}
-                      onChange={(e) => updateTabSearch('ready', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {selectedIds.size > 0 && (
-                      <div className="flex items-center gap-2 border-r border-slate-200 pr-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                          title="Approve Selected"
-                          onClick={handleApproveSelected}
-                        >
-                          <CheckCircle2 className="w-5 h-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                          title="Delete Selected"
-                          onClick={handleDeleteSelected}
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </Button>
-                      </div>
-                    )}
-                    {renderFilterTrigger('ready')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
+                {renderTabToolbar('ready', 'Search ready invoices…',
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Approve Selected" onClick={handleApproveSelected}>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-100 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </>
+                )}
                 {renderFilterChips('ready')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-0 z-20 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
                           checked={getVisibleTabRecords('ready').length > 0 && getVisibleTabRecords('ready').every(r => selectedIds.has(r.id))}
                           onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('ready'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Approval Snapshot</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[16%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[24%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%]">Supplier</TableHead>
+                      <TableHead className={`${valueHeadClass} w-[15%]`}>Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%] text-center">Approval Snapshot</TableHead>
+                      <TableHead className={`${routingHeadClass} w-[12%]`}>Routing</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[16%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('ready').length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents ready to post.</TableCell></TableRow>
-                    ) : getPaginatedData('ready').map(record => (
+                    ) : getPaginatedData('ready').map((record, idx) => (
                       <TableRow
                         key={record.id}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-emerald-400 hover:bg-emerald-50/30 ${idx % 2 === 1 ? 'bg-[#FBFFFC]' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`}
                         onClick={() => handleRowClick(record)}
                       >
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
@@ -2081,7 +2276,7 @@ export default function APWorkspace() {
                             onCheckedChange={(checked) => toggleSelect(record.id, !!checked)}
                           />
                         </TableCell>
-                        <TableCell className="py-3 px-6">
+                        <TableCell className="py-2.5 px-6">
                           <div className="flex flex-col gap-0.5">
                             <div className="font-bold text-slate-900 text-[15px] leading-tight">{record.invoiceNo}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-1">
@@ -2093,31 +2288,11 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
-                        <TableCell className="text-center">
-                          <div className="flex flex-wrap justify-center gap-1.5 max-w-[240px] mx-auto py-2">
-                            {[
-                              { label: 'Company', passed: record.validations.company, show: true },
-                              { label: 'GST', passed: record.validations.gst, show: true },
-                              { label: 'Particulars', passed: record.validations.particulars, show: true },
-                              { label: 'Supplier', passed: record.validations.supplier, show: true },
-                              { label: 'Duplication', passed: record.validations.duplication, show: true },
-                              { label: 'Ledger', passed: record.validations.ledger, show: record.docTypeLabel?.toLowerCase().includes('goods') },
-                            ].filter(v => v.show).map(v => (
-                              <div 
-                                key={v.label} 
-                                className="flex items-center gap-1.5 px-2 py-0.5 bg-white border border-slate-200/60 rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all hover:border-slate-300"
-                                title={`${v.label}: ${v.passed ? 'Passed' : 'Failed'}`}
-                              >
-                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-tight leading-none">{v.label}</span>
-                                {v.passed 
-                                  ? <Check className="w-3 h-3 text-emerald-500 stroke-[3]" /> 
-                                  : <X className="w-3 h-3 text-rose-500 stroke-[3]" />}
-                              </div>
-                            ))}
-                          </div>
+                        <TableCell className={`${valueCellClass} font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]`}>{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className="py-2.5 text-center">
+                          {renderApprovalSnapshot(record)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={routingCellClass}>
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
@@ -2125,7 +2300,7 @@ export default function APWorkspace() {
                             type="text"
                             placeholder="Add remarks..."
                             defaultValue={record.remarks || ''}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               const val = e.target.value.trim();
                               if (val !== (record.remarks || '')) {
@@ -2149,7 +2324,7 @@ export default function APWorkspace() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                              className="h-7 w-7 text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 opacity-0 group-hover:opacity-100 transition-all"
                               onClick={() => handleApproveRow(record.id)}
                               title="Approve & Post"
                             >
@@ -2175,72 +2350,37 @@ export default function APWorkspace() {
 
               {/* --- AWAITING INPUT TAB --- */}
               <TabsContent value="input" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search documents needing input..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.input}
-                      onChange={(e) => updateTabSearch('input', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('input')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('input', 'Search documents needing input…',
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
                 {renderFilterChips('input')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-0 z-20 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
                           checked={getVisibleTabRecords('input').length > 0 && getVisibleTabRecords('input').every(r => selectedIds.has(r.id))}
                           onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('input'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Required Input</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[16%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[24%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%]">Supplier</TableHead>
+                      <TableHead className={`${valueHeadClass} w-[15%]`}>Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%] text-center">Required Input</TableHead>
+                      <TableHead className={`${routingHeadClass} w-[12%]`}>Routing</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[16%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('input').length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents awaiting input.</TableCell></TableRow>
-                    ) : getPaginatedData('input').map(record => (
+                    ) : getPaginatedData('input').map((record, idx) => (
                       <TableRow
                         key={record.id}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-amber-400 hover:bg-amber-50/30 ${idx % 2 === 1 ? 'bg-[#FFFDF6]' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`}
                         onClick={() => handleRowClick(record)}
                       >
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
@@ -2249,7 +2389,7 @@ export default function APWorkspace() {
                             onCheckedChange={(checked) => toggleSelect(record.id, !!checked)}
                           />
                         </TableCell>
-                        <TableCell className="py-3 px-6">
+                        <TableCell className="py-2.5 px-6">
                           <div className="flex flex-col gap-0.5">
                             <div className="font-bold text-slate-900 text-[15px] leading-tight">{record.invoiceNo}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-1">
@@ -2261,13 +2401,13 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className={`${valueCellClass} font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]`}>{formatCurrency(record.amount)}</TableCell>
                         <TableCell className="text-center">
-                          <div className="text-[12px] font-bold text-rose-600 leading-tight">
+                          <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
                             {record.reason || 'Pending Input'}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={routingCellClass}>
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
@@ -2275,7 +2415,7 @@ export default function APWorkspace() {
                             type="text"
                             placeholder="Add remarks..."
                             defaultValue={record.remarks || ''}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               const val = e.target.value.trim();
                               if (val !== (record.remarks || '')) {
@@ -2298,7 +2438,7 @@ export default function APWorkspace() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
+                            className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
                             onClick={(e) => handleDelete(e, record.id)}
                             title="Delete Invoice"
                           >
@@ -2314,85 +2454,44 @@ export default function APWorkspace() {
 
               {/* --- HANDOFF TAB --- */}
               <TabsContent value="handoff" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search handoffs..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.handoff}
-                      onChange={(e) => updateTabSearch('handoff', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('handoff')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          title={`Revalidate Selected (${selectedIds.size})`}
-                          onClick={handleBulkRevalidate}
-                        >
-                          <RefreshCw className="w-5 h-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                          title={`Delete Selected (${selectedIds.size})`}
-                          onClick={handleDeleteSelected}
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('handoff', 'Search handoffs…',
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Revalidate Selected" onClick={handleBulkRevalidate}>
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-100 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </>
+                )}
                 {renderFilterChips('handoff')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-0 z-20 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
                           checked={getVisibleTabRecords('handoff').length > 0 && getVisibleTabRecords('handoff').every(r => selectedIds.has(r.id))}
                           onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('handoff'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[18%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[16%] text-center">Failure Reason</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[23%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[7%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[24%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[18%]">Supplier</TableHead>
+                      <TableHead className={`${valueHeadClass} w-[12%]`}>Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[16%] text-center">Failure Reason</TableHead>
+                      <TableHead className={`${routingHeadClass} w-[12%]`}>Routing</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[23%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[7%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('handoff').length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents requiring human handoff.</TableCell></TableRow>
-                    ) : getPaginatedData('handoff').map(record => (
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleRowClick(record)}>
+                    ) : getPaginatedData('handoff').map((record, idx) => (
+                      <TableRow key={record.id} className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-rose-400 hover:bg-rose-50/30 ${idx % 2 === 1 ? 'bg-[#FFF9FA]' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`} onClick={() => handleRowClick(record)}>
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
                           <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-3 px-6">
+                        <TableCell className="py-2.5 px-6">
                           <div className="flex flex-col gap-0.5">
                             <div className="font-bold text-slate-900 text-[15px] leading-tight">{record.invoiceNo}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-1">
@@ -2404,17 +2503,11 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
-                        <TableCell className="text-center">
-                          <div
-                            className="flex items-center justify-center gap-1.5 text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 w-fit mx-auto"
-                            title={record.reason || 'Failure'}
-                          >
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span className="text-[11px] font-medium leading-tight truncate max-w-[120px]">{record.reason || 'Failure'}</span>
-                          </div>
+                        <TableCell className={`${valueCellClass} font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]`}>{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className="py-2.5 text-center">
+                          {renderFailureReason(record.reason)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={routingCellClass}>
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
@@ -2422,7 +2515,7 @@ export default function APWorkspace() {
                             type="text"
                             placeholder="Add remarks..."
                             defaultValue={record.remarks}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               if (e.target.value !== record.remarks) {
                                 try {
@@ -2459,72 +2552,37 @@ export default function APWorkspace() {
 
               {/* --- POSTED TAB --- */}
               <TabsContent value="posted" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search history..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.posted}
-                      onChange={(e) => updateTabSearch('posted', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('posted')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('posted', 'Search history…',
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
                 {renderFilterChips('posted')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-0 z-20 shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
                           checked={getVisibleTabRecords('posted').length > 0 && getVisibleTabRecords('posted').every(r => selectedIds.has(r.id))}
                           onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('posted'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[45%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[40%]">ERP Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[10%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[45%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[40%]">ERP Reference</TableHead>
+                      <TableHead className={`${routingHeadClass} w-[12%]`}>Routing</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[10%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('posted').length === 0 ? (
                       <TableRow><TableCell colSpan={6} className="text-center py-12 text-slate-500">No documents posted yet.</TableCell></TableRow>
-                    ) : getPaginatedData('posted').map(record => (
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleRowClick(record)}>
+                    ) : getPaginatedData('posted').map((record, idx) => (
+                      <TableRow key={record.id} className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-slate-300 hover:bg-slate-50/60 ${idx % 2 === 1 ? 'bg-[#FCFCFD]' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`} onClick={() => handleRowClick(record)}>
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
                           <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-2.5">
+                        <TableCell className="py-2">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-slate-900">{record.invoiceNo}</span>
@@ -2533,7 +2591,7 @@ export default function APWorkspace() {
                             <div className="text-xs text-slate-600 flex items-center gap-2">
                               <span className="font-medium">{record.supplier}</span>
                               <span className="text-slate-300">|</span>
-                              <span className="font-bold text-slate-900">{formatCurrency(record.amount)}</span>
+                              <span className="font-extrabold text-slate-900 tracking-[-0.01em]">{formatCurrency(record.amount)}</span>
                             </div>
                           </div>
                         </TableCell>
@@ -2544,21 +2602,21 @@ export default function APWorkspace() {
                                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                 <span className="text-xs font-semibold">Ref: {record.erpRef || 'N/A'}</span>
                               </div>
-                              <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 uppercase px-1 py-0 shadow-none h-4">Synced</Badge>
+                              <Badge variant="outline" className="text-[8.5px] bg-emerald-50 text-emerald-700 border-emerald-200 uppercase px-1.5 py-0 shadow-[0_4px_10px_rgba(15,23,42,0.04)] h-4.5 rounded-full">Synced</Badge>
                             </div>
                             <div className="text-[11px] text-slate-500">
                               Posted: {formatDetailedDate(record.updatedAt)}
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className={routingCellClass}>
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="text"
                             defaultValue={record.remarks}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               if (e.target.value !== record.remarks) {
                                 try {
@@ -2580,7 +2638,7 @@ export default function APWorkspace() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
+                            className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
                             onClick={(e) => handleDelete(e, record.id)}
                             title="Delete Invoice"
                           >

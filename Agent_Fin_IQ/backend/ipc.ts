@@ -51,6 +51,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { finalizeFileStorage } from './utils/filesystem';
+import {
+    makeDeleteAudit,
+    makeErpPostOutcomeAudit,
+    makeStatusChangedAudit,
+    makeUploadCreatedAudit,
+    makeVendorMappedAudit,
+} from './audit/events';
 
 // ─── ESM Compatibility ────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -234,13 +241,9 @@ export function registerIpcHandlers() {
         const updated = await queries.updateInvoiceWithOCR(invoiceId, { vendor_id: vendorId, is_mapped: true });
 
         // Log audit event
-        await queries.createAuditLog({
-            invoice_id: invoiceId,
-            invoice_no: updated.invoice_number,
-            vendor_name: updated.vendor_name,
-            event_type: 'Edited',
-            description: `Invoice mapped to vendor ID: ${vendorId}`,
-        });
+        await queries.createAuditLog(
+            makeVendorMappedAudit(updated, updated?.vendor_name || null)
+        );
 
         return updated;
     });
@@ -323,12 +326,9 @@ export function registerIpcHandlers() {
 
 
         // Step 4: Log audit event
-        await queries.createAuditLog({
-            invoice_id: invoice.id,
-            invoice_no: invoice.invoice_number,
-            event_type: 'Created',
-            description: `Invoice "${fileName}" uploaded to batch "${currentBatch}"`,
-        });
+        await queries.createAuditLog(
+            makeUploadCreatedAudit(invoice, fileName, currentBatch, userName || 'System')
+        );
 
         await recordStageSafe(
             invoice.id,
@@ -497,16 +497,9 @@ export function registerIpcHandlers() {
         const updated = await queries.updateInvoiceStatus(id, status);
 
         // Log audit event
-        await queries.createAuditLog({
-            invoice_id: id,
-            invoice_no: before?.invoice_number,
-            vendor_name: before?.vendor_name,
-            event_type: status === 'Auto-Posted' ? 'Approved' : status === 'Failed' ? 'Rejected' : 'Edited',
-            user_name: userName || 'System',
-            description: `Status changed from "${before?.processing_status}" to "${status}"`,
-            before_data: { status: before?.processing_status },
-            after_data: { status },
-        });
+        await queries.createAuditLog(
+            makeStatusChangedAudit(before, status, userName || 'System')
+        );
 
         // If approved, send to Tally via the dedicated service
         if (status === 'Auto-Posted' || status === 'Approved') {
@@ -518,9 +511,25 @@ export function registerIpcHandlers() {
                 
                 // Update erp_sync_status based on webhook result
                 await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
+                await queries.createAuditLog(
+                    makeErpPostOutcomeAudit({
+                        invoice: updated,
+                        success: true,
+                        userName: userName || 'System',
+                        tallyId: tallyIdStr,
+                    })
+                );
             } catch (err: any) {
                 console.error('[IPC] Tally posting failed:', err.message);
                 await queries.updateInvoiceWithOCR(id, { erp_sync_status: 'failed' } as any);
+                await queries.createAuditLog(
+                    makeErpPostOutcomeAudit({
+                        invoice: updated,
+                        success: false,
+                        userName: userName || 'System',
+                        errorMessage: err?.message || 'Unknown ERP posting error',
+                    })
+                );
             }
         }
 
@@ -542,13 +551,9 @@ export function registerIpcHandlers() {
         await queries.deleteInvoice(id);
         
         // Log audit event
-        await queries.createAuditLog({
-            invoice_id: id,
-            invoice_no: invoice?.invoice_number,
-            vendor_name: invoice?.vendor_name,
-            event_type: 'Deleted',
-            description: `Invoice "${invoice?.invoice_number}" was deleted.`,
-        });
+        await queries.createAuditLog(
+            makeDeleteAudit(invoice, 'System')
+        );
 
         return { success: true };
     });
