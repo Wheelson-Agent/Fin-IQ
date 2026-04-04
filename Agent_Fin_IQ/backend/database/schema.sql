@@ -541,12 +541,31 @@ CREATE INDEX IF NOT EXISTS idx_tally_sync_logs_entity ON tally_sync_logs(entity_
 CREATE INDEX IF NOT EXISTS idx_audit_logs_invoice ON audit_logs(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_invoice_ts ON audit_logs(invoice_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_invoice ON processing_jobs(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_integration_queues_entity ON integration_queues(entity_id);
 CREATE INDEX IF NOT EXISTS idx_batches_company ON batches(company_id);
 
+-- Audit logs: event_type CHECK constraint (drop-and-recreate to stay in sync with new types)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_audit_logs_event_type'
+      AND conrelid = 'audit_logs'::regclass
+  ) THEN
+    ALTER TABLE audit_logs DROP CONSTRAINT chk_audit_logs_event_type;
+  END IF;
+  ALTER TABLE audit_logs ADD CONSTRAINT chk_audit_logs_event_type
+    CHECK (event_type IN (
+      'Created', 'Edited', 'Approved', 'Rejected',
+      'Auto-Posted', 'Deleted', 'Validated', 'Revalidated', 'Processed'
+    ));
+END $$;
+
 -- Update companies
-DO $$ 
+DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='companies' AND column_name='tally_port') THEN
     ALTER TABLE companies ADD COLUMN tally_port INT DEFAULT 9000;

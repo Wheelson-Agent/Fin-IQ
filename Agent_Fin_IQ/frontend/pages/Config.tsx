@@ -679,6 +679,13 @@ export default function Config() {
                     try {
                         const suppliers = await window.api.invoke('vendors:get-all', { companyId: activeCompanyId });
                         setAllSuppliers(suppliers || []);
+                        // Strip any orphaned vendor IDs (deleted vendors) from the supplier filter
+                        const validSupplierIds = new Set((suppliers || []).map((v: any) => String(v.id)));
+                        setCriteria((prev: any) => {
+                            const cleanIds = (prev.filter_supplier_ids || []).filter((id: string) => validSupplierIds.has(id));
+                            if (cleanIds.length === (prev.filter_supplier_ids || []).length) return prev;
+                            return { ...prev, filter_supplier_ids: cleanIds };
+                        });
                     } catch (e) { console.error('[Config] Failed to load suppliers:', e); }
 
                     try {
