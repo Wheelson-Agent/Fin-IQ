@@ -72,7 +72,7 @@ function smartUpdatePayload(payload: any, targetKey: string, value: any) {
     if (!payload) return;
     const normalizedTarget = getCanonicalKey(targetKey);
     const existingKeys = Object.keys(payload);
-    
+
     // Find the first key that normalizes to our target canonical key
     const foundKey = existingKeys.find(k => getCanonicalKey(k) === normalizedTarget);
 
@@ -363,8 +363,8 @@ function dedupeRawPayloadAliases(payload: any, sourceKeys: string[] = []) {
  * This encapsulates the business logic for tab movement.
  */
 export async function evaluateInvoiceStatus(
-    validationData: any, 
-    vendorId: string | null, 
+    validationData: any,
+    vendorId: string | null,
     invoiceNumber: string | null,
     lineItems: any[] = [],
     n8nStatus?: string,
@@ -386,20 +386,21 @@ export async function evaluateInvoiceStatus(
     const dataPassed = getVal('invoice_ocr_data_validation') || getVal('invoice_ocr_data_valdiation');
     const duplicatePassed = getVal('duplicate_check');
     const stockItemsMatch = getVal('line_item_match_status');
+    const datePassed = validationData['invoice_date_validation'] !== false; // False means explicitly failed date check
 
     // 2. Master Data / Input Validations
     const vendorPassed = getVal('vendor_verification') && !!vendorId;
-    
+
     // Ledger validation: every line must have a ledger_id
     const ledgerPassed = lineItems.length > 0 && lineItems.every(li => li.ledger_id || li.gl_account_id);
 
     // 3. Status Decision
-    // We treat buyer, gst, duplicate, and basic extraction as 'Major' technical checks.
+    // We treat buyer, gst, duplicate, basic extraction, and date as 'Major' technical checks.
     // Master data issues (Vendor, Ledger/Stock Items, Invoice No) route to 'Awaiting Input'.
-    const majorChecksPassed = buyerPassed && gstPassed && dataPassed && duplicatePassed;
+    const majorChecksPassed = buyerPassed && gstPassed && dataPassed && duplicatePassed && datePassed;
     const hasInvoiceNo = !!(invoiceNumber && invoiceNumber !== 'Unknown' && invoiceNumber !== 'N/A');
 
-    if (n8nStatus === 'Failed') return 'Handoff';
+    if (n8nStatus === 'Failed' || n8nStatus === 'Invalid Date') return 'Handoff';
 
     if (majorChecksPassed) {
         if (vendorPassed && ledgerPassed && hasInvoiceNo && stockItemsMatch) {
@@ -558,8 +559,8 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
             if (!updateValues[dbKey] || key === dbKey) {
                 updateValues[dbKey] = ocrData[key];
             }
-        } 
-        
+        }
+
         // Use smart update to prevent key duplication in the JSON payload during OCR sync
         smartUpdatePayload(rawPayload, key, ocrData[key]);
     });
@@ -586,7 +587,7 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
 
     // Special handling for date strings to ensure PostgreSQL compatibility
     const dateFields = ["invoice_date", "due_date", "ack_date"];
-    
+
     const setClauses = Object.keys(updateValues).map((k, i) => {
         if (dateFields.includes(k)) {
             const val = updateValues[k];
@@ -837,7 +838,7 @@ export async function getLedgerMasters(companyId?: string) {
         sql += ` AND (company_id = $1 OR company_id IS NULL)`;
         params.push(companyId);
     }
-    
+
     // DISTINCT ON requires the first ORDER BY column to match the DISTINCT ON column
     sql += ` ORDER BY name, (company_id IS NOT NULL) DESC`;
 
@@ -913,7 +914,7 @@ export async function getSyncedCompanies() {
             FROM companies 
             ORDER BY created_at DESC
         `);
-        
+
         // Find the latest created_at from the returned rows (since they are ordered DESC, it's the first row)
         let lastSyncedAt = null;
         if (rows.length > 0 && rows[0].created_at) {
@@ -1182,7 +1183,7 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                     updated_at = NOW() 
                 WHERE id = $1 
                 RETURNING *`;
-            
+
             const updateParams = [id, JSON.stringify(mergedPayload), nextDocType, ...Object.values(updateValues)];
             const invoiceRes = await client.query(updateSql, updateParams);
             const updatedInvoice = invoiceRes.rows[0];
@@ -1224,7 +1225,7 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             if (allowedCols.includes(dbKey) && !['file_path', 'file_location'].includes(dbKey)) {
                 updateValues[dbKey] = ocrData[key];
             }
-            
+
             // Use smart update to prevent key duplication in the JSON payload
             smartUpdatePayload(rawPayload, key, ocrData[key]);
         });
@@ -1473,14 +1474,14 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         // Determine Final Status based on validation checks
         // Robustly extract validation flags from either a JSON string or top-level fields
         let n8nVal = (typeof invData.n8n_val_json_data === 'string' ? JSON.parse(invData.n8n_val_json_data) : invData.n8n_val_json_data) || {};
-        
+
         // If n8nVal is empty but top-level fields exist, collect them
         const valKeys = [
-            'buyer_verification', 'gst_validation_status', 'invoice_ocr_data_validation', 
+            'buyer_verification', 'gst_validation_status', 'invoice_ocr_data_validation',
             'vendor_verification', 'duplicate_check', 'line_item_match_status',
             'Company Verified', 'GST Validated', 'Data Validated', 'Vendor Verified', 'Document Duplicate Check', 'Stock Items Matched'
         ];
-        
+
         valKeys.forEach(k => {
             if (invData[k] !== undefined && n8nVal[k] === undefined) {
                 n8nVal[k] = invData[k];
@@ -1525,7 +1526,7 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             getVal('vendor_verification'),
             getVal('line_item_match_status')
         ];
-        
+
         console.log(`[DB] ingestN8nData Final Payload Source:`, invData.file_name);
 
         // Pre-scan line items from payload for status evaluation
@@ -1535,9 +1536,49 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             return { ledger_id: candidates.length > 0 ? 'exists' : null };
         });
 
+        // --- FUTURE DATE CHECK ---
+        let isFutureDate = false;
+        if (invData.invoice_date) {
+            const invDateStr = String(invData.invoice_date).trim();
+            let parsedDate: Date | null = null;
+            if (/^\d{8}$/.test(invDateStr)) {
+                const d = parseInt(invDateStr.substring(0, 2), 10);
+                const m = parseInt(invDateStr.substring(2, 4), 10) - 1;
+                const y = parseInt(invDateStr.substring(4, 8), 10);
+                parsedDate = new Date(y, m, d);
+            } else if (/^\d{4}-\d{2}-\d{2}/.test(invDateStr)) {
+                parsedDate = new Date(invDateStr);
+            } else if (/^\d{2}-\d{2}-\d{4}/.test(invDateStr)) {
+                const parts = invDateStr.split('-');
+                parsedDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+            } else if (/^\d{2}\/\d{2}\/\d{4}/.test(invDateStr)) {
+                const parts = invDateStr.split('/');
+                parsedDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+            } else {
+                parsedDate = new Date(invDateStr);
+            }
+
+            if (parsedDate && !isNaN(parsedDate.getTime())) {
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                parsedDate.setHours(0, 0, 0, 0);
+                if (parsedDate > now) {
+                    isFutureDate = true;
+                }
+            }
+        }
+
+        if (isFutureDate) {
+            console.warn(`[DB] ingestN8nData: Future invoice date detected (${invData.invoice_date}). Flagging as Handoff.`);
+            n8nVal['invoice_date_validation'] = false;
+            invData.n8n_validation_status = 'Invalid Date';
+            invData.n8n_val_json_data = JSON.stringify(n8nVal);
+        }
+        // --- END FUTURE DATE CHECK ---
+
         const finalStatus = await evaluateInvoiceStatus(
-            n8nVal, 
-            vendorId, 
+            n8nVal,
+            vendorId,
             invData.invoice_number || invData.invoice_no || invData.invoiceNo,
             tempLineItems,
             invData.n8n_validation_status,
@@ -1595,11 +1636,11 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             if (invData.invoice_no !== undefined && invData.invoice_number === undefined) invData.invoice_number = invData.invoice_no;
             if (invData.invoiceNo !== undefined && invData.invoice_number === undefined) invData.invoice_number = invData.invoiceNo;
 
-            const invKeys = Object.keys(invData).filter(k => 
-                allowedApInvoicesCols.includes(k) && 
+            const invKeys = Object.keys(invData).filter(k =>
+                allowedApInvoicesCols.includes(k) &&
                 !['file_path', 'file_location'].includes(k) &&
-                invData[k] !== undefined && 
-                invData[k] !== null && 
+                invData[k] !== undefined &&
+                invData[k] !== null &&
                 invData[k] !== ""
             );
             if (invKeys.length > 0) {
@@ -1623,7 +1664,7 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                             console.log(`[DB] Executing Auto-Post for ${invoiceId}`);
                             const postResult = await sendInvoiceToTally(invoiceId, invData.ocr_raw_payload);
                             const tallyIdStr = postResult.response?.tally_id || postResult.response?.masterid || postResult.response?.master_id || null;
-                            
+
                             // Use the exported markPostedToTally to finalise
                             await markPostedToTally(invoiceId, postResult.response, tallyIdStr, postResult.status);
                         } catch (postErr) {
@@ -2314,7 +2355,7 @@ export async function getTallySyncStats(companyId?: string) {
     // handoff: failed validation — matches AP tab Handoff tab logic
     // recent 5 Tally sync events joined with invoice for vendor + amount
     const recentParams = hasCompany ? [companyId] : [];
-    const recentWhere  = hasCompany ? 'AND tsl.company_id = $1' : '';
+    const recentWhere = hasCompany ? 'AND tsl.company_id = $1' : '';
     const recentRes = await query(
         `SELECT tsl.status, tsl.created_at, ai.vendor_name, ai.grand_total
          FROM tally_sync_logs tsl
@@ -2332,19 +2373,19 @@ export async function getTallySyncStats(companyId?: string) {
         posted,
         pending,
         handoff,
-        recent:  recentRes.rows.map((r: any) => ({
+        recent: recentRes.rows.map((r: any) => ({
             vendor: r.vendor_name || 'Unknown',
             status: r.status === 'Success' ? 'posted' : 'handoff',
             amount: Number(r.grand_total || 0),
-            ts:     r.created_at,
+            ts: r.created_at,
         })),
         handoff_reasons: {
-            duplicate:             handoffReasonCounts.duplicate,
-            gst_validation:        handoffReasonCounts.gst_validation,
-            buyer_validation:      handoffReasonCounts.buyer_validation,
-            data_validation:       handoffReasonCounts.data_validation,
-            vendor_mapping:        handoffReasonCounts.vendor_mapping,
-            line_item_match:       handoffReasonCounts.line_item_match,
+            duplicate: handoffReasonCounts.duplicate,
+            gst_validation: handoffReasonCounts.gst_validation,
+            buyer_validation: handoffReasonCounts.buyer_validation,
+            data_validation: handoffReasonCounts.data_validation,
+            vendor_mapping: handoffReasonCounts.vendor_mapping,
+            line_item_match: handoffReasonCounts.line_item_match,
             missing_invoice_field: handoffReasonCounts.missing_invoice_field,
         },
         duplicate_rate_pct,
@@ -2380,7 +2421,7 @@ export async function getAppConfig(key: string, companyId?: string) {
  */
 export async function setAppConfig(key: string, value: any, companyId?: string) {
     const valueJson = JSON.stringify(value);
-    
+
     // UPSERT pattern
     const existing = await query(
         `SELECT id FROM app_config WHERE config_key = $1 AND (company_id = $2 OR (company_id IS NULL AND $2 IS NULL))`,
