@@ -201,7 +201,7 @@ export function registerIpcHandlers() {
                 if (latestJobId) {
                     const outputDir = path.join(jobsDir, latestJobId, 'output');
                     const pagesDir = path.join(jobsDir, latestJobId, 'pages');
-                    
+
                     // Count pages if the pages directory exists
                     if (fs.existsSync(pagesDir)) {
                         const pageFiles = fs.readdirSync(pagesDir).filter(f => /^page_\d+\.png$/i.test(f));
@@ -216,10 +216,10 @@ export function registerIpcHandlers() {
                 }
             }
 
-            return { 
-                path: invoice.file_path || invoice.file_location || null, 
-                totalPages: 1, 
-                source: invoice.file_path ? 'original' : 'missing' 
+            return {
+                path: invoice.file_path || invoice.file_location || null,
+                totalPages: 1,
+                source: invoice.file_path ? 'original' : 'missing'
             };
         } catch (err) {
             console.error('[IPC] invoices:get-document-view error:', err);
@@ -372,7 +372,7 @@ export function registerIpcHandlers() {
         // RACECONDITION FIX: Do not reset status to 'Processing' if n8n already moved it to a terminal state
         const current = await queries.getInvoiceById(id);
         const currentStatus = current?.status || 'Processing';
-        
+
         const terminalStatuses = ['Ready to Post', 'Awaiting Input', 'Handoff', 'Manual Review', 'Posted', 'Auto-Posted'];
         const nextStatus = (isSuccess && !terminalStatuses.includes(currentStatus)) ? 'Processing' : (isSuccess ? currentStatus : 'Failed');
 
@@ -403,7 +403,7 @@ export function registerIpcHandlers() {
             const payload = {
                 ...n8nPayloadBase,
                 revalidation: true,
-                invoice_id: id 
+                invoice_id: id
             };
 
             const result = await n8n.sendToValidation(payload);
@@ -515,7 +515,7 @@ export function registerIpcHandlers() {
 
                 // Extract tally_id from response (n8n usually returns it in response.response.masterid or tally_id)
                 const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
-                
+
                 // Update erp_sync_status based on webhook result
                 await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
             } catch (err: any) {
@@ -540,7 +540,7 @@ export function registerIpcHandlers() {
     ipcMain.handle('invoices:delete', async (_event, { id }) => {
         const invoice = await queries.getInvoiceById(id);
         await queries.deleteInvoice(id);
-        
+
         // Log audit event
         await queries.createAuditLog({
             invoice_id: id,
@@ -953,7 +953,7 @@ export function registerIpcHandlers() {
     ipcMain.handle('processing:get-all-logs-debug', async () => {
         return batchLogger.getAllLogsDebug();
     });
-    
+
     ipcMain.handle('processing:clear-batch-logs', async (_event, { batchName }) => {
         batchLogger.clearBatch(batchName);
         return { success: true };
@@ -977,7 +977,7 @@ export function registerIpcHandlers() {
     ipcMain.handle('ses:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllServiceEntrySheets(companyId);
     });
-    
+
     // ─── MASTERS ────────────────────────────────────────────────
     ipcMain.handle('masters:get-ledgers', async (_event, { companyId } = {}) => {
         return await queries.getLedgerMasters(companyId);
@@ -987,7 +987,7 @@ export function registerIpcHandlers() {
         try {
             console.log('[IPC] masters:create-ledger: Received:', { name, parent_group, company_id, meta });
             console.log('[IPC] Routing via n8n first');
-            
+
             // 1. Send to n8n Webhook (raw body for FC_tally_module wrapper)
             const n8nResult = await n8n.sendMasterCreationToN8n({
                 process: { ledger_creation: true },
@@ -1006,10 +1006,10 @@ export function registerIpcHandlers() {
 
             if (!n8nResult.success) {
                 console.error('[IPC] n8n ledger creation failed:', n8nResult.message);
-                return { 
-                    success: false, 
-                    ledger: null, 
-                    message: n8nResult.message || 'Failed to create ledger in Tally' 
+                return {
+                    success: false,
+                    ledger: null,
+                    message: n8nResult.message || 'Failed to create ledger in Tally'
                 };
             }
 
@@ -1021,10 +1021,10 @@ export function registerIpcHandlers() {
                 company_id: company_id ?? null,
             });
 
-            return { 
-                success: true, 
-                ledger, 
-                message: n8nResult.message || 'Ledger created successfully in Tally' 
+            return {
+                success: true,
+                ledger,
+                message: n8nResult.message || 'Ledger created successfully in Tally'
             };
         } catch (err: any) {
             console.error('[IPC] masters:create-ledger error:', err.message);
@@ -1036,7 +1036,7 @@ export function registerIpcHandlers() {
         try {
             console.log('[IPC] masters:create-item: Received:', { name, uom, hsn, tax_rate, company_id, meta });
             console.log('[IPC] Routing via n8n first');
-            
+
             // 1. Send to n8n Webhook (raw body for FC_tally_module wrapper)
             const n8nResult = await n8n.sendMasterCreationToN8n({
                 process: {
@@ -1060,10 +1060,10 @@ export function registerIpcHandlers() {
 
             if (!n8nResult.success) {
                 console.error('[IPC] n8n item creation failed:', n8nResult.message);
-                return { 
-                    success: false, 
-                    item: null, 
-                    message: n8nResult.message || 'Failed to create stock item in Tally' 
+                return {
+                    success: false,
+                    item: null,
+                    message: n8nResult.message || 'Failed to create stock item in Tally'
                 };
             }
 
@@ -1078,10 +1078,10 @@ export function registerIpcHandlers() {
                 is_active: true
             });
 
-            return { 
-                success: true, 
-                item, 
-                message: n8nResult.message || 'Stock item created successfully in Tally' 
+            return {
+                success: true,
+                item,
+                message: n8nResult.message || 'Stock item created successfully in Tally'
             };
         } catch (err: any) {
             console.error('[IPC] masters:create-item error:', err.message);
@@ -1109,7 +1109,7 @@ export function registerIpcHandlers() {
     // ─── DASHBOARD ──────────────────────────────────────────────
 
     // ─── CONFIGURATION ──────────────────────────────────────────
-    
+
     ipcMain.handle('config:get-rules', async (_event, { companyId } = {}) => {
         const rules = await queries.getAppConfig('posting_rules', companyId);
         const legacyDateRange = await queries.getAppConfig('global_invoice_date_range');
@@ -1158,32 +1158,52 @@ export function registerIpcHandlers() {
         return { success: true };
     });
 
-    // ─── ERP SYNC ──────────────────────────────────────────────
-    ipcMain.handle('erp:sync', async () => {
-        const syncUrl = process.env.N8N_ERP_sync_URL;
-        console.log(`[IPC] ERP Sync requested. Target: ${syncUrl}`);
+    let lastSyncTime = 0; // Timestamp for rate-limiting
 
-        if (!syncUrl) {
-            console.error('[IPC] ERP Sync failed: N8N_ERP_sync_URL not defined in .env');
-            return { success: false, error: 'Sync URL not configured' };
+    ipcMain.handle('erp:sync', async () => {
+        const now = Date.now();
+        if (now - lastSyncTime < 2000) {
+            console.warn('[IPC] ERP Sync requested too soon. Rate-limiting to prevent double-execution.');
+            return { success: false, error: 'Sync requested too soon. Please wait 2 seconds.' };
         }
 
+        lastSyncTime = now;
         try {
-            const requestPayload = {
+            const syncUrl = process.env.N8N_ERP_sync_URL;
+            console.log(`[IPC] ERP Sync requested. Target: ${syncUrl}`);
+
+            if (!syncUrl) {
+                console.error('[IPC] ERP Sync failed: N8N_ERP_sync_URL not defined in .env');
+                return { success: false, error: 'Sync URL not configured' };
+            }
+
+            const innerPayloadPayload = {
                 timestamp: new Date().toISOString(),
                 action: 'manual_sync',
-                source: 'Agent_Fin_IQ_Desktop'
+                source: 'Agent_Fin_IQ_Desktop',
+                bridge_base_url: process.env.TALLY_SERVER_URL || '', 
+                bridge_api_key: process.env.BRIDGE_API_KEY || ''
             };
 
             const executeSyncRequest = async (method: 'POST' | 'GET') => {
-                const response = await fetch(syncUrl, method === 'POST'
+                let finalUrl = syncUrl;
+                if (method === 'GET') {
+                    const params = new URLSearchParams();
+                    // Groups everything under sync_data natively for n8n
+                    for (const [key, value] of Object.entries(innerPayloadPayload)) {
+                        params.append(`sync_data[${key}]`, value as string);
+                    }
+                    finalUrl = `${syncUrl}${syncUrl.includes('?') ? '&' : '?'}${params.toString()}`;
+                }
+
+                const response = await fetch(finalUrl, method === 'POST'
                     ? {
                         method,
                         headers: {
                             'Content-Type': 'application/json',
                             'Cache-Control': 'no-cache',
                         },
-                        body: JSON.stringify(requestPayload),
+                        body: JSON.stringify({ sync_data: innerPayloadPayload }),
                     }
                     : {
                         method,
@@ -1196,16 +1216,8 @@ export function registerIpcHandlers() {
                 return { method, response, rawBody };
             };
 
-            let requestResult = await executeSyncRequest('POST');
-
-            if (
-                !requestResult.response.ok &&
-                requestResult.response.status === 404 &&
-                /GET requests?/i.test(requestResult.rawBody)
-            ) {
-                console.warn('[IPC] ERP Sync POST rejected because webhook expects GET. Retrying with GET.');
-                requestResult = await executeSyncRequest('GET');
-            }
+            // Force GET only, preventing the double trigger
+            let requestResult = await executeSyncRequest('GET');
 
             if (!requestResult.response.ok) {
                 throw new Error(`ERP sync request failed (${requestResult.response.status}): ${requestResult.rawBody || requestResult.response.statusText}`);
