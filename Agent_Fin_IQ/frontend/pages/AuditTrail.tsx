@@ -89,10 +89,11 @@ export default function AuditTrail() {
   const [deleteError, setDeleteError]         = useState<string | null>(null);
 
   // Bulk selection
-  const [selectedIds, setSelectedIds]   = useState<Set<number>>(new Set());
+  const [selectedIds, setSelectedIds]       = useState<Set<number>>(new Set());
   const [bulkConfirming, setBulkConfirming] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [bulkError, setBulkError]       = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting]     = useState(false);
+  const [bulkError, setBulkError]           = useState<string | null>(null);
+  const [bulkSuccess, setBulkSuccess]       = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -160,10 +161,17 @@ export default function AuditTrail() {
     setBulkDeleting(true);
     setBulkError(null);
     try {
-      await deleteAuditLogsBulk(Array.from(selectedIds));
+      const { deleted } = await deleteAuditLogsBulk(Array.from(selectedIds));
+      // Navigate to the last valid page in case this page is now empty
+      const newTotal      = Math.max(0, total - deleted);
+      const newTotalPages = Math.max(1, Math.ceil(newTotal / pageSize));
+      const targetPage    = Math.min(page, newTotalPages);
       setSelectedIds(new Set());
       setBulkConfirming(false);
-      await fetchLogs(page, pageSize, selectedType, selectedRange);
+      setBulkSuccess(`${deleted} ${deleted === 1 ? 'entry' : 'entries'} deleted`);
+      setTimeout(() => setBulkSuccess(null), 3000);
+      if (targetPage !== page) setPage(targetPage);
+      else await fetchLogs(page, pageSize, selectedType, selectedRange);
     } catch (err: any) {
       setBulkError(err?.message || 'Bulk delete failed');
     } finally {
@@ -512,56 +520,64 @@ export default function AuditTrail() {
 
       {/* Bulk delete floating action bar */}
       <AnimatePresence>
-        {selectedIds.size > 0 && (
+        {(selectedIds.size > 0 || bulkSuccess) && (
           <motion.div
             initial={{ y: 80, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 80, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed bottom-[28px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#1A2640] text-white rounded-[14px] shadow-[0_8px_32px_rgba(13,27,42,0.35)] px-5 py-3"
+            className={`fixed bottom-[28px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 text-white rounded-[14px] shadow-[0_8px_32px_rgba(13,27,42,0.35)] px-5 py-3 ${
+              bulkSuccess ? 'bg-[#059669]' : 'bg-[#1A2640]'
+            }`}
           >
-            <span className="text-[13px] font-semibold text-white/80">
-              <span className="font-black text-white">{selectedIds.size}</span> {selectedIds.size === 1 ? 'entry' : 'entries'} selected
-            </span>
-            <div className="w-[1px] h-[18px] bg-white/20" />
-            {bulkError && (
-              <span className="text-[11px] text-red-400 font-semibold max-w-[200px] truncate">{bulkError}</span>
-            )}
-            {bulkConfirming ? (
-              <>
-                <span className="text-[12px] text-amber-300 font-semibold">Delete {selectedIds.size} {selectedIds.size === 1 ? 'entry' : 'entries'}?</span>
-                <button
-                  onClick={() => { setBulkConfirming(false); setBulkError(null); }}
-                  className="text-[12px] font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-[8px] transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  disabled={bulkDeleting}
-                  onClick={handleBulkDelete}
-                  className="flex items-center gap-1.5 text-[12px] font-bold bg-red-500 hover:bg-red-600 disabled:opacity-60 px-4 py-1.5 rounded-[8px] transition-colors shadow-sm"
-                >
-                  {bulkDeleting
-                    ? <RefreshCw size={12} className="animate-spin" />
-                    : <Trash2 size={12} />}
-                  Confirm Delete
-                </button>
-              </>
+            {bulkSuccess ? (
+              /* ── Success toast ── */
+              <><CheckCircle size={15} /><span className="text-[13px] font-semibold">{bulkSuccess}</span></>
             ) : (
+              /* ── Selection controls ── */
               <>
-                <button
-                  onClick={() => { setSelectedIds(new Set()); setBulkError(null); }}
-                  className="text-[12px] font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-[8px] transition-colors"
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={() => { setBulkConfirming(true); setBulkError(null); }}
-                  className="flex items-center gap-1.5 text-[12px] font-bold bg-red-500 hover:bg-red-600 px-4 py-1.5 rounded-[8px] transition-colors shadow-sm"
-                >
-                  <Trash2 size={12} />
-                  Delete Selected
-                </button>
+                <span className="text-[13px] font-semibold text-white/80">
+                  <span className="font-black text-white">{selectedIds.size}</span> {selectedIds.size === 1 ? 'entry' : 'entries'} selected
+                </span>
+                <div className="w-[1px] h-[18px] bg-white/20" />
+                {bulkError && (
+                  <span className="text-[11px] text-red-400 font-semibold max-w-[200px] truncate">{bulkError}</span>
+                )}
+                {bulkConfirming ? (
+                  <>
+                    <span className="text-[12px] text-amber-300 font-semibold">Delete {selectedIds.size} {selectedIds.size === 1 ? 'entry' : 'entries'}?</span>
+                    <button
+                      onClick={() => { setBulkConfirming(false); setBulkError(null); }}
+                      className="text-[12px] font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-[8px] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={bulkDeleting}
+                      onClick={handleBulkDelete}
+                      className="flex items-center gap-1.5 text-[12px] font-bold bg-red-500 hover:bg-red-600 disabled:opacity-60 px-4 py-1.5 rounded-[8px] transition-colors shadow-sm"
+                    >
+                      {bulkDeleting ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      Confirm Delete
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => { setSelectedIds(new Set()); setBulkError(null); }}
+                      className="text-[12px] font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-[8px] transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => { setBulkConfirming(true); setBulkError(null); }}
+                      className="flex items-center gap-1.5 text-[12px] font-bold bg-red-500 hover:bg-red-600 px-4 py-1.5 rounded-[8px] transition-colors shadow-sm"
+                    >
+                      <Trash2 size={12} />
+                      Delete Selected
+                    </button>
+                  </>
+                )}
               </>
             )}
           </motion.div>

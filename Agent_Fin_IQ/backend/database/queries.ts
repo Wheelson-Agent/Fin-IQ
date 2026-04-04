@@ -1208,15 +1208,19 @@ export async function deleteInvoice(id: string, actor?: { userId?: string; userN
         await client.query('DELETE FROM ap_invoice_taxes WHERE ap_invoice_id = $1', [id]);
         await client.query('DELETE FROM ap_invoices WHERE id = $1', [id]);
         // Audit is inside the transaction — if it fails the delete rolls back too
-        await client.query(
-            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, changed_by_user_id, description)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [
-                id, inv?.invoice_number || null, inv?.vendor_name || null,
-                'Deleted', actor?.userName || 'System', actor?.userId || null,
-                `Invoice "${inv?.invoice_number || id}" was deleted.`,
-            ]
-        );
+        await insertAuditLog(client.query.bind(client), {
+            invoice_id: id,
+            invoice_no: inv?.invoice_number || null,
+            vendor_name: inv?.vendor_name || null,
+            event_type: 'Deleted',
+            event_code: 'DELETED',
+            user_name: actor?.userName || 'System',
+            changed_by_user_id: actor?.userId || null,
+            description: `Invoice "${inv?.invoice_number || id}" was deleted.`,
+            summary: `Invoice "${inv?.invoice_number || id}" deleted.`,
+            old_values: inv ? { invoice_number: inv.invoice_number, vendor_name: inv.vendor_name } : undefined,
+            before_data: inv ? { invoice_number: inv.invoice_number, vendor_name: inv.vendor_name } : undefined,
+        });
         await client.query('COMMIT');
         return true;
     } catch (err) {
@@ -1634,27 +1638,20 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                         ? `Updated ${workspaceAuditDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${workspaceAuditDiff.changedFieldLabels.length - 3} more.`
                         : `Updated ${workspaceAuditDiff.changedFieldLabels.join(', ')}.`;
 
-                await client.query(
-                    `INSERT INTO audit_logs (
-                        invoice_id, invoice_no, vendor_name, event_type, event_code, user_name, description, summary,
-                        before_data, after_data, old_values, new_values
-                    )
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)`,
-                    [
-                        id,
-                        updatedInvoice?.invoice_number,
-                        updatedInvoice?.vendor_name,
-                        'Edited',
-                        'FIELD_EDITED',
-                        userName,
-                        summary,
-                        summary,
-                        JSON.stringify(workspaceAuditDiff.beforeData),
-                        JSON.stringify(workspaceAuditDiff.afterData),
-                        JSON.stringify(workspaceAuditDiff.beforeData),
-                        JSON.stringify(workspaceAuditDiff.afterData),
-                    ]
-                );
+                await insertAuditLog(client.query.bind(client), {
+                    invoice_id: id,
+                    invoice_no: updatedInvoice?.invoice_number,
+                    vendor_name: updatedInvoice?.vendor_name,
+                    event_type: 'Edited',
+                    event_code: 'FIELD_EDITED',
+                    user_name: userName,
+                    description: summary,
+                    summary,
+                    before_data: workspaceAuditDiff.beforeData,
+                    after_data: workspaceAuditDiff.afterData,
+                    old_values: workspaceAuditDiff.beforeData,
+                    new_values: workspaceAuditDiff.afterData,
+                });
             }
 
             await client.query('COMMIT');
@@ -1729,17 +1726,22 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
         }
 
         // 3. Log Audit Entry
-        await client.query(
-            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-            [
-                id, updatedInvoice.invoice_number, updatedInvoice.vendor_name,
-                'Edited', userName,
-                `Manual edit: updated header and ${items.length} line items`,
-                JSON.stringify({ status: current.processing_status }),
-                JSON.stringify({ status: updatedInvoice.processing_status })
-            ]
-        );
+        await insertAuditLog(client.query.bind(client), {
+            invoice_id: id,
+            invoice_no: updatedInvoice.invoice_number,
+            vendor_name: updatedInvoice.vendor_name,
+            event_type: 'Edited',
+            event_code: 'LINE_ITEM_EDITED',
+            user_name: userName,
+            description: `Manual edit: updated header and ${items.length} line items`,
+            summary: `Manual edit: updated header and ${items.length} line items.`,
+            before_data: { status: current.processing_status },
+            after_data: { status: updatedInvoice.processing_status },
+            old_values: { status: current.processing_status },
+            new_values: { status: updatedInvoice.processing_status },
+            status_from: current.processing_status || null,
+            status_to: updatedInvoice.processing_status || null,
+        });
 
         await client.query('COMMIT');
         return updatedInvoice;
@@ -1865,27 +1867,20 @@ export async function applyRevalidationOutcome(
                     ? `Revalidated ${revalidationAuditDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${revalidationAuditDiff.changedFieldLabels.length - 3} more.`
                     : `Revalidated ${revalidationAuditDiff.changedFieldLabels.join(', ')}.`;
 
-            await client.query(
-                `INSERT INTO audit_logs (
-                    invoice_id, invoice_no, vendor_name, event_type, event_code, user_name, description, summary,
-                    before_data, after_data, old_values, new_values
-                )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)`,
-                [
-                    id,
-                    updatedInvoice?.invoice_number || current.invoice_number,
-                    updatedInvoice?.vendor_name || current.vendor_name,
-                    'Revalidated',
-                    'REVALIDATED',
-                    userName,
-                    summary,
-                    summary,
-                    JSON.stringify(revalidationAuditDiff.beforeData),
-                    JSON.stringify(revalidationAuditDiff.afterData),
-                    JSON.stringify(revalidationAuditDiff.beforeData),
-                    JSON.stringify(revalidationAuditDiff.afterData),
-                ]
-            );
+            await insertAuditLog(client.query.bind(client), {
+                invoice_id: id,
+                invoice_no: updatedInvoice?.invoice_number || current.invoice_number,
+                vendor_name: updatedInvoice?.vendor_name || current.vendor_name,
+                event_type: 'Revalidated',
+                event_code: 'REVALIDATED',
+                user_name: userName,
+                description: summary,
+                summary,
+                before_data: revalidationAuditDiff.beforeData,
+                after_data: revalidationAuditDiff.afterData,
+                old_values: revalidationAuditDiff.beforeData,
+                new_values: revalidationAuditDiff.afterData,
+            });
         }
 
         await client.query('COMMIT');
@@ -2314,6 +2309,82 @@ export async function getTallySyncLogs(entityId?: string) {
  *
  * @param data - Audit event data
  */
+type AuditQueryExecutor = (text: string, params?: any[]) => Promise<any>;
+
+type AuditLogWriteInput = {
+    invoice_id?: string | null;
+    invoice_no?: string | null;
+    vendor_name?: string | null;
+    event_type: string;
+    user_name?: string | null;
+    changed_by_user_id?: string | null;
+    description: string;
+    before_data?: object | null;
+    after_data?: object | null;
+    old_values?: object | null;
+    new_values?: object | null;
+    entity_name?: string | null;
+    entity_type?: string | null;
+    entity_id?: string | null;
+    event_code?: string | null;
+    summary?: string | null;
+    company_id?: string | null;
+    batch_id?: string | null;
+    status_from?: string | null;
+    status_to?: string | null;
+    details?: object | null;
+    is_user_visible?: boolean;
+    severity?: string | null;
+    created_by_user_id?: string | null;
+    created_by_display_name?: string | null;
+};
+
+async function insertAuditLog(executor: AuditQueryExecutor, data: AuditLogWriteInput) {
+    await executor(
+        `INSERT INTO audit_logs (
+            invoice_id, invoice_no, vendor_name, event_type, user_name, changed_by_user_id,
+            description, before_data, after_data, old_values, new_values,
+            entity_name, entity_type, entity_id, event_code, summary,
+            company_id, batch_id, status_from, status_to, details,
+            is_user_visible, severity, created_by_user_id, created_by_display_name
+         )
+         VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb,
+            $12, $13, $14, $15, $16,
+            $17, $18, $19, $20, $21::jsonb,
+            $22, $23, $24, $25
+         )`,
+        [
+            data.invoice_id || null,
+            data.invoice_no || null,
+            data.vendor_name || null,
+            data.event_type,
+            data.user_name || data.created_by_display_name || 'System',
+            data.changed_by_user_id || data.created_by_user_id || null,
+            data.description,
+            data.before_data ? JSON.stringify(data.before_data) : null,
+            data.after_data ? JSON.stringify(data.after_data) : null,
+            data.old_values ? JSON.stringify(data.old_values) : null,
+            data.new_values ? JSON.stringify(data.new_values) : null,
+            data.entity_name || null,
+            data.entity_type || null,
+            data.entity_id || null,
+            data.event_code || null,
+            data.summary || null,
+            data.company_id || null,
+            data.batch_id || null,
+            data.status_from || null,
+            data.status_to || null,
+            data.details ? JSON.stringify(data.details) : null,
+            data.is_user_visible ?? true,
+            data.severity || null,
+            data.created_by_user_id || data.changed_by_user_id || null,
+            data.created_by_display_name || data.user_name || 'System',
+        ]
+    );
+}
+
 export async function createAuditLog(data: {
     invoice_id?: string;
     invoice_no?: string;
@@ -2324,27 +2395,24 @@ export async function createAuditLog(data: {
     description: string;
     before_data?: object;
     after_data?: object;
+    old_values?: object;
+    new_values?: object;
     entity_name?: string;
     entity_type?: string;
+    entity_id?: string;
     event_code?: string;
     summary?: string;
+    company_id?: string;
+    batch_id?: string;
+    status_from?: string;
+    status_to?: string;
+    details?: object;
+    is_user_visible?: boolean;
+    severity?: string;
+    created_by_user_id?: string;
+    created_by_display_name?: string;
 }) {
-    await query(
-        `INSERT INTO audit_logs (
-            invoice_id, invoice_no, vendor_name, event_type, user_name, changed_by_user_id,
-            description, before_data, after_data, entity_name, entity_type, event_code, summary
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13)`,
-        [
-            data.invoice_id || null, data.invoice_no || null, data.vendor_name || null,
-            data.event_type, data.user_name || 'System', data.changed_by_user_id || null,
-            data.description,
-            data.before_data ? JSON.stringify(data.before_data) : null,
-            data.after_data ? JSON.stringify(data.after_data) : null,
-            data.entity_name || null, data.entity_type || null,
-            data.event_code || null, data.summary || null,
-        ]
-    );
+    await insertAuditLog(query, data);
 }
 
 /**
@@ -2968,26 +3036,19 @@ export async function setAppConfig(key: string, value: any, companyId?: string) 
                 ? `${configDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${configDiff.changedFieldLabels.length - 3} more`
                 : configDiff.changedFieldLabels.join(', ');
 
-        await query(
-            `INSERT INTO audit_logs (
-                entity_name, entity_type, event_type, event_code, user_name, description, summary,
-                before_data, after_data, old_values, new_values
-            )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)`,
-            [
-                configLabel,
-                'config',
-                'Edited',
-                'CONFIG_UPDATED',
-                'System',
-                `${configLabel} updated (${scopeLabel}): ${changedSummary}.`,
-                `${configLabel}: ${changedSummary}.`,
-                JSON.stringify(configDiff.beforeData),
-                JSON.stringify(configDiff.afterData),
-                JSON.stringify(configDiff.beforeData),
-                JSON.stringify(configDiff.afterData),
-            ]
-        );
+        await insertAuditLog(query, {
+            entity_name: configLabel,
+            entity_type: 'config',
+            event_type: 'Edited',
+            event_code: 'CONFIG_UPDATED',
+            user_name: 'System',
+            description: `${configLabel} updated (${scopeLabel}): ${changedSummary}.`,
+            summary: `${configLabel}: ${changedSummary}.`,
+            before_data: configDiff.beforeData,
+            after_data: configDiff.afterData,
+            old_values: configDiff.beforeData,
+            new_values: configDiff.afterData,
+        });
     } catch (auditErr) {
         console.error(`[DB] setAppConfig audit failed for ${key}:`, auditErr);
     }

@@ -427,6 +427,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     after_data            JSONB,
     old_values            JSONB,
     new_values            JSONB,
+    company_id            UUID REFERENCES companies(id) ON DELETE CASCADE,
+    batch_id              TEXT,
+    entity_type           TEXT,
+    event_code            TEXT,
+    status_from           TEXT,
+    status_to             TEXT,
+    summary               TEXT,
+    details               JSONB,
+    is_user_visible       BOOLEAN,
+    severity              TEXT,
+    created_by_user_id    UUID,
+    created_by_display_name TEXT,
     timestamp             TIMESTAMPTZ DEFAULT NOW(),
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
@@ -543,6 +555,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_invoice_ts ON audit_logs(invoice_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_company_timestamp ON audit_logs(company_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_batch_timestamp ON audit_logs(batch_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event_code_timestamp ON audit_logs(event_code, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_visible_timestamp ON audit_logs(is_user_visible, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_invoice ON processing_jobs(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_integration_queues_entity ON integration_queues(entity_id);
 CREATE INDEX IF NOT EXISTS idx_batches_company ON batches(company_id);
