@@ -67,7 +67,11 @@ export async function sendInvoiceToTally(invoiceId: string, ocrRawPayload: any):
     const payload = {
         ocr_raw_payload: sanitizeOcrRawPayloadForTally(ocrRawPayload),
         id: invoiceId,
-        invoice_posting: true
+        invoice_posting: true,
+        sync_data: {
+            bridge_base_url: process.env.TALLY_SERVER_URL || '',
+            bridge_api_key: process.env.BRIDGE_API_KEY || ''
+        }
     };
 
     try {
