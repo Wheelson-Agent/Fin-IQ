@@ -1919,6 +1919,42 @@ export async function updateProcessingJob(jobId: string, status: string, metrics
     );
 }
 
+export async function recordProcessingStage(
+    invoiceId: string,
+    stage: string,
+    status: string,
+    startedAt: string | Date,
+    completedAt: string | Date,
+    metrics?: object,
+    error?: string
+) {
+    const startedIso = startedAt instanceof Date ? startedAt.toISOString() : startedAt;
+    const completedIso = completedAt instanceof Date ? completedAt.toISOString() : completedAt;
+    const result = await query(
+        `INSERT INTO processing_jobs (
+            invoice_id,
+            stage,
+            status,
+            metrics,
+            error_message,
+            started_at,
+            completed_at
+        )
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6::timestamptz, $7::timestamptz)
+        RETURNING *`,
+        [
+            invoiceId,
+            stage,
+            status,
+            metrics ? JSON.stringify(metrics) : null,
+            error || null,
+            startedIso,
+            completedIso
+        ]
+    );
+    return result.rows[0];
+}
+
 /**
  * Get all processing jobs for a specific invoice.
  * Used by: Detail View processing timeline.
@@ -1930,6 +1966,46 @@ export async function getProcessingJobs(invoiceId: string) {
     const result = await query(
         `SELECT * FROM processing_jobs WHERE invoice_id = $1 ORDER BY started_at ASC`,
         [invoiceId]
+    );
+    return result.rows;
+}
+
+export async function getBatchInvoiceCount(batchId: string, startedAfter?: string | null) {
+    const result = await query(
+        `SELECT COUNT(*)::int AS invoice_count
+         FROM ap_invoices
+         WHERE batch_id = $1
+           AND ($2::timestamptz IS NULL OR created_at >= ($2::timestamptz - INTERVAL '1 second'))`,
+        [batchId, startedAfter || null]
+    );
+    return Number(result.rows[0]?.invoice_count || 0);
+}
+
+export async function getBatchStageTimingTable(batchId: string, startedAfter?: string | null) {
+    const result = await query(
+        `SELECT
+            ai.id AS invoice_id,
+            ai.file_name,
+            ai.created_at,
+            MAX(CASE WHEN pj.stage = 'FOLDER_SETUP' THEN (pj.metrics->>'duration_ms')::numeric END) AS folder_setup_ms,
+            MAX(CASE WHEN pj.stage = 'UPLOAD_COPY' THEN (pj.metrics->>'duration_ms')::numeric END) AS upload_copy_ms,
+            MAX(CASE WHEN pj.stage = 'PRE_OCR' THEN (pj.metrics->>'duration_ms')::numeric END) AS pre_ocr_ms,
+            MAX(CASE WHEN pj.stage = 'OCR' THEN (pj.metrics->>'duration_ms')::numeric END) AS ocr_ms,
+            MAX(CASE WHEN pj.stage = 'N8N' THEN (pj.metrics->>'duration_ms')::numeric END) AS n8n_ms,
+            MAX(CASE WHEN pj.stage = 'DB_UPDATE' THEN (pj.metrics->>'duration_ms')::numeric END) AS db_update_ms,
+            MAX(CASE WHEN pj.stage = 'FOLDER_SETUP' THEN pj.status END) AS folder_setup_status,
+            MAX(CASE WHEN pj.stage = 'UPLOAD_COPY' THEN pj.status END) AS upload_copy_status,
+            MAX(CASE WHEN pj.stage = 'PRE_OCR' THEN pj.status END) AS pre_ocr_status,
+            MAX(CASE WHEN pj.stage = 'OCR' THEN pj.status END) AS ocr_status,
+            MAX(CASE WHEN pj.stage = 'N8N' THEN pj.status END) AS n8n_status,
+            MAX(CASE WHEN pj.stage = 'DB_UPDATE' THEN pj.status END) AS db_update_status
+         FROM ap_invoices ai
+         LEFT JOIN processing_jobs pj ON pj.invoice_id = ai.id
+         WHERE ai.batch_id = $1
+           AND ($2::timestamptz IS NULL OR ai.created_at >= ($2::timestamptz - INTERVAL '1 second'))
+         GROUP BY ai.id, ai.file_name, ai.created_at
+         ORDER BY ai.created_at ASC`,
+        [batchId, startedAfter || null]
     );
     return result.rows;
 }
@@ -2443,7 +2519,7 @@ export async function reEvaluateAutoPostStatuses() {
             await client.query(
                 `UPDATE ap_invoices
                  SET is_high_amount = (grand_total > $1), updated_at = NOW()
-                 WHERE processing_status IN ('Processing', 'Ready to Post', 'Awaiting Input', 'Auto-Posted')
+                 WHERE processing_status IN ('Processing', 'Ready to Post', 'Awaiting Input', 'Auto-Posted', 'Handoff')
                    AND grand_total IS NOT NULL AND grand_total > 0`,
                 [valueLimit]
             );
