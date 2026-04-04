@@ -83,6 +83,95 @@ function smartUpdatePayload(payload: any, targetKey: string, value: any) {
     }
 }
 
+const WORKSPACE_AUDIT_KEYS = new Set([
+    'irn', 'ack_no', 'ack_date', 'eway_bill_no',
+    'invoice_number', 'invoice_date',
+    'vendor_name', 'vendor_gst', 'supplier_pan', 'supplier_address',
+    'buyer_name', 'buyer_gst',
+    'sub_total', 'tax_total', 'grand_total',
+    'round_off', 'cgst', 'sgst', 'igst', 'cgst_pct', 'sgst_pct', 'igst_pct',
+    'failure_reason', 'doc_type',
+]);
+
+const WORKSPACE_AUDIT_LABELS: Record<string, string> = {
+    irn: 'IRN',
+    ack_no: 'Ack No',
+    ack_date: 'Ack Date',
+    eway_bill_no: 'E-Way Bill No',
+    invoice_number: 'Invoice No',
+    invoice_date: 'Invoice Date',
+    vendor_name: 'Seller Name',
+    vendor_gst: 'Supplier GST',
+    supplier_pan: 'Supplier PAN',
+    supplier_address: 'Supplier Address',
+    buyer_name: 'Buyer Name',
+    buyer_gst: 'Buyer GST',
+    sub_total: 'Taxable Value',
+    tax_total: 'Sum of GST Amount',
+    grand_total: 'Total Invoice Amount',
+    round_off: 'Round Off',
+    cgst: 'CGST',
+    sgst: 'SGST',
+    igst: 'IGST',
+    cgst_pct: 'CGST %',
+    sgst_pct: 'SGST %',
+    igst_pct: 'IGST %',
+    failure_reason: 'Failure Reason',
+    doc_type: 'Document Type',
+};
+
+function getPayloadValueByCanonicalKey(payload: any, canonicalKey: string) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+    const matchingKey = Object.keys(payload).find((key) => getCanonicalKey(key) === canonicalKey);
+    return matchingKey ? payload[matchingKey] : undefined;
+}
+
+function normalizeWorkspaceAuditValue(value: any): any {
+    if (value === undefined || value === '') return null;
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+            const asDate = new Date(trimmed);
+            if (!Number.isNaN(asDate.getTime())) {
+                return asDate.toISOString().slice(0, 10);
+            }
+        }
+        return trimmed;
+    }
+    if (typeof value === 'number') return Number.isFinite(value) ? Number(value) : null;
+    if (typeof value === 'boolean' || value === null) return value;
+    return JSON.stringify(value);
+}
+
+function buildWorkspacePayloadAuditDiff(beforePayload: any, afterPayload: any, changedSourceKeys: string[], docTypeChanged: boolean) {
+    const trackedKeys = Array.from(
+        new Set(
+            [
+                ...changedSourceKeys.map((key) => getCanonicalKey(key)),
+                ...(docTypeChanged ? ['doc_type'] : []),
+            ].filter((key) => WORKSPACE_AUDIT_KEYS.has(key))
+        )
+    );
+
+    const beforeData: Record<string, any> = {};
+    const afterData: Record<string, any> = {};
+    const changedFieldLabels: string[] = [];
+
+    trackedKeys.forEach((canonicalKey) => {
+        const previousValue = normalizeWorkspaceAuditValue(getPayloadValueByCanonicalKey(beforePayload, canonicalKey));
+        const nextValue = normalizeWorkspaceAuditValue(getPayloadValueByCanonicalKey(afterPayload, canonicalKey));
+        if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) return;
+
+        beforeData[canonicalKey] = previousValue;
+        afterData[canonicalKey] = nextValue;
+        changedFieldLabels.push(WORKSPACE_AUDIT_LABELS[canonicalKey] || canonicalKey.replace(/_/g, ' '));
+    });
+
+    return { beforeData, afterData, changedFieldLabels };
+}
+
 function normalizeDateOnlyValue(value: any): string | null {
     if (!value) return null;
     const raw = String(value).trim();
@@ -1187,17 +1276,41 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             const invoiceRes = await client.query(updateSql, updateParams);
             const updatedInvoice = invoiceRes.rows[0];
 
-            await client.query(
-                `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-                [
-                    id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
-                    'Edited', userName,
-                    'Workspace save: updated ocr_raw_payload and top-level columns',
-                    JSON.stringify({ grand_total: current.grand_total }),
-                    JSON.stringify({ grand_total: updatedInvoice.grand_total }),
-                ]
+            const workspaceAuditDiff = buildWorkspacePayloadAuditDiff(
+                rawPayload,
+                mergedPayload,
+                Object.keys(patch || {}),
+                !!nextDocType && nextDocType !== current.doc_type
             );
+
+            if (workspaceAuditDiff.changedFieldLabels.length > 0) {
+                const summary =
+                    workspaceAuditDiff.changedFieldLabels.length > 3
+                        ? `Updated ${workspaceAuditDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${workspaceAuditDiff.changedFieldLabels.length - 3} more.`
+                        : `Updated ${workspaceAuditDiff.changedFieldLabels.join(', ')}.`;
+
+                await client.query(
+                    `INSERT INTO audit_logs (
+                        invoice_id, invoice_no, vendor_name, event_type, event_code, user_name, description, summary,
+                        before_data, after_data, old_values, new_values
+                    )
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)`,
+                    [
+                        id,
+                        updatedInvoice?.invoice_number,
+                        updatedInvoice?.vendor_name,
+                        'Edited',
+                        'FIELD_EDITED',
+                        userName,
+                        summary,
+                        summary,
+                        JSON.stringify(workspaceAuditDiff.beforeData),
+                        JSON.stringify(workspaceAuditDiff.afterData),
+                        JSON.stringify(workspaceAuditDiff.beforeData),
+                        JSON.stringify(workspaceAuditDiff.afterData),
+                    ]
+                );
+            }
 
             await client.query('COMMIT');
             return updatedInvoice;
