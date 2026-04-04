@@ -495,6 +495,9 @@ export default function APWorkspace() {
           if (isUnknownFile || isUnknownInv) {
             reasons.push('Missing invoice field');
           }
+          if (inv.n8n_validation_status === 'Invalid Date') {
+            reasons.push('Future Date/Validation Failed');
+          }
           if (!bVerif) reasons.push('Buyer Verification Failed');
           if (!gValid) reasons.push('Missing GST');
           if (!dValid) reasons.push('Data OCR Fail');
