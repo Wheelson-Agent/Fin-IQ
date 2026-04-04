@@ -2475,6 +2475,13 @@ function CustomTableSelect({
 }: any) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
+  const visibleOptionCount = 5;
+  const optionRowHeightPx = 40;
+  const listHeaderHeightPx = 30;
+  const pickerChromeHeightPx =
+    76 + // search box block
+    (useCategorizedOptions && allowStockMode ? 56 : 0) +
+    (showCreate ? 60 : 0);
   const normalizedDefaultMode: LineItemPickerMode =
     allowStockMode && defaultMode === 'STOCK_ITEM' ? 'STOCK_ITEM' : 'LEDGER';
   const [mode, setMode] = React.useState<LineItemPickerMode>(normalizedDefaultMode);
@@ -2510,8 +2517,9 @@ function CustomTableSelect({
     ? (mode === 'STOCK_ITEM' ? 'Stock Item List' : 'Ledger List')
     : 'Ledger List';
   const activeCreateLabel = useCategorizedOptions
-    ? (mode === 'STOCK_ITEM' ? 'Create ' : 'Create ')
+    ? (mode === 'STOCK_ITEM' ? 'Create Stock Item' : 'Create Ledger')
     : createLabel;
+  const listViewportHeightPx = (visibleOptionCount * optionRowHeightPx) + listHeaderHeightPx;
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -2556,9 +2564,12 @@ function CustomTableSelect({
 
       <Popover.Portal>
         <Popover.Content
+          side="bottom"
           sideOffset={8}
           align="start"
-          className="z-[100] w-[320px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2),0_0_0_1px_rgba(0,0,0,0.05)] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          collisionPadding={16}
+          className="z-[160] w-[340px] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_24px_60px_rgba(15,23,42,0.22),0_0_0_1px_rgba(15,23,42,0.06)] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          style={{ maxHeight: 'min(430px, var(--radix-popover-content-available-height))' }}
         >
           {useCategorizedOptions && allowStockMode && (
             <div className="p-2 pb-0">
@@ -2567,7 +2578,7 @@ function CustomTableSelect({
                   type="button"
                   onClick={() => setMode('STOCK_ITEM')}
                   className={[
-                    'h-9 rounded-lg text-[12px] font-black transition-all',
+                    'h-8 rounded-lg text-[11px] font-bold tracking-[0.02em] transition-all',
                     mode === 'STOCK_ITEM'
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700',
@@ -2579,7 +2590,7 @@ function CustomTableSelect({
                   type="button"
                   onClick={() => setMode('LEDGER')}
                   className={[
-                    'h-9 rounded-lg text-[12px] font-black transition-all',
+                    'h-8 rounded-lg text-[11px] font-bold tracking-[0.02em] transition-all',
                     mode === 'LEDGER'
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700',
@@ -2591,26 +2602,29 @@ function CustomTableSelect({
             </div>
           )}
 
-          <Command className="flex flex-col h-full">
+          <Command className="flex h-full min-h-0 flex-col">
             <div className="p-2 border-b border-slate-50">
               <div className="relative flex items-center">
-                <Search size={14} className="absolute left-3 text-slate-400" />
+                <Search size={13} className="absolute left-3 text-slate-400" />
                 <Command.Input
                   value={search}
                   onValueChange={setSearch}
                   placeholder={searchPlaceholder}
-                  className="w-full bg-slate-50 border-none h-10 pl-9 pr-3 rounded-xl text-[13px] font-bold text-slate-700 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500/10"
+                  className="w-full bg-slate-50 border-none h-9 pl-9 pr-3 rounded-xl text-[12px] font-semibold text-slate-700 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-blue-500/10"
                 />
               </div>
             </div>
 
-            <Command.List className="max-h-[280px] overflow-y-auto p-1.5 custom-scrollbar">
+            <Command.List
+              className="min-h-0 overflow-y-auto p-1.5 custom-scrollbar"
+              style={{ maxHeight: `min(${listViewportHeightPx}px, max(140px, calc(var(--radix-popover-content-available-height) - ${pickerChromeHeightPx}px)))` }}
+            >
               <Command.Empty className="text-center py-6">
                 <div className="text-[12px] font-bold text-slate-400 mb-1">No results found</div>
                 <div className="text-[10px] text-slate-300 uppercase tracking-widest font-black">Try a different name</div>
               </Command.Empty>
 
-              <div className="px-2 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              <div className="px-2 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-[0.18em]">
                 {listLabel}
               </div>
 
@@ -2623,8 +2637,8 @@ function CustomTableSelect({
                     key={opt.id || label}
                     onSelect={() => { void handleSelect(label); }}
                     className={[
-                      'px-3 py-2.5 rounded-xl mb-0.5',
-                      'text-[13px] font-bold',
+                      'px-3 py-2 rounded-xl mb-0.5 min-h-[40px]',
+                      'text-[12px] font-semibold leading-5',
                       'flex items-center justify-between gap-3',
                       'cursor-pointer transition-all outline-none',
                       isSelected
@@ -2649,7 +2663,7 @@ function CustomTableSelect({
                     setSearch('');
                     setMode(normalizedDefaultMode);
                   }}
-                  className="w-full h-11 px-4 flex items-center justify-center gap-2 text-[13px] font-black text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-[0.98]"
+                  className="w-full h-10 px-4 flex items-center justify-center gap-2 text-[12px] font-bold text-blue-600 bg-white border border-blue-100 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm active:scale-[0.98]"
                 >
                   <Plus size={16} strokeWidth={3} />
                   {activeCreateLabel}
