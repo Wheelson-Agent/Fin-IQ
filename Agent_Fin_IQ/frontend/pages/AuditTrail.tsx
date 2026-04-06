@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SectionHeader } from '../components/at/SectionHeader';
 import { getAuditLogs, deleteAuditLog, deleteAuditLogsBulk } from '../lib/api';
 import { RevalidationIcon } from '../components/at/RevalidationIcon';
+import { useCompany } from '../context/CompanyContext';
 import type { AuditEvent } from '../lib/types';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -69,6 +70,8 @@ function formatTimestamp(ts: string) {
 
 // ─── Component ────────────────────────────────────────────────
 export default function AuditTrail() {
+  const { selectedCompany, selectedCompanyName } = useCompany();
+
   const [events, setEvents]           = useState<AuditEvent[]>([]);
   const [total, setTotal]             = useState(0);
   const [totalPages, setTotalPages]   = useState(1);
@@ -99,7 +102,7 @@ export default function AuditTrail() {
 
   // ─── Fetch ──────────────────────────────────────────────────
   const fetchLogs = useCallback(async (
-    p: number, ps: number, type: string, range: string
+    p: number, ps: number, type: string, range: string, companyId: string
   ) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -109,6 +112,7 @@ export default function AuditTrail() {
       const result = await getAuditLogs({
         page: p, pageSize: ps,
         eventType: type !== 'All' ? type : undefined,
+        companyId: companyId !== 'ALL' ? companyId : undefined,
         ...dateRange,
       });
       setEvents(result.rows);
@@ -122,12 +126,15 @@ export default function AuditTrail() {
   }, []);
 
   useEffect(() => {
-    fetchLogs(page, pageSize, selectedType, selectedRange);
-  }, [page, pageSize, selectedType, selectedRange, fetchLogs]);
+    fetchLogs(page, pageSize, selectedType, selectedRange, selectedCompany);
+  }, [page, pageSize, selectedType, selectedRange, selectedCompany, fetchLogs]);
 
   // Reset to page 1 when filters change; clear selection on any filter/page change
   const handleTypeChange  = (t: string) => { setSelectedType(t);  setPage(1); setSelectedIds(new Set()); };
   const handleRangeChange = (r: string) => { setSelectedRange(r); setPage(1); setSelectedIds(new Set()); };
+
+  // Also reset on company switch (selectedCompany comes from context, handled in useEffect dep array)
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [selectedCompany]);
 
   // Bulk selection helpers
   const deletableEvents  = events.filter(e => !PROTECTED_EVENT_TYPES.has(e.event_type));
@@ -171,7 +178,7 @@ export default function AuditTrail() {
       setBulkSuccess(`${deleted} ${deleted === 1 ? 'entry' : 'entries'} deleted`);
       setTimeout(() => setBulkSuccess(null), 3000);
       if (targetPage !== page) setPage(targetPage);
-      else await fetchLogs(page, pageSize, selectedType, selectedRange);
+      else await fetchLogs(page, pageSize, selectedType, selectedRange, selectedCompany);
     } catch (err: any) {
       setBulkError(err?.message || 'Bulk delete failed');
     } finally {
@@ -219,7 +226,7 @@ export default function AuditTrail() {
         </div>
         <div className="flex gap-[12px]">
           <button
-            onClick={() => fetchLogs(page, pageSize, selectedType, selectedRange)}
+            onClick={() => fetchLogs(page, pageSize, selectedType, selectedRange, selectedCompany)}
             className="flex items-center gap-[8px] bg-white border border-[#D0D9E8] text-[#4A5568] rounded-[8px] p-[10px_16px] text-[13px] font-bold cursor-pointer hover:bg-[#F8FAFC] transition-colors shadow-sm"
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
@@ -323,7 +330,14 @@ export default function AuditTrail() {
             <div className="flex flex-col items-center justify-center py-16 gap-2">
               <ShieldOff size={32} className="text-[#CBD5E1]" />
               <span className="text-[14px] font-semibold text-[#94A3B8]">No audit events found</span>
-              <span className="text-[12px] text-[#CBD5E1]">Try changing the filters or date range</span>
+              {selectedCompany !== 'ALL' ? (
+                <span className="text-[12px] text-[#CBD5E1] text-center max-w-[360px] leading-relaxed">
+                  No events recorded for <span className="font-semibold text-[#94A3B8]">{selectedCompanyName}</span> yet.
+                  Events will appear here as actions are taken for this company.
+                </span>
+              ) : (
+                <span className="text-[12px] text-[#CBD5E1]">Try changing the filters or date range</span>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-[16px] relative z-10 pt-[8px]">

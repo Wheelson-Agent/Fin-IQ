@@ -2412,7 +2412,17 @@ export async function createAuditLog(data: {
     created_by_user_id?: string;
     created_by_display_name?: string;
 }) {
-    await insertAuditLog(query, data);
+    // Auto-resolve company_id from the invoice when not explicitly provided
+    let resolvedCompanyId = data.company_id || null;
+    if (!resolvedCompanyId && data.invoice_id) {
+        try {
+            const res = await query('SELECT company_id FROM ap_invoices WHERE id = $1', [data.invoice_id]);
+            resolvedCompanyId = res.rows[0]?.company_id ?? null;
+        } catch {
+            // Non-critical — audit write proceeds with null company_id
+        }
+    }
+    await insertAuditLog(query, { ...data, company_id: resolvedCompanyId ?? undefined });
 }
 
 /**
@@ -2427,6 +2437,7 @@ export async function getAuditLogs(params: {
     eventType?: string;
     dateFrom?: string;
     dateTo?: string;
+    companyId?: string;
 } = {}) {
     const page     = Math.max(1, params.page || 1);
     const pageSize = Math.min(100, Math.max(10, params.pageSize || 25));
@@ -2436,6 +2447,10 @@ export async function getAuditLogs(params: {
     const values: any[]        = [];
     let idx = 1;
 
+    if (params.companyId && params.companyId !== 'ALL') {
+        conditions.push(`company_id = $${idx++}`);
+        values.push(params.companyId);
+    }
     if (params.eventType && params.eventType !== 'All') {
         conditions.push(`event_type = $${idx++}`);
         values.push(params.eventType);

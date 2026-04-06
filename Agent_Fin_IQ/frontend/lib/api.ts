@@ -296,6 +296,7 @@ export async function getAuditLogs(params?: {
     eventType?: string;
     dateFrom?: string;
     dateTo?: string;
+    companyId?: string;
 }): Promise<AuditLogsResult> {
     return invoke<AuditLogsResult>('audit:get-logs', params || {});
 }

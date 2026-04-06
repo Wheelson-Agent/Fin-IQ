@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useCompany } from '../context/CompanyContext';
 import { motion, AnimatePresence, Variants } from 'motion/react';
 import {
     Plus, Trash2, MapPin, Phone, IndianRupee, Calendar, FileCheck, Hash, Shield, Edit2, ChevronRight, XCircle, RefreshCw,
@@ -492,10 +493,10 @@ export default function Config() {
     const [isSyncing, setIsSyncing] = useState(false);
     const [pendingSyncData, setPendingSyncData] = useState<{ added: any[], removed: any[], all: any[] } | null>(null);
 
-    // Persisted active company id
-    const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => {
-        return localStorage.getItem('activeCompanyId') || null;
-    });
+    // Active company — driven by the global CompanyContext (topbar selector)
+    const { selectedCompany: _ctxCompany, setSelectedCompany: _setCtxCompany } = useCompany();
+    const activeCompanyId: string | null = _ctxCompany !== 'ALL' ? _ctxCompany : null;
+    const setActiveCompanyId = (id: string) => _setCtxCompany(id);
 
     const companiesRef = React.useRef(companies);
     useEffect(() => { companiesRef.current = companies; }, [companies]);
@@ -563,7 +564,6 @@ export default function Config() {
         if (!preferredCompany?.id) return;
 
         setActiveCompanyId(preferredCompany.id);
-        localStorage.setItem('activeCompanyId', preferredCompany.id);
     }, [companies, activeCompanyId]);
 
     useEffect(() => {
@@ -605,7 +605,6 @@ export default function Config() {
 
     const handleSetActive = (id: string) => {
         setActiveCompanyId(id);
-        localStorage.setItem('activeCompanyId', id);
     };
 
     const handleDeleteCompany = (id: string) => {
