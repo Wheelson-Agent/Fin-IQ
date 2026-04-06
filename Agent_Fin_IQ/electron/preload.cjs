@@ -63,6 +63,8 @@ const ALLOWED_CHANNELS = [
     'dashboard:tally-sync',
     // Audit
     'audit:get-logs',
+    'audit:delete-log',
+    'audit:delete-bulk',
     // Processing
     'processing:get-jobs',
     'processing:run-pipeline',

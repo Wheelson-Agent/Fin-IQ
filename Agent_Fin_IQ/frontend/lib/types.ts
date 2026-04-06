@@ -170,7 +170,7 @@ export interface AuditEvent {
     invoice_id: string | null;
     invoice_no: string | null;
     vendor_name: string | null;
-    event_type: 'Created' | 'Validated' | 'Auto-Posted' | 'Edited' | 'Revalidated' | 'Rejected' | 'Approved';
+    event_type: 'Created' | 'Validated' | 'Auto-Posted' | 'Edited' | 'Revalidated' | 'Rejected' | 'Approved' | 'Deleted' | 'Processed';
     user_name: string;
     description: string;
     before_data: Record<string, any> | null;

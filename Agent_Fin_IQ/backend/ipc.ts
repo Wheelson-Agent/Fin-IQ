@@ -60,6 +60,10 @@ const __dirname = path.dirname(__filename);
 const envPath = path.resolve(__dirname, '../../config/.env');
 dotenv.config({ path: envPath });
 
+// ─── Active session (set on login, cleared on logout) ────────
+// Gives every backend audit call real user attribution.
+let _session: { userId: string; userName: string } | null = null;
+
 function buildStageMetrics(startedAt: Date, completedAt: Date, extra: Record<string, any> = {}) {
     return {
         duration_ms: Math.max(0, completedAt.getTime() - startedAt.getTime()),
@@ -119,7 +123,11 @@ export function registerIpcHandlers() {
      * Output: { success, user, token, error }
      */
     ipcMain.handle('auth:login', async (_event, { email, password }) => {
-        return await login(email, password);
+        const result = await login(email, password);
+        if (result.success && result.user) {
+            _session = { userId: result.user.id, userName: result.user.display_name || result.user.email };
+        }
+        return result;
     });
 
     /**
@@ -239,6 +247,8 @@ export function registerIpcHandlers() {
             invoice_no: updated.invoice_number,
             vendor_name: updated.vendor_name,
             event_type: 'Edited',
+            user_name: _session?.userName || 'System',
+            changed_by_user_id: _session?.userId,
             description: `Invoice mapped to vendor ID: ${vendorId}`,
         });
 
@@ -502,7 +512,8 @@ export function registerIpcHandlers() {
             invoice_no: before?.invoice_number,
             vendor_name: before?.vendor_name,
             event_type: status === 'Auto-Posted' ? 'Approved' : status === 'Failed' ? 'Rejected' : 'Edited',
-            user_name: userName || 'System',
+            user_name: _session?.userName || userName || 'System',
+            changed_by_user_id: _session?.userId,
             description: `Status changed from "${before?.processing_status}" to "${status}"`,
             before_data: { status: before?.processing_status },
             after_data: { status },
@@ -531,25 +542,33 @@ export function registerIpcHandlers() {
      * Update invoice remarks.
      */
     ipcMain.handle('invoices:update-remarks', async (_event, { id, remarks }) => {
-        return await queries.updateInvoiceRemarks(id, remarks);
+        const before = await queries.getInvoiceById(id);
+        const updated = await queries.updateInvoiceRemarks(id, remarks);
+        // Audit best-effort — never block the response
+        try {
+            await queries.createAuditLog({
+                invoice_id: id,
+                invoice_no: updated?.invoice_number,
+                vendor_name: updated?.vendor_name,
+                event_type: 'Edited',
+                user_name: _session?.userName || 'System',
+                changed_by_user_id: _session?.userId,
+                description: `Remarks updated for invoice "${updated?.invoice_number || id}".`,
+                before_data: { Remarks: before?.failure_reason ?? null },
+                after_data: { Remarks: remarks ?? null },
+            });
+        } catch (auditErr) {
+            console.error('[IPC] Audit failed for update-remarks:', auditErr);
+        }
+        return updated;
     });
 
     /**
      * Delete an invoice.
+     * Audit is written inside a transaction within deleteInvoice() — atomic with the delete.
      */
     ipcMain.handle('invoices:delete', async (_event, { id }) => {
-        const invoice = await queries.getInvoiceById(id);
-        await queries.deleteInvoice(id);
-
-        // Log audit event
-        await queries.createAuditLog({
-            invoice_id: id,
-            invoice_no: invoice?.invoice_number,
-            vendor_name: invoice?.vendor_name,
-            event_type: 'Deleted',
-            description: `Invoice "${invoice?.invoice_number}" was deleted.`,
-        });
-
+        await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true };
     });
 
@@ -587,6 +606,36 @@ export function registerIpcHandlers() {
             console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
             const result = await n8n.sendVendorCreationToN8n(payload || {});
             console.log('[IPC] vendors:sync-tally result:', result.success, result.message?.slice(0, 80));
+
+            if (result.success) {
+                try {
+                    const meta = payload?.invoice?.payload?.meta || {};
+                    const invoiceId = typeof meta.invoice_id === 'string' ? meta.invoice_id : '';
+                    const vendorName =
+                        payload?.invoice?.payload?.vendorNameAsPerTally ||
+                        payload?.invoice?.payload?.vendorName ||
+                        result?.data?.vendor_name ||
+                        null;
+
+                    if (invoiceId) {
+                        const invoice = await queries.getInvoiceById(invoiceId);
+                        await queries.createAuditLog({
+                            invoice_id: invoiceId,
+                            invoice_no: invoice?.invoice_number,
+                            vendor_name: vendorName || invoice?.vendor_name || null,
+                            event_type: 'Edited',
+                            user_name: _session?.userName || 'System',
+                            changed_by_user_id: _session?.userId,
+                            description: vendorName
+                                ? `Vendor master synced for "${vendorName}".`
+                                : 'Vendor master synced.',
+                        });
+                    }
+                } catch (auditErr: any) {
+                    console.error('[IPC] vendors:sync-tally audit error:', auditErr?.message || auditErr);
+                }
+            }
+
             return { success: result.success, message: result.message, data: result.data };
         } catch (err: any) {
             console.error('[IPC] vendors:sync-tally error:', err.message);
@@ -601,8 +650,30 @@ export function registerIpcHandlers() {
      * Get all audit log events.
      * Output: Array of audit event rows (most recent first)
      */
-    ipcMain.handle('audit:get-logs', async () => {
-        return await queries.getAuditLogs();
+    ipcMain.handle('audit:get-logs', async (_event, params = {}) => {
+        return await queries.getAuditLogs(params);
+    });
+
+    /**
+     * Hard-delete a single audit log entry.
+     * Restricted: 'Created' and 'Deleted' events are forensic records and cannot be removed.
+     */
+    ipcMain.handle('audit:delete-log', async (_event, { id }) => {
+        if (!id) throw new Error('Missing audit log id');
+        // Guard: fetch the row first and reject forensic event types
+        const { rows } = await queries.getAuditLogById(id);
+        if (!rows?.length) throw new Error('Audit log entry not found');
+        const PROTECTED = ['Created', 'Deleted'];
+        if (PROTECTED.includes(rows[0].event_type)) {
+            throw new Error(`Audit entries of type "${rows[0].event_type}" cannot be deleted.`);
+        }
+        return await queries.deleteAuditLog(id);
+    });
+
+    ipcMain.handle('audit:delete-bulk', async (_event, { ids }: { ids: number[] }) => {
+        if (!Array.isArray(ids) || ids.length === 0) throw new Error('No IDs provided');
+        const deleted = await queries.deleteAuditLogsBulk(ids);
+        return { deleted };
     });
 
     // ─── ITEMS ─────────────────────────────────────────────
@@ -879,6 +950,32 @@ export function registerIpcHandlers() {
                 await recordPipelineStage('DB_UPDATE', 'PASSED', dbStartedAt, dbCompletedAt, {
                     source: 'ingestN8nData'
                 });
+                // Write 'Processed' audit entry with extracted invoice data
+                try {
+                    const n8nPayload   = Array.isArray(n8nData) ? n8nData[0] : n8nData;
+                    const invSummary   = n8nPayload?.ap_invoices?.[0] || {};
+                    const auditInvNo   = invSummary.invoice_number || invSummary.invoice_no || null;
+                    const auditVendor  = invSummary.vendor_name || null;
+                    const rawTotal     = invSummary.total_amount;
+                    const auditTotal   = rawTotal != null ? `₹${Number(rawTotal).toLocaleString('en-IN')}` : null;
+                    const descParts    = [`Invoice ${fileName} extracted by OCR pipeline`];
+                    if (auditInvNo)  descParts.push(`— No: ${auditInvNo}`);
+                    if (auditVendor) descParts.push(`| Vendor: ${auditVendor}`);
+                    if (auditTotal)  descParts.push(`| Amount: ${auditTotal}`);
+                    await queries.createAuditLog({
+                        invoice_id:          invoiceId,
+                        invoice_no:          auditInvNo,
+                        vendor_name:         auditVendor,
+                        event_type:          'Processed',
+                        event_code:          'PROCESSED',
+                        description:         descParts.join(' '),
+                        summary:             [auditInvNo, auditVendor, auditTotal].filter(Boolean).join(' · ') || 'Extraction complete',
+                        changed_by_user_id:  _session?.userId,
+                        user_name:           'System',
+                    });
+                } catch (auditErr) {
+                    console.warn('[IPC] Non-critical: Failed to write Processed audit log:', auditErr);
+                }
             } catch (dbErr: any) {
                 const dbCompletedAt = new Date();
                 await recordPipelineStage('DB_UPDATE', 'FAILED', dbStartedAt, dbCompletedAt, {
