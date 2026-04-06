@@ -282,8 +282,31 @@ export async function saveItem(item: Partial<ItemMaster>): Promise<ItemMaster> {
  * Fetch all audit trail logs.
  * @returns Array of audit events
  */
-export async function getAuditLogs(): Promise<AuditEvent[]> {
-    return invoke<AuditEvent[]>('audit:get-logs');
+export interface AuditLogsResult {
+    rows: AuditEvent[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+}
+
+export async function getAuditLogs(params?: {
+    page?: number;
+    pageSize?: number;
+    eventType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    companyId?: string;
+}): Promise<AuditLogsResult> {
+    return invoke<AuditLogsResult>('audit:get-logs', params || {});
+}
+
+export async function deleteAuditLog(id: number): Promise<boolean> {
+    return invoke<boolean>('audit:delete-log', { id });
+}
+
+export async function deleteAuditLogsBulk(ids: number[]): Promise<{ deleted: number }> {
+    return invoke<{ deleted: number }>('audit:delete-bulk', { ids });
 }
 
 // ─── INVOICE ITEMS ────────────────────────────────────────

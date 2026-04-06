@@ -83,6 +83,389 @@ function smartUpdatePayload(payload: any, targetKey: string, value: any) {
     }
 }
 
+const WORKSPACE_AUDIT_KEYS = new Set([
+    'irn', 'ack_no', 'ack_date', 'eway_bill_no',
+    'invoice_number', 'invoice_date',
+    'vendor_name', 'vendor_gst', 'supplier_pan', 'supplier_address',
+    'buyer_name', 'buyer_gst',
+    'sub_total', 'tax_total', 'grand_total',
+    'round_off', 'cgst', 'sgst', 'igst', 'cgst_pct', 'sgst_pct', 'igst_pct',
+    'failure_reason', 'doc_type',
+]);
+
+const WORKSPACE_AUDIT_LABELS: Record<string, string> = {
+    irn: 'IRN',
+    ack_no: 'Ack No',
+    ack_date: 'Ack Date',
+    eway_bill_no: 'E-Way Bill No',
+    invoice_number: 'Invoice No',
+    invoice_date: 'Invoice Date',
+    vendor_name: 'Seller Name',
+    vendor_gst: 'Supplier GST',
+    supplier_pan: 'Supplier PAN',
+    supplier_address: 'Supplier Address',
+    buyer_name: 'Buyer Name',
+    buyer_gst: 'Buyer GST',
+    sub_total: 'Taxable Value',
+    tax_total: 'Sum of GST Amount',
+    grand_total: 'Total Invoice Amount',
+    round_off: 'Round Off',
+    cgst: 'CGST',
+    sgst: 'SGST',
+    igst: 'IGST',
+    cgst_pct: 'CGST %',
+    sgst_pct: 'SGST %',
+    igst_pct: 'IGST %',
+    failure_reason: 'Failure Reason',
+    doc_type: 'Document Type',
+};
+
+function getPayloadValueByCanonicalKey(payload: any, canonicalKey: string) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+    const matchingKey = Object.keys(payload).find((key) => getCanonicalKey(key) === canonicalKey);
+    return matchingKey ? payload[matchingKey] : undefined;
+}
+
+function normalizeWorkspaceAuditValue(value: any): any {
+    if (value === undefined || value === '') return null;
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+            const asDate = new Date(trimmed);
+            if (!Number.isNaN(asDate.getTime())) {
+                return asDate.toISOString().slice(0, 10);
+            }
+        }
+        return trimmed;
+    }
+    if (typeof value === 'number') return Number.isFinite(value) ? Number(value) : null;
+    if (typeof value === 'boolean' || value === null) return value;
+    return JSON.stringify(value);
+}
+
+function buildWorkspacePayloadAuditDiff(beforePayload: any, afterPayload: any, changedSourceKeys: string[], docTypeChanged: boolean) {
+    const trackedKeys = Array.from(
+        new Set(
+            [
+                ...changedSourceKeys.map((key) => getCanonicalKey(key)),
+                ...(docTypeChanged ? ['doc_type'] : []),
+            ].filter((key) => WORKSPACE_AUDIT_KEYS.has(key))
+        )
+    );
+
+    const beforeData: Record<string, any> = {};
+    const afterData: Record<string, any> = {};
+    const changedFieldLabels: string[] = [];
+
+    trackedKeys.forEach((canonicalKey) => {
+        const previousValue = normalizeWorkspaceAuditValue(getPayloadValueByCanonicalKey(beforePayload, canonicalKey));
+        const nextValue = normalizeWorkspaceAuditValue(getPayloadValueByCanonicalKey(afterPayload, canonicalKey));
+        if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) return;
+
+        beforeData[canonicalKey] = previousValue;
+        afterData[canonicalKey] = nextValue;
+        changedFieldLabels.push(WORKSPACE_AUDIT_LABELS[canonicalKey] || canonicalKey.replace(/_/g, ' '));
+    });
+
+    const includesLineItems = changedSourceKeys.some((key) => getCanonicalKey(key) === 'line_items');
+    if (!includesLineItems) {
+        return { beforeData, afterData, changedFieldLabels };
+    }
+
+    const lineItemsDiff = buildWorkspaceLineItemsAuditDiff(beforePayload, afterPayload);
+    return {
+        beforeData: {
+            ...beforeData,
+            ...lineItemsDiff.beforeData,
+        },
+        afterData: {
+            ...afterData,
+            ...lineItemsDiff.afterData,
+        },
+        changedFieldLabels: [...changedFieldLabels, ...lineItemsDiff.changedFieldLabels],
+    };
+}
+
+function summarizeWorkspaceLineForAudit(line: any, index: number) {
+    const description = String(line?.description || line?.item_description || `Line ${index + 1}`).trim();
+    const mappedLedger = String(line?.mapped_ledger ?? line?.gl_mapped ?? '').trim();
+    const ledger = String(line?.ledger ?? line?.gl_account_id ?? '').trim();
+    const targetLedger = mappedLedger || ledger || 'Unmapped';
+
+    return {
+        key: `${description}|${targetLedger}|${line?.hsn_sac ?? line?.hsn ?? ''}|${line?.qty ?? line?.quantity ?? ''}|${line?.rate ?? line?.unit_price ?? ''}`,
+        summary: `${description} -> ${targetLedger}`,
+    };
+}
+
+function buildWorkspaceLineItemsAuditDiff(beforePayload: any, afterPayload: any) {
+    const beforeLines = Array.isArray(beforePayload?.line_items)
+        ? beforePayload.line_items
+        : Array.isArray(beforePayload?.__ap_workspace?.line_items)
+            ? beforePayload.__ap_workspace.line_items
+            : [];
+    const afterLines = Array.isArray(afterPayload?.line_items)
+        ? afterPayload.line_items
+        : Array.isArray(afterPayload?.__ap_workspace?.line_items)
+            ? afterPayload.__ap_workspace.line_items
+            : [];
+
+    const previous = beforeLines.map(summarizeWorkspaceLineForAudit);
+    const next = afterLines.map(summarizeWorkspaceLineForAudit);
+
+    const changedEntries: string[] = [];
+    const maxLength = Math.max(previous.length, next.length);
+    for (let index = 0; index < maxLength; index += 1) {
+        const beforeLine = previous[index];
+        const afterLine = next[index];
+        if (JSON.stringify(beforeLine) === JSON.stringify(afterLine)) continue;
+
+        changedEntries.push(
+            `${afterLine?.summary || beforeLine?.summary || `Line ${index + 1}`}`
+        );
+    }
+
+    if (changedEntries.length === 0) {
+        return { beforeData: {}, afterData: {}, changedFieldLabels: [] as string[] };
+    }
+
+    return {
+        beforeData: {
+            line_items: previous.map((line: { summary: string }) => line.summary),
+        },
+        afterData: {
+            line_items: next.map((line: { summary: string }) => line.summary),
+        },
+        changedFieldLabels: ['line items'],
+    };
+}
+
+const REVALIDATION_AUDIT_KEYS = new Set([
+    'buyer_verification',
+    'gst_validation_status',
+    'invoice_ocr_data_validation',
+    'invoice_ocr_data_valdiation',
+    'vendor_verification',
+    'duplicate_check',
+    'line_item_match_status',
+    'document_type_check',
+]);
+
+const REVALIDATION_AUDIT_LABELS: Record<string, string> = {
+    buyer_verification: 'Buyer verification',
+    gst_validation_status: 'GST validation',
+    invoice_ocr_data_validation: 'Invoice data validation',
+    invoice_ocr_data_valdiation: 'Invoice data validation',
+    vendor_verification: 'Supplier verification',
+    duplicate_check: 'Duplicate check',
+    line_item_match_status: 'Line item match',
+    document_type_check: 'Document type check',
+    processing_status: 'Status',
+};
+
+function normalizeValidationAuditValue(value: any): any {
+    if (value === undefined || value === '') return null;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const lower = trimmed.toLowerCase();
+        if (lower === 'true') return true;
+        if (lower === 'false') return false;
+        return trimmed;
+    }
+    if (typeof value === 'boolean' || value === null) return value;
+    return value;
+}
+
+function buildRevalidationAuditDiff(beforeValidation: any, afterValidation: any, beforeStatus: any, afterStatus: any) {
+    const beforeData: Record<string, any> = {};
+    const afterData: Record<string, any> = {};
+    const changedFieldLabels: string[] = [];
+
+    const trackedKeys = Array.from(
+        new Set([
+            ...Object.keys(beforeValidation || {}).filter((key) => REVALIDATION_AUDIT_KEYS.has(key)),
+            ...Object.keys(afterValidation || {}).filter((key) => REVALIDATION_AUDIT_KEYS.has(key)),
+        ])
+    );
+
+    trackedKeys.forEach((key) => {
+        const normalizedKey = key === 'invoice_ocr_data_valdiation' ? 'invoice_ocr_data_validation' : key;
+        const previousValue = normalizeValidationAuditValue(beforeValidation?.[key]);
+        const nextValue = normalizeValidationAuditValue(afterValidation?.[key]);
+        if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) return;
+
+        beforeData[normalizedKey] = previousValue;
+        afterData[normalizedKey] = nextValue;
+        changedFieldLabels.push(REVALIDATION_AUDIT_LABELS[key] || normalizedKey.replace(/_/g, ' '));
+    });
+
+    const normalizedBeforeStatus = normalizeValidationAuditValue(beforeStatus);
+    const normalizedAfterStatus = normalizeValidationAuditValue(afterStatus);
+    if (JSON.stringify(normalizedBeforeStatus) !== JSON.stringify(normalizedAfterStatus)) {
+        beforeData.processing_status = normalizedBeforeStatus;
+        afterData.processing_status = normalizedAfterStatus;
+        changedFieldLabels.push(REVALIDATION_AUDIT_LABELS.processing_status);
+    }
+
+    return { beforeData, afterData, changedFieldLabels };
+}
+
+const APP_CONFIG_LABELS: Record<string, string> = {
+    posting_rules: 'Posting Rules',
+    auto_post_criteria_extended: 'Extended Criteria',
+    storage_config: 'Storage Configuration',
+    global_invoice_date_range: 'Invoice Date Range',
+};
+
+const APP_CONFIG_FIELD_LABELS: Record<string, string> = {
+    postingMode: 'Posting mode',
+    destination: 'Destination',
+    'criteria.enableValueLimit': 'Maximum invoice value limit enabled',
+    'criteria.valueLimit': 'Maximum invoice value limit',
+    'criteria.poMatch': 'Two-way match',
+    'criteria.knownVendor': 'Auto supplier creation on mismatch',
+    'criteria.twoWayMatch': 'Two-way match',
+    'criteria.filter_item_enabled': 'Item filter enabled',
+    'criteria.filter_item_ids': 'Selected items',
+    'criteria.filter_supplier_enabled': 'Supplier filter enabled',
+    'criteria.filter_supplier_ids': 'Selected suppliers',
+    'criteria.filter_invoice_date_enabled': 'Invoice date filter enabled',
+    'criteria.filter_invoice_date_from': 'Invoice date from',
+    'criteria.filter_invoice_date_to': 'Invoice date to',
+    provider: 'Storage provider',
+    localPath: 'Local storage path',
+};
+
+function normalizeConfigAuditValue(value: any): any {
+    if (value === undefined) return null;
+    if (value === null) return null;
+    if (Array.isArray(value)) return value.map((entry) => normalizeConfigAuditValue(entry));
+    if (typeof value === 'object') {
+        return Object.keys(value)
+            .sort()
+            .reduce((acc: Record<string, any>, key) => {
+                acc[key] = normalizeConfigAuditValue(value[key]);
+                return acc;
+            }, {});
+    }
+    return value;
+}
+
+async function resolveConfigAuditValue(path: string, value: any) {
+    const normalized = normalizeConfigAuditValue(value);
+    const isUuidLike = (entry: any) =>
+        typeof entry === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.trim());
+
+    if (path === 'criteria.filter_item_enabled' || path === 'criteria.filter_supplier_enabled' || path === 'criteria.filter_invoice_date_enabled' || path === 'criteria.enableValueLimit') {
+        if (normalized === true) return 'Enabled';
+        if (normalized === false) return 'Disabled';
+        return normalized;
+    }
+
+    if (path === 'criteria.filter_item_ids') {
+        // Normalise: accept both array and legacy comma-joined string
+        const entries: string[] = Array.isArray(normalized)
+            ? normalized.map(String)
+            : typeof normalized === 'string' && normalized.trim()
+              ? normalized.split(',').map((s) => s.trim()).filter(Boolean)
+              : [];
+
+        if (entries.length === 0) return [];
+
+        // Only query UUIDs — non-UUID entries are already human-readable names
+        const uuidEntries = entries.filter(isUuidLike);
+        const nameById = new Map<string, string>();
+        if (uuidEntries.length > 0) {
+            const { rows } = await query(
+                `SELECT id, item_name FROM item_master WHERE id = ANY($1::uuid[])`,
+                [uuidEntries]
+            );
+            rows.forEach((row: any) => nameById.set(String(row.id), String(row.item_name)));
+        }
+
+        return entries.map((id) => nameById.get(id) ?? (isUuidLike(id) ? 'Unknown item' : id));
+    }
+
+    if (path === 'criteria.filter_supplier_ids') {
+        // Normalise: accept both array and legacy comma-joined string
+        const entries: string[] = Array.isArray(normalized)
+            ? normalized.map(String)
+            : typeof normalized === 'string' && normalized.trim()
+              ? normalized.split(',').map((s) => s.trim()).filter(Boolean)
+              : [];
+
+        if (entries.length === 0) return [];
+
+        // Only query UUIDs — non-UUID entries are already human-readable names
+        const uuidEntries = entries.filter(isUuidLike);
+        const nameById = new Map<string, string>();
+        if (uuidEntries.length > 0) {
+            const { rows } = await query(
+                `SELECT id, name FROM vendors WHERE id = ANY($1::uuid[])`,
+                [uuidEntries]
+            );
+            rows.forEach((row: any) => nameById.set(String(row.id), String(row.name)));
+        }
+
+        return entries.map((id) => nameById.get(id) ?? (isUuidLike(id) ? 'Deleted vendor' : id));
+    }
+
+    return normalized;
+}
+
+function flattenConfigAuditObject(value: any, prefix = ''): Record<string, any> {
+    const normalized = normalizeConfigAuditValue(value);
+    if (normalized === null || normalized === undefined) {
+        return prefix ? { [prefix]: null } : {};
+    }
+
+    if (Array.isArray(normalized)) {
+        return prefix ? { [prefix]: normalized } : {};
+    }
+
+    if (typeof normalized !== 'object') {
+        return prefix ? { [prefix]: normalized } : {};
+    }
+
+    const flattened: Record<string, any> = {};
+    Object.keys(normalized).forEach((key) => {
+        const nextPrefix = prefix ? `${prefix}.${key}` : key;
+        const child = flattenConfigAuditObject(normalized[key], nextPrefix);
+        Object.assign(flattened, child);
+    });
+    return flattened;
+}
+
+async function buildAppConfigAuditDiff(beforeValue: any, afterValue: any) {
+    const beforeFlat = flattenConfigAuditObject(beforeValue);
+    const afterFlat = flattenConfigAuditObject(afterValue);
+    const trackedKeys = Array.from(new Set([...Object.keys(beforeFlat), ...Object.keys(afterFlat)])).sort();
+    const beforeData: Record<string, any> = {};
+    const afterData: Record<string, any> = {};
+    const changedFieldLabels: string[] = [];
+
+    for (const key of trackedKeys) {
+        const previousValue = await resolveConfigAuditValue(key, beforeFlat[key] ?? null);
+        const nextValue = await resolveConfigAuditValue(key, afterFlat[key] ?? null);
+        if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) continue;
+
+        const label = APP_CONFIG_FIELD_LABELS[key] || key.replace(/\./g, ' ').replace(/_/g, ' ');
+        beforeData[label] = previousValue;
+        afterData[label] = nextValue;
+        changedFieldLabels.push(label);
+    }
+
+    if (changedFieldLabels.length === 0) {
+        return null;
+    }
+
+    return { beforeData, afterData, changedFieldLabels };
+}
+
 function normalizeDateOnlyValue(value: any): string | null {
     if (!value) return null;
     const raw = String(value).trim();
@@ -768,17 +1151,41 @@ export async function updateInvoiceRemarks(id: string, remarks: string) {
  */
 export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed') {
     await query(
-        `UPDATE ap_invoices SET 
-          is_posted_to_tally = true, 
-          processing_status = 'Auto-Posted', 
+        `UPDATE ap_invoices SET
+          is_posted_to_tally = true,
+          processing_status = 'Auto-Posted',
           erp_sync_status = $4,
           erp_sync_id = COALESCE($3, erp_sync_id),
           posted_to_tally_json = COALESCE($2::jsonb, posted_to_tally_json),
           tally_id = COALESCE($3, tally_id),
-          updated_at = NOW() 
+          updated_at = NOW()
         WHERE id = $1`,
         [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus]
     );
+
+    // Audit the Tally posting — best-effort, never throws to caller
+    try {
+        const invRes = await query(
+            'SELECT invoice_number, vendor_name FROM ap_invoices WHERE id = $1',
+            [id]
+        );
+        const inv = invRes.rows[0];
+        const isSuccess = erpSyncStatus === 'processed';
+        await createAuditLog({
+            invoice_id: id,
+            invoice_no: inv?.invoice_number,
+            vendor_name: inv?.vendor_name,
+            event_type: 'Auto-Posted',
+            description: isSuccess
+                ? `Invoice "${inv?.invoice_number || id}" posted to Tally${tallyId ? ` (Ref: ${tallyId})` : ''}.`
+                : `Invoice "${inv?.invoice_number || id}" Tally posting failed (status: ${erpSyncStatus}).`,
+            after_data: isSuccess
+                ? { Status: 'Posted to Tally', TallyRef: tallyId || '—' }
+                : { Status: 'Posting Failed', ErpSyncStatus: erpSyncStatus },
+        });
+    } catch (auditErr) {
+        console.error('[DB] Audit failed for markPostedToTally:', auditErr);
+    }
 }
 
 /**
@@ -786,11 +1193,42 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
  * 
  * @param id - Invoice UUID
  */
-export async function deleteInvoice(id: string) {
-    await query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [id]);
-    await query('DELETE FROM ap_invoice_taxes WHERE ap_invoice_id = $1', [id]);
-    await query('DELETE FROM ap_invoices WHERE id = $1', [id]);
-    return true;
+export async function deleteInvoice(id: string, actor?: { userId?: string; userName?: string }) {
+    // Fetch before the transaction so we have data for the audit entry
+    const invRes = await query(
+        'SELECT invoice_number, vendor_name FROM ap_invoices WHERE id = $1',
+        [id]
+    );
+    const inv = invRes.rows[0];
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [id]);
+        await client.query('DELETE FROM ap_invoice_taxes WHERE ap_invoice_id = $1', [id]);
+        await client.query('DELETE FROM ap_invoices WHERE id = $1', [id]);
+        // Audit is inside the transaction — if it fails the delete rolls back too
+        await insertAuditLog(client.query.bind(client), {
+            invoice_id: id,
+            invoice_no: inv?.invoice_number || null,
+            vendor_name: inv?.vendor_name || null,
+            event_type: 'Deleted',
+            event_code: 'DELETED',
+            user_name: actor?.userName || 'System',
+            changed_by_user_id: actor?.userId || null,
+            description: `Invoice "${inv?.invoice_number || id}" was deleted.`,
+            summary: `Invoice "${inv?.invoice_number || id}" deleted.`,
+            old_values: inv ? { invoice_number: inv.invoice_number, vendor_name: inv.vendor_name } : undefined,
+            before_data: inv ? { invoice_number: inv.invoice_number, vendor_name: inv.vendor_name } : undefined,
+        });
+        await client.query('COMMIT');
+        return true;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 }
 
 /**
@@ -1187,17 +1625,34 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             const invoiceRes = await client.query(updateSql, updateParams);
             const updatedInvoice = invoiceRes.rows[0];
 
-            await client.query(
-                `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-                [
-                    id, updatedInvoice?.invoice_number, updatedInvoice?.vendor_name,
-                    'Edited', userName,
-                    'Workspace save: updated ocr_raw_payload and top-level columns',
-                    JSON.stringify({ grand_total: current.grand_total }),
-                    JSON.stringify({ grand_total: updatedInvoice.grand_total }),
-                ]
+            const workspaceAuditDiff = buildWorkspacePayloadAuditDiff(
+                rawPayload,
+                mergedPayload,
+                Object.keys(patch || {}),
+                !!nextDocType && nextDocType !== current.doc_type
             );
+
+            if (workspaceAuditDiff.changedFieldLabels.length > 0) {
+                const summary =
+                    workspaceAuditDiff.changedFieldLabels.length > 3
+                        ? `Updated ${workspaceAuditDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${workspaceAuditDiff.changedFieldLabels.length - 3} more.`
+                        : `Updated ${workspaceAuditDiff.changedFieldLabels.join(', ')}.`;
+
+                await insertAuditLog(client.query.bind(client), {
+                    invoice_id: id,
+                    invoice_no: updatedInvoice?.invoice_number,
+                    vendor_name: updatedInvoice?.vendor_name,
+                    event_type: 'Edited',
+                    event_code: 'FIELD_EDITED',
+                    user_name: userName,
+                    description: summary,
+                    summary,
+                    before_data: workspaceAuditDiff.beforeData,
+                    after_data: workspaceAuditDiff.afterData,
+                    old_values: workspaceAuditDiff.beforeData,
+                    new_values: workspaceAuditDiff.afterData,
+                });
+            }
 
             await client.query('COMMIT');
             return updatedInvoice;
@@ -1271,17 +1726,22 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
         }
 
         // 3. Log Audit Entry
-        await client.query(
-            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-            [
-                id, updatedInvoice.invoice_number, updatedInvoice.vendor_name,
-                'Edited', userName,
-                `Manual edit: updated header and ${items.length} line items`,
-                JSON.stringify({ status: current.processing_status }),
-                JSON.stringify({ status: updatedInvoice.processing_status })
-            ]
-        );
+        await insertAuditLog(client.query.bind(client), {
+            invoice_id: id,
+            invoice_no: updatedInvoice.invoice_number,
+            vendor_name: updatedInvoice.vendor_name,
+            event_type: 'Edited',
+            event_code: 'LINE_ITEM_EDITED',
+            user_name: userName,
+            description: `Manual edit: updated header and ${items.length} line items`,
+            summary: `Manual edit: updated header and ${items.length} line items.`,
+            before_data: { status: current.processing_status },
+            after_data: { status: updatedInvoice.processing_status },
+            old_values: { status: current.processing_status },
+            new_values: { status: updatedInvoice.processing_status },
+            status_from: current.processing_status || null,
+            status_to: updatedInvoice.processing_status || null,
+        });
 
         await client.query('COMMIT');
         return updatedInvoice;
@@ -1394,26 +1854,34 @@ export async function applyRevalidationOutcome(
         );
         const updatedInvoice = updateRes.rows[0];
 
-        await client.query(
-            `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-            [
-                id,
-                updatedInvoice?.invoice_number || current.invoice_number,
-                updatedInvoice?.vendor_name || current.vendor_name,
-                'Edited',
-                userName,
-                'Revalidation: updated n8n validation data and recomputed status',
-                JSON.stringify({
-                    processing_status: current.processing_status,
-                    n8n_val_json_data: current.n8n_val_json_data || null
-                }),
-                JSON.stringify({
-                    processing_status: updatedInvoice?.processing_status,
-                    n8n_val_json_data: updatedInvoice?.n8n_val_json_data || null
-                }),
-            ]
+        const revalidationAuditDiff = buildRevalidationAuditDiff(
+            n8nVal,
+            mergedN8nVal,
+            current.processing_status,
+            updatedInvoice?.processing_status
         );
+
+        if (revalidationAuditDiff.changedFieldLabels.length > 0) {
+            const summary =
+                revalidationAuditDiff.changedFieldLabels.length > 3
+                    ? `Revalidated ${revalidationAuditDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${revalidationAuditDiff.changedFieldLabels.length - 3} more.`
+                    : `Revalidated ${revalidationAuditDiff.changedFieldLabels.join(', ')}.`;
+
+            await insertAuditLog(client.query.bind(client), {
+                invoice_id: id,
+                invoice_no: updatedInvoice?.invoice_number || current.invoice_number,
+                vendor_name: updatedInvoice?.vendor_name || current.vendor_name,
+                event_type: 'Revalidated',
+                event_code: 'REVALIDATED',
+                user_name: userName,
+                description: summary,
+                summary,
+                before_data: revalidationAuditDiff.beforeData,
+                after_data: revalidationAuditDiff.afterData,
+                old_values: revalidationAuditDiff.beforeData,
+                new_values: revalidationAuditDiff.afterData,
+            });
+        }
 
         await client.query('COMMIT');
         return updatedInvoice;
@@ -1841,26 +2309,120 @@ export async function getTallySyncLogs(entityId?: string) {
  *
  * @param data - Audit event data
  */
+type AuditQueryExecutor = (text: string, params?: any[]) => Promise<any>;
+
+type AuditLogWriteInput = {
+    invoice_id?: string | null;
+    invoice_no?: string | null;
+    vendor_name?: string | null;
+    event_type: string;
+    user_name?: string | null;
+    changed_by_user_id?: string | null;
+    description: string;
+    before_data?: object | null;
+    after_data?: object | null;
+    old_values?: object | null;
+    new_values?: object | null;
+    entity_name?: string | null;
+    entity_type?: string | null;
+    entity_id?: string | null;
+    event_code?: string | null;
+    summary?: string | null;
+    company_id?: string | null;
+    batch_id?: string | null;
+    status_from?: string | null;
+    status_to?: string | null;
+    details?: object | null;
+    is_user_visible?: boolean;
+    severity?: string | null;
+    created_by_user_id?: string | null;
+    created_by_display_name?: string | null;
+};
+
+async function insertAuditLog(executor: AuditQueryExecutor, data: AuditLogWriteInput) {
+    await executor(
+        `INSERT INTO audit_logs (
+            invoice_id, invoice_no, vendor_name, event_type, user_name, changed_by_user_id,
+            description, before_data, after_data, old_values, new_values,
+            entity_name, entity_type, entity_id, event_code, summary,
+            company_id, batch_id, status_from, status_to, details,
+            is_user_visible, severity, created_by_user_id, created_by_display_name
+         )
+         VALUES (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb,
+            $12, $13, $14, $15, $16,
+            $17, $18, $19, $20, $21::jsonb,
+            $22, $23, $24, $25
+         )`,
+        [
+            data.invoice_id || null,
+            data.invoice_no || null,
+            data.vendor_name || null,
+            data.event_type,
+            data.user_name || data.created_by_display_name || 'System',
+            data.changed_by_user_id || data.created_by_user_id || null,
+            data.description,
+            data.before_data ? JSON.stringify(data.before_data) : null,
+            data.after_data ? JSON.stringify(data.after_data) : null,
+            data.old_values ? JSON.stringify(data.old_values) : null,
+            data.new_values ? JSON.stringify(data.new_values) : null,
+            data.entity_name || null,
+            data.entity_type || null,
+            data.entity_id || null,
+            data.event_code || null,
+            data.summary || null,
+            data.company_id || null,
+            data.batch_id || null,
+            data.status_from || null,
+            data.status_to || null,
+            data.details ? JSON.stringify(data.details) : null,
+            data.is_user_visible ?? true,
+            data.severity || null,
+            data.created_by_user_id || data.changed_by_user_id || null,
+            data.created_by_display_name || data.user_name || 'System',
+        ]
+    );
+}
+
 export async function createAuditLog(data: {
     invoice_id?: string;
     invoice_no?: string;
     vendor_name?: string;
     event_type: string;
     user_name?: string;
+    changed_by_user_id?: string;
     description: string;
     before_data?: object;
     after_data?: object;
+    old_values?: object;
+    new_values?: object;
+    entity_name?: string;
+    entity_type?: string;
+    entity_id?: string;
+    event_code?: string;
+    summary?: string;
+    company_id?: string;
+    batch_id?: string;
+    status_from?: string;
+    status_to?: string;
+    details?: object;
+    is_user_visible?: boolean;
+    severity?: string;
+    created_by_user_id?: string;
+    created_by_display_name?: string;
 }) {
-    await query(
-        `INSERT INTO audit_logs (invoice_id, invoice_no, vendor_name, event_type, user_name, description, before_data, after_data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
-        [
-            data.invoice_id || null, data.invoice_no || null, data.vendor_name || null,
-            data.event_type, data.user_name || 'System', data.description,
-            data.before_data ? JSON.stringify(data.before_data) : null,
-            data.after_data ? JSON.stringify(data.after_data) : null,
-        ]
-    );
+    // Auto-resolve company_id from the invoice when not explicitly provided
+    let resolvedCompanyId = data.company_id || null;
+    if (!resolvedCompanyId && data.invoice_id) {
+        try {
+            const res = await query('SELECT company_id FROM ap_invoices WHERE id = $1', [data.invoice_id]);
+            resolvedCompanyId = res.rows[0]?.company_id ?? null;
+        } catch {
+            // Non-critical — audit write proceeds with null company_id
+        }
+    }
+    await insertAuditLog(query, { ...data, company_id: resolvedCompanyId ?? undefined });
 }
 
 /**
@@ -1869,13 +2431,89 @@ export async function createAuditLog(data: {
  *
  * @returns Array of audit event rows
  */
-export async function getAuditLogs() {
-    const result = await query(`
-    SELECT * FROM audit_logs 
-    ORDER BY timestamp DESC 
-    LIMIT 500
-  `);
-    return result.rows;
+export async function getAuditLogs(params: {
+    page?: number;
+    pageSize?: number;
+    eventType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    companyId?: string;
+} = {}) {
+    const page     = Math.max(1, params.page || 1);
+    const pageSize = Math.min(100, Math.max(10, params.pageSize || 25));
+    const offset   = (page - 1) * pageSize;
+
+    const conditions: string[] = [];
+    const values: any[]        = [];
+    let idx = 1;
+
+    if (params.companyId && params.companyId !== 'ALL') {
+        conditions.push(`company_id = $${idx++}`);
+        values.push(params.companyId);
+    }
+    if (params.eventType && params.eventType !== 'All') {
+        conditions.push(`event_type = $${idx++}`);
+        values.push(params.eventType);
+    }
+    if (params.dateFrom) {
+        conditions.push(`timestamp >= $${idx++}`);
+        values.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+        conditions.push(`timestamp < $${idx++}`);
+        values.push(params.dateTo);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const [countResult, dataResult] = await Promise.all([
+        query(`SELECT COUNT(*) FROM audit_logs ${where}`, values),
+        query(
+            `SELECT * FROM audit_logs ${where} ORDER BY timestamp DESC LIMIT $${idx} OFFSET $${idx + 1}`,
+            [...values, pageSize, offset]
+        ),
+    ]);
+
+    const total = parseInt(countResult.rows[0].count, 10);
+    return {
+        rows:       dataResult.rows,
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+    };
+}
+
+/**
+ * Fetch a single audit log row by primary key (used for pre-delete guard).
+ */
+export async function getAuditLogById(id: number) {
+    return query('SELECT id, event_type FROM audit_logs WHERE id = $1', [id]);
+}
+
+/**
+ * Hard-delete a single audit log entry by ID.
+ * Only permitted for non-forensic event types (enforced in the IPC layer).
+ */
+export async function deleteAuditLog(id: number) {
+    await query('DELETE FROM audit_logs WHERE id = $1', [id]);
+    return true;
+}
+
+/**
+ * Hard-delete multiple audit log entries in a single query.
+ * Protected event types ('Created', 'Deleted') are excluded at the DB level as a safety net.
+ * Returns the number of rows actually deleted.
+ */
+export async function deleteAuditLogsBulk(ids: number[]): Promise<number> {
+    if (!ids.length) return 0;
+    const result = await query(
+        `DELETE FROM audit_logs
+         WHERE id = ANY($1::int[])
+           AND event_type NOT IN ('Created', 'Deleted')`,
+        [ids]
+    );
+    return result.rowCount ?? 0;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2380,6 +3018,7 @@ export async function getAppConfig(key: string, companyId?: string) {
  */
 export async function setAppConfig(key: string, value: any, companyId?: string) {
     const valueJson = JSON.stringify(value);
+    const previousValue = await getAppConfig(key, companyId);
     
     // UPSERT pattern
     const existing = await query(
@@ -2397,6 +3036,36 @@ export async function setAppConfig(key: string, value: any, companyId?: string) 
             `INSERT INTO app_config (config_key, config_value, company_id) VALUES ($1, $2, $3)`,
             [key, valueJson, companyId || null]
         );
+    }
+
+    // Audit the config change — wrapped entirely so any failure never propagates to the caller.
+    // The config is already saved above; audit is best-effort.
+    try {
+        const configDiff = await buildAppConfigAuditDiff(previousValue, value);
+        if (!configDiff || configDiff.changedFieldLabels.length === 0) return;
+
+        const configLabel = APP_CONFIG_LABELS[key] || key.replace(/_/g, ' ');
+        const scopeLabel = companyId ? 'company scoped' : 'global';
+        const changedSummary =
+            configDiff.changedFieldLabels.length > 3
+                ? `${configDiff.changedFieldLabels.slice(0, 3).join(', ')} and ${configDiff.changedFieldLabels.length - 3} more`
+                : configDiff.changedFieldLabels.join(', ');
+
+        await insertAuditLog(query, {
+            entity_name: configLabel,
+            entity_type: 'config',
+            event_type: 'Edited',
+            event_code: 'CONFIG_UPDATED',
+            user_name: 'System',
+            description: `${configLabel} updated (${scopeLabel}): ${changedSummary}.`,
+            summary: `${configLabel}: ${changedSummary}.`,
+            before_data: configDiff.beforeData,
+            after_data: configDiff.afterData,
+            old_values: configDiff.beforeData,
+            new_values: configDiff.afterData,
+        });
+    } catch (auditErr) {
+        console.error(`[DB] setAppConfig audit failed for ${key}:`, auditErr);
     }
 }
 

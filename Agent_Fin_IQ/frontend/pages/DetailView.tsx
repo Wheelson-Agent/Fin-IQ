@@ -609,7 +609,7 @@ export default function DetailView() {
       const docTypeChanged = JSON.stringify(docFields.doc_type) !== JSON.stringify(originalDocFields.doc_type);
 
       // Workspace-only save: update `ap_invoices.ocr_raw_payload` and persist doc_type when it changes.
-      await saveAllInvoiceData(
+      const savedInvoice = await saveAllInvoiceData(
         id,
         {
           __workspace_only: true,
@@ -619,6 +619,22 @@ export default function DetailView() {
         [],
         'Admin'
       );
+
+      const savedRawPayload = (savedInvoice as any)?.ocr_raw_payload;
+
+      if (savedRawPayload) {
+        try {
+          setRawPayload(
+            typeof savedRawPayload === 'string'
+              ? JSON.parse(savedRawPayload)
+              : savedRawPayload
+          );
+        } catch {
+          setRawPayload(payloadPatch);
+        }
+      } else {
+        setRawPayload(payloadPatch);
+      }
 
       // Reset originals using deep copy to break all references
       setOriginalDocFields(JSON.parse(JSON.stringify(docFields)));
