@@ -112,10 +112,17 @@ export async function sendToTallyPrime(payload: Record<string, any>): Promise<{
 
     try {
         console.log(`[N8N] Sending to Tally Prime webhook: ${url}`);
+        const fullPayload = {
+            ...payload,
+            sync_data: {
+                bridge_base_url: process.env.TALLY_SERVER_URL || '',
+                bridge_api_key: process.env.BRIDGE_API_KEY || ''
+            }
+        };
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(fullPayload),
             signal: AbortSignal.timeout(30000),
         });
 
@@ -154,7 +161,14 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
     console.log('[N8N] Vendor creation: outgoing webhook URL:', url);
 
     try {
-        const body = JSON.stringify(payload);
+        const fullPayload = {
+            ...payload,
+            sync_data: {
+                bridge_base_url: process.env.TALLY_SERVER_URL || '',
+                bridge_api_key: process.env.BRIDGE_API_KEY || ''
+            }
+        };
+        const body = JSON.stringify(fullPayload);
         console.log('[N8N] Vendor creation: POST body length:', body.length);
         const response = await fetch(url!, {
             method: 'POST',
@@ -213,7 +227,14 @@ export async function sendMasterCreationToN8n(payload: Record<string, any>): Pro
     console.log('[N8N] Master creation: Routing to Tally Post URL:', url);
 
     try {
-        const body = JSON.stringify(payload);
+        const fullPayload = {
+            ...payload,
+            sync_data: {
+                bridge_base_url: process.env.TALLY_SERVER_URL || '',
+                bridge_api_key: process.env.BRIDGE_API_KEY || ''
+            }
+        };
+        const body = JSON.stringify(fullPayload);
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
