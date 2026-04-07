@@ -1355,5 +1355,25 @@ export function registerIpcHandlers() {
         }
     });
 
-    console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp, config');
+    ipcMain.handle('invoices:get-tally-post-status', async (_: any, { invoiceId, since }: { invoiceId: string; since: string }) => {
+        try {
+            const result = await queries.getTallyPostStatus(invoiceId, since);
+            return { success: true, ...result };
+        } catch (err: any) {
+            console.error('[IPC] invoices:get-tally-post-status failed:', err.message);
+            return { success: false, status: 'pending' };
+        }
+    });
+
+    ipcMain.handle('sync:get-latest-status', async (_: any, { since, companyId }: { since?: string; companyId?: string } = {}) => {
+        try {
+            const rows = await queries.getLatestSyncStatus(since, companyId);
+            return { success: true, rows };
+        } catch (err: any) {
+            console.error('[IPC] sync:get-latest-status failed:', err.message);
+            return { success: false, rows: [], error: err.message };
+        }
+    });
+
+    console.log('[IPC] Registered handlers: auth, invoices, vendors, audit, processing, erp, config, sync-status');
 }
