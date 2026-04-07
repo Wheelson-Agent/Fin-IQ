@@ -590,3 +590,68 @@ BEGIN
     ALTER TABLE companies ADD COLUMN tally_version TEXT;
   END IF;
 END $$;
+
+-- Migrate audit_logs: add columns that were added after the table was first created.
+-- Each block is safe to run repeatedly (IF NOT EXISTS guard).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='entity_type') THEN
+    ALTER TABLE audit_logs ADD COLUMN entity_type TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='entity_name') THEN
+    ALTER TABLE audit_logs ADD COLUMN entity_name TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='entity_id') THEN
+    ALTER TABLE audit_logs ADD COLUMN entity_id UUID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='event_code') THEN
+    ALTER TABLE audit_logs ADD COLUMN event_code TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='summary') THEN
+    ALTER TABLE audit_logs ADD COLUMN summary TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='batch_id') THEN
+    ALTER TABLE audit_logs ADD COLUMN batch_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='status_from') THEN
+    ALTER TABLE audit_logs ADD COLUMN status_from TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='status_to') THEN
+    ALTER TABLE audit_logs ADD COLUMN status_to TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='details') THEN
+    ALTER TABLE audit_logs ADD COLUMN details JSONB;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='is_user_visible') THEN
+    ALTER TABLE audit_logs ADD COLUMN is_user_visible BOOLEAN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='severity') THEN
+    ALTER TABLE audit_logs ADD COLUMN severity TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='created_by_user_id') THEN
+    ALTER TABLE audit_logs ADD COLUMN created_by_user_id UUID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='created_by_display_name') THEN
+    ALTER TABLE audit_logs ADD COLUMN created_by_display_name TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='company_id') THEN
+    ALTER TABLE audit_logs ADD COLUMN company_id UUID REFERENCES companies(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='old_values') THEN
+    ALTER TABLE audit_logs ADD COLUMN old_values JSONB;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='new_values') THEN
+    ALTER TABLE audit_logs ADD COLUMN new_values JSONB;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='audit_logs' AND column_name='changed_by_user_id') THEN
+    ALTER TABLE audit_logs ADD COLUMN changed_by_user_id UUID;
+  END IF;
+END $$;
+
+-- Backfill company_id on audit_logs rows that were written before auto-resolve was added
+UPDATE audit_logs al
+SET company_id = inv.company_id
+FROM ap_invoices inv
+WHERE al.invoice_id = inv.id
+  AND al.company_id IS NULL
+  AND inv.company_id IS NOT NULL;

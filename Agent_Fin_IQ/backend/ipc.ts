@@ -332,13 +332,13 @@ export function registerIpcHandlers() {
         });
 
 
-        // Step 4: Log audit event
-        await queries.createAuditLog({
+        // Step 4: Log audit event — fire-and-forget, never blocks the upload
+        queries.createAuditLog({
             invoice_id: invoice.id,
             invoice_no: invoice.invoice_number,
             event_type: 'Created',
             description: `Invoice "${fileName}" uploaded to batch "${currentBatch}"`,
-        });
+        }).catch((auditErr) => console.warn('[IPC] Non-critical: upload audit log failed:', auditErr?.message));
 
         await recordStageSafe(
             invoice.id,
