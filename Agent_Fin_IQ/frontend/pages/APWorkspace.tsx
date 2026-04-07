@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, startTransition } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, MoreVertical, Filter,
@@ -52,6 +52,7 @@ interface APRecord {
   items: number;
   fileName: string;
   erpRef?: string;
+  voucherNumber?: string;
   reason?: string;
   remarks?: string;
   requiredField?: string;
@@ -344,6 +345,7 @@ export default function APWorkspace() {
     posted: 1,
   });
   const [pageSize, setPageSize] = useState(10);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
@@ -532,6 +534,7 @@ export default function APWorkspace() {
             createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : new Date().toISOString(),
             updatedAt: inv.updated_at ? new Date(inv.updated_at).toISOString() : new Date().toISOString(),
             erpRef: inv.erp_sync_id || undefined,
+            voucherNumber: inv.voucher_number || undefined,
             taxAmount: Number(inv.gst || inv.tax_total || 0),
             uploadedAt: inv.uploaded_date ? new Date(inv.uploaded_date).toISOString() : 'Unknown',
             docTypeLabel: docTypeLabel,
@@ -718,6 +721,13 @@ export default function APWorkspace() {
     resetAllPages();
   }, [searchQuery, dateFilter.from?.getTime(), dateFilter.to?.getTime(), pageSize]);
 
+  useEffect(() => {
+    const saved = sessionStorage.getItem('apWorkspaceScrollTop');
+    if (saved && tableScrollRef.current) {
+      tableScrollRef.current.scrollTop = Number(saved);
+      sessionStorage.removeItem('apWorkspaceScrollTop');
+    }
+  }, [records]);
 
   const confirmUpload = async () => {
     if (!pendingUploads) return;
@@ -938,6 +948,14 @@ export default function APWorkspace() {
   };
 
   const handleRowClick = (record: APRecord) => {
+    if (tableScrollRef.current) {
+      sessionStorage.setItem('apWorkspaceScrollTop', String(tableScrollRef.current.scrollTop));
+    }
+    const pageRecords = getPaginatedData(activeTab);
+    const ids = pageRecords.map(r => r.id);
+    const idx = ids.indexOf(record.id);
+    sessionStorage.setItem('apWorkspaceNavIds', JSON.stringify(ids));
+    sessionStorage.setItem('apWorkspaceNavIdx', String(idx));
     navigate(`/detail/${record.id}?from=${activeTab}`);
   };
 
@@ -1067,20 +1085,25 @@ export default function APWorkspace() {
     }, {} as Record<TableTab, APRecord[]>);
   }, [filtersByTab, statusMatchedRecordsByTab, valueLimitConfig]);
 
-  const getVisibleTabRecords = (targetTab: string) => {
-    if (!isTableTab(targetTab)) return [];
-
-    let base = structuredRecordsByTab[targetTab];
-    const tabFilter = tabFilters[targetTab];
-    if (tabFilter) {
-      const q = tabFilter.toLowerCase();
-      base = base.filter(r =>
-        r.invoiceNo.toLowerCase().includes(q) ||
-        r.supplier.toLowerCase().includes(q)
-      );
+  const visibleRecordsByTab = useMemo<Record<string, APRecord[]>>(() => {
+    const result: Record<string, APRecord[]> = {};
+    for (const tab of TABLE_TABS) {
+      let base = structuredRecordsByTab[tab];
+      const tabFilter = tabFilters[tab];
+      if (tabFilter) {
+        const q = tabFilter.toLowerCase();
+        base = base.filter(r =>
+          r.invoiceNo.toLowerCase().includes(q) ||
+          r.supplier.toLowerCase().includes(q)
+        );
+      }
+      result[tab] = base;
     }
-    return base;
-  };
+    return result;
+  }, [structuredRecordsByTab, tabFilters]);
+
+  const getVisibleTabRecords = (targetTab: string): APRecord[] =>
+    visibleRecordsByTab[targetTab] ?? [];
 
   // Derived filtered data
   const counts = {
@@ -1766,10 +1789,12 @@ export default function APWorkspace() {
           <Tabs
             value={activeTab}
             onValueChange={(val) => {
-              setActiveTab(val);
-              setSelectedIds(new Set());
-              setFilterPanelTab(null);
-              setSearchParams({ tab: val });
+              startTransition(() => {
+                setActiveTab(val);
+                setSelectedIds(new Set());
+                setFilterPanelTab(null);
+                setSearchParams({ tab: val });
+              });
             }}
             className="flex-1 flex flex-col w-full h-full"
           >
@@ -1818,7 +1843,7 @@ export default function APWorkspace() {
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-auto bg-white p-0">
+            <div ref={tableScrollRef} className="flex-1 overflow-auto bg-white p-0">
               {/* --- PROCESSING TAB --- */}
               {isProcessing && (
                 <TabsContent value="processing" className="m-0 h-full border-none p-0 outline-none">
@@ -1900,8 +1925,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('received').length > 0 && getVisibleTabRecords('received').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('received'))}
+                          checked={getPaginatedData('received').length > 0 && getPaginatedData('received').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('received'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%]">Supplier Reference</TableHead>
@@ -2088,8 +2113,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('ready').length > 0 && getVisibleTabRecords('ready').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('ready'))}
+                          checked={getPaginatedData('ready').length > 0 && getPaginatedData('ready').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('ready'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
@@ -2258,8 +2283,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('input').length > 0 && getVisibleTabRecords('input').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('input'))}
+                          checked={getPaginatedData('input').length > 0 && getPaginatedData('input').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('input'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
@@ -2410,8 +2435,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('handoff').length > 0 && getVisibleTabRecords('handoff').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('handoff'))}
+                          checked={getPaginatedData('handoff').length > 0 && getPaginatedData('handoff').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('handoff'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
@@ -2546,8 +2571,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('posted').length > 0 && getVisibleTabRecords('posted').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('posted'))}
+                          checked={getPaginatedData('posted').length > 0 && getPaginatedData('posted').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('posted'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[45%] px-6">Supplier Reference</TableHead>
@@ -2580,10 +2605,13 @@ export default function APWorkspace() {
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center gap-2">
-                              <div className="flex items-center gap-1.5 text-emerald-700">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                <span className="text-xs font-semibold">Ref: {record.erpRef || 'N/A'}</span>
+                            <div className="flex items-start gap-2">
+                              <div className="flex items-start gap-1.5 text-emerald-700">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 mt-1.5" />
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-sm font-bold text-emerald-800 leading-none">Vch No: {record.voucherNumber || 'N/A'}</span>
+                                  <span className="text-[10px] text-emerald-600/80 leading-tight">Ref: {record.erpRef || 'N/A'}</span>
+                                </div>
                               </div>
                               <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 uppercase px-1 py-0 shadow-none h-4">Synced</Badge>
                             </div>

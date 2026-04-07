@@ -464,6 +464,24 @@ export default function DetailView() {
   const [zoom, setZoom] = useState(100);
   const [page, setPage] = useState(1);
   const fromTab = searchParams.get('from') || 'received';
+
+  const navIds: string[] = (() => {
+    try { return JSON.parse(sessionStorage.getItem('apWorkspaceNavIds') || '[]'); } catch { return []; }
+  })();
+  const navIdx = (() => {
+    const v = sessionStorage.getItem('apWorkspaceNavIdx');
+    return v !== null ? Number(v) : navIds.indexOf(id || '');
+  })();
+  const hasPrev = navIdx > 0;
+  const hasNext = navIdx < navIds.length - 1;
+
+  const navigateToRecord = (targetIdx: number) => {
+    const targetId = navIds[targetIdx];
+    if (!targetId) return;
+    sessionStorage.setItem('apWorkspaceNavIdx', String(targetIdx));
+    navigate(`/detail/${targetId}?from=${fromTab}`);
+  };
+
   const tabNames: Record<string, string> = {
     received: 'Received',
     handoff: 'Handoff',
@@ -1440,6 +1458,28 @@ export default function DetailView() {
           </button>
 
           <div className="h-10 w-[1px] bg-slate-200 mx-1" />
+
+          {navIds.length > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => navigateToRecord(navIdx - 1)}
+                disabled={!hasPrev}
+                title="Previous record"
+                className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} />
+              </button>
+              <span className="text-[11px] font-bold text-slate-400 select-none px-1">{navIdx + 1}/{navIds.length}</span>
+              <button
+                onClick={() => navigateToRecord(navIdx + 1)}
+                disabled={!hasNext}
+                title="Next record"
+                className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                <ChevronRight size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
 
           <div className="flex flex-col">
             <h1 className="text-[17px] font-black text-slate-900 leading-tight flex items-center gap-3">
