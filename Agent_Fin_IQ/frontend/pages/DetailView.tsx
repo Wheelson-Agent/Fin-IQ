@@ -349,6 +349,11 @@ const isGenericGoodsMarker = (value: any): boolean => {
   return !normalized || normalized === 'goods';
 };
 
+const isGenericServiceMarker = (value: any): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return !normalized || normalized === 'services';
+};
+
 const findMatchingOption = (value: any, options: string[]): string => {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (!normalized) return '';
@@ -1351,6 +1356,16 @@ export default function DetailView() {
     return true;
   };
 
+  const applyAllMappedLedgers = () => {
+    const nextLineItems = lineItems.map((item, index) => {
+      const ml = String(rawPayload?.line_items?.[index]?.mapped_ledger ?? '').trim();
+      if (!ml) return item;
+      const resolvedId = resolveLedgerId(ml);
+      return { ...item, ledger: resolvedId || ml, mapped_ledger: ml, matched_stock_item: '', matched_id: '' };
+    });
+    setLineItems(nextLineItems);
+  };
+
   const applyLedgerSelection = (rowIndex: number, ledgerLabel: string, explicitLedgerId?: string) => {
     const resolvedId = explicitLedgerId || resolveLedgerId(ledgerLabel);
     const nextLineItems = lineItems.map((line, index) => {
@@ -1643,11 +1658,9 @@ export default function DetailView() {
                     { label: 'Particulars', key: 'invoice_ocr_data_validation', showIf: 'all' },
                     { label: 'Supplier', key: 'vendor_verification', showIf: 'all' },
                     { label: 'Duplication', key: 'duplicate_check', showIf: 'all' },
-                    { label: 'Ledger', key: 'line_item_match_status', showIf: 'goods' },
+                    { label: isGoodsDocument ? 'Stock Item' : 'Ledger', key: 'line_item_match_status', showIf: 'all' },
                   ].filter(item => {
-                    const label = (docFields.doc_type_label || '').toLowerCase();
                     if (item.showIf === 'all') return true;
-                    if (item.showIf === 'goods') return label.includes('goods');
                     return true;
                   }).map(({ label, key }) => {
                     const value = docFields[key];
@@ -1838,6 +1851,15 @@ export default function DetailView() {
                     <div className="flex items-center gap-2">
                       <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Line Items</h3>
                       <div className="h-[2px] flex-1 bg-slate-50" />
+                      {!isGoodsDocument && !readOnly && lineItems.some((_item, idx) => String(rawPayload?.line_items?.[idx]?.mapped_ledger ?? '').trim()) && (
+                        <button
+                          type="button"
+                          onClick={applyAllMappedLedgers}
+                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-[11px] font-black text-blue-600 uppercase tracking-tight hover:bg-blue-100 transition-colors"
+                        >
+                          Use All Suggestions
+                        </button>
+                      )}
                     </div>
 
                     <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
@@ -1855,7 +1877,7 @@ export default function DetailView() {
                           <thead className="bg-slate-50/80 border-b border-slate-200">
                             <tr>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">{isGoodsDocument ? 'Stock Item' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">{isGoodsDocument ? 'Stock Item / Ledger' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">HSN/SAC</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Quantity</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Unit Rate</th>
@@ -1939,10 +1961,10 @@ export default function DetailView() {
                                       setShowLedgerSlideout(true);
                                     }}
                                   />
-                                  {(!isGoodsDocument && !String(item?.ledger || '').trim() && rawPayload?.line_items?.[index]?.mapped_ledger) && (
+                                  {(!isGoodsDocument && isGenericServiceMarker(item?.ledger) && String(rawPayload?.line_items?.[index]?.mapped_ledger ?? '').trim()) && (
                                     <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
-                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">OCR Suggested Ledger</span>
-                                      <span className="text-[11px] text-slate-700 font-medium leading-4 whitespace-normal break-words" title={rawPayload.line_items[index].mapped_ledger}>
+                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">Suggested Ledger</span>
+                                      <span className="text-[11px] text-blue-600 font-semibold leading-4 whitespace-normal break-words" title={rawPayload.line_items[index].mapped_ledger}>
                                         {rawPayload.line_items[index].mapped_ledger}
                                       </span>
                                     </div>

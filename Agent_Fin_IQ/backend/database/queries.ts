@@ -1928,6 +1928,23 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             console.warn(`[DB] ingestN8nData: Canonical ocr_raw_payload missing in payload.ap_invoices[0]. File: ${invData.file_name || 'unknown'}`);
         }
 
+        // --- DERIVE doc_type FROM line_items[0].ledger (source of truth) ---
+        // n8n's invoice-level doc_type field can be inconsistent.
+        // Check in priority order:
+        //   1. ocr_raw_payload.line_items[0].ledger  (set after canonicalRawPayload above)
+        //   2. all_data_invoice.line_items[0].ledger  (n8n puts enriched data here)
+        // "services" → doc_type = 'services', anything else → doc_type = 'goods'
+        const _rawPayloadItem = (invData.ocr_raw_payload?.line_items ?? [])[0];
+        const _allDataItem = (invData.all_data_invoice?.line_items ?? [])[0];
+        const _firstLineItem = _rawPayloadItem ?? _allDataItem;
+        if (_firstLineItem) {
+            const _firstLedger = String(_firstLineItem.ledger ?? '').trim().toLowerCase();
+            invData.doc_type = _firstLedger === 'services' ? 'services' : 'goods';
+            console.log(`[DB] ingestN8nData: derived doc_type="${invData.doc_type}" from line_items[0].ledger="${_firstLineItem.ledger}"`);
+        } else {
+            console.warn(`[DB] ingestN8nData: could not find line_items[0].ledger — doc_type unchanged ("${invData.doc_type}")`);
+        }
+
         // 1. Vendor lookup only.
         // Do not auto-create vendors during upload/ingestion in production.
         let vendorId = invData.vendor_id;

@@ -2088,6 +2088,8 @@ export default function APWorkspace() {
                               <span>Tax: <span className="text-slate-700">{formatCurrency(record.taxAmount)}</span></span>
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
+                              <span className="text-slate-300">|</span>
+                              <span>{record.docTypeLabel?.replace('Invoice (', '')?.replace(')', '') || 'Unknown'}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
@@ -2256,6 +2258,8 @@ export default function APWorkspace() {
                               <span>Tax: <span className="text-slate-700">{formatCurrency(record.taxAmount)}</span></span>
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
+                              <span className="text-slate-300">|</span>
+                              <span>{record.docTypeLabel?.replace('Invoice (', '')?.replace(')', '') || 'Unknown'}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
@@ -2399,6 +2403,8 @@ export default function APWorkspace() {
                               <span>Tax: <span className="text-slate-700">{formatCurrency(record.taxAmount)}</span></span>
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
+                              <span className="text-slate-300">|</span>
+                              <span>{record.docTypeLabel?.replace('Invoice (', '')?.replace(')', '') || 'Unknown'}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
