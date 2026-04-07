@@ -665,6 +665,10 @@ export default function DetailView() {
   };
 
   const [isSyncingVendor, setIsSyncingVendor] = useState(false);
+  const [vendorSyncError, setVendorSyncError] = useState<string | null>(null);
+  const [vendorSyncSuccess, setVendorSyncSuccess] = useState<string | null>(null);
+  const [masterSyncError, setMasterSyncError] = useState<string | null>(null);
+  const [masterSyncSuccess, setMasterSyncSuccess] = useState<string | null>(null);
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [itemOptions, setItemOptions] = useState<string[]>([]);
@@ -2128,8 +2132,21 @@ export default function DetailView() {
                   </div>
                 </div>
               </div>
+              {vendorSyncSuccess && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </div>
+                  <span className="text-[12px] text-emerald-700 font-medium leading-snug">{vendorSyncSuccess}</span>
+                </div>
+              )}
+              {vendorSyncError && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 font-medium leading-snug">
+                  {vendorSyncError}
+                </div>
+              )}
               <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
+                <Button variant="ghost" onClick={() => { setShowVendorSlideout(false); setVendorSyncError(null); setVendorSyncSuccess(null); }} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
                 <Button
                   disabled={isSyncingVendor}
                   onClick={async () => {
@@ -2194,20 +2211,19 @@ export default function DetailView() {
                     };
                     console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
                     setIsSyncingVendor(true);
-                    toast.info('Vendor creation started');
+                    setVendorSyncError(null);
                     try {
                       const result = await syncVendorWithTally(payload);
                       console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
                       if (result.success) {
-                        toast.success(result.message || 'Vendor created successfully in ERP');
-                        setShowVendorSlideout(false);
+                        setVendorSyncSuccess(result.message || 'Vendor created successfully in Tally');
                       } else {
-                        toast.error(result.message || 'Vendor sync with ERP failed');
+                        setVendorSyncError(result.message || 'Vendor sync with ERP failed');
                       }
                     } catch (err) {
                       const msg = err instanceof Error ? err.message : 'Vendor sync failed';
                       console.error('[DetailView] syncVendorWithTally error:', err);
-                      toast.error(msg);
+                      setVendorSyncError(msg);
                     } finally {
                       setIsSyncingVendor(false);
                     }
@@ -2276,8 +2292,21 @@ export default function DetailView() {
                 )}
               </div>
 
+              {masterSyncSuccess && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </div>
+                  <span className="text-[12px] text-emerald-700 font-medium leading-snug">{masterSyncSuccess}</span>
+                </div>
+              )}
+              {masterSyncError && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 font-medium leading-snug">
+                  {masterSyncError}
+                </div>
+              )}
               <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={saving}>Cancel</Button>
+                <Button variant="ghost" onClick={() => { setShowLedgerSlideout(false); setMasterSyncError(null); setMasterSyncSuccess(null); }} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={saving}>Cancel</Button>
                 <Button
                   disabled={saving}
                   onClick={async () => {
@@ -2295,6 +2324,8 @@ export default function DetailView() {
                     const isGoods = label.toLowerCase().includes('goods');
 
                     setSaving(true);
+                    setMasterSyncError(null);
+                    setMasterSyncSuccess(null);
                     try {
                       if (creationMode === 'STOCK_ITEM') {
                         const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
@@ -2322,7 +2353,7 @@ export default function DetailView() {
                         const createdName = result.item.item_name || name;
                         setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
                         applyGoodsStockItemSelection(activeLedgerIndex, createdName);
-                        toast.success('Stock item created and synced');
+                        setMasterSyncSuccess(result.message || 'Stock item created successfully in Tally');
                       } else {
                         const { name, underGroup, buyerName, gstApplicable } = newLedger;
                         if (!name.trim()) throw new Error('Ledger name is required');
@@ -2352,17 +2383,15 @@ export default function DetailView() {
                           if (converted) {
                             // Conversion flow already surfaces its own persisted success message.
                           } else {
-                            toast.success('Ledger created');
-                            toast.info('Goods invoice remains unchanged until you confirm the conversion');
+                            setMasterSyncSuccess(result.message || 'Ledger created successfully in Tally');
                           }
                         } else {
                           applyLedgerSelection(activeLedgerIndex, createdName, createdId);
-                          toast.success('Ledger created and synced');
+                          setMasterSyncSuccess(result.message || 'Ledger created successfully in Tally');
                         }
                       }
-                      setShowLedgerSlideout(false);
                     } catch (err: any) {
-                      toast.error(err.message || 'Creation failed');
+                      setMasterSyncError(err.message || 'Creation failed');
                     } finally {
                       setSaving(false);
                     }

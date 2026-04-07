@@ -174,7 +174,7 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body,
-            signal: AbortSignal.timeout(30000),
+            signal: AbortSignal.timeout(15000),
         });
 
         const rawText = await response.text();
@@ -203,7 +203,13 @@ export async function sendVendorCreationToN8n(payload: Record<string, any>): Pro
         return { success, message, data };
     } catch (error: any) {
         console.error('[N8N] ❌ Vendor creation webhook failed:', error.message);
-        return { success: false, message: error.message || 'Network error' };
+        const isTimeout = error.name === 'TimeoutError' || error.name === 'AbortError';
+        return {
+            success: false,
+            message: isTimeout
+                ? 'Tally did not respond in time. Please check that Tally is open and the bridge is running.'
+                : (error.message || 'Network error')
+        };
     }
 }
 
@@ -239,7 +245,7 @@ export async function sendMasterCreationToN8n(payload: Record<string, any>): Pro
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body,
-            signal: AbortSignal.timeout(30000),
+            signal: AbortSignal.timeout(15000),
         });
 
         const data = await response.json().catch(() => ({}));
@@ -250,14 +256,20 @@ export async function sendMasterCreationToN8n(payload: Record<string, any>): Pro
         }
 
         const success = data.success === true || data.status === 'success';
-        return { 
-            success, 
-            message: data.message || (success ? 'Master created successfully' : 'Master creation rejected by n8n/Tally'),
-            data 
+        return {
+            success,
+            message: data.message || (success ? 'Master created successfully' : 'Master creation failed, try again'),
+            data
         };
     } catch (error: any) {
         console.error('[N8N] ❌ Master creation failed:', error.message);
-        return { success: false, message: error.message || 'Network error' };
+        const isTimeout = error.name === 'TimeoutError' || error.name === 'AbortError';
+        return {
+            success: false,
+            message: isTimeout
+                ? 'Tally did not respond in time. Please check that Tally is open and the bridge is running.'
+                : (error.message || 'Network error')
+        };
     }
 }
 

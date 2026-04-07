@@ -344,7 +344,6 @@ export default function APWorkspace() {
     posted: 1,
   });
   const [pageSize, setPageSize] = useState(10);
-  const [tallySuccess, setTallySuccess] = useState<{ invoiceNo: string; supplier: string; voucherNumber: string | null; erpSyncId: string } | null>(null);
   const [tallyError, setTallyError] = useState<{ invoiceNo: string; supplier: string; reason: string } | null>(null);
   const tallyPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
@@ -369,12 +368,24 @@ export default function APWorkspace() {
   } = useProcessing();
 
   // Tally success celebration
-  const [tallySuccess, setTallySuccess] = useState<{ id: string; invoiceNo: string; supplier: string; erpRef: string } | null>(null);
+  const [tallySuccess, setTallySuccess] = useState<{ invoiceNo: string; supplier: string; voucherNumber: string | null; erpSyncId: string } | null>(null);
   useEffect(() => {
     if (!tallySuccess) return;
     const t = setTimeout(() => setTallySuccess(null), 5000);
     return () => clearTimeout(t);
   }, [tallySuccess]);
+
+  // Tally error overlay — auto-dismiss after 8s
+  useEffect(() => {
+    if (!tallyError) return;
+    const t = setTimeout(() => setTallyError(null), 8000);
+    return () => clearTimeout(t);
+  }, [tallyError]);
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => { if (tallyPollRef.current) clearInterval(tallyPollRef.current); };
+  }, []);
 
   // Local-only dialog state
   const [showBatchDialog, setShowBatchDialog] = useState(false);
@@ -896,42 +907,52 @@ export default function APWorkspace() {
     }
   };
 
-  // Poll until erp_sync_id appears on the invoice (truth = posted to Tally)
-  const pollForTallyConfirmation = (invoiceId: string, maxWaitMs = 30000) => {
-    const interval = 2000;
-    const deadline = Date.now() + maxWaitMs;
-    const timer = setInterval(async () => {
-      try {
-        const fresh = await getInvoices();
-        const raw = (fresh as any[]).find((inv: any) => inv.id === invoiceId);
-        if (raw?.erp_sync_id) {
-          clearInterval(timer);
-          fetchData(true);
-          setTallySuccess({
-            id: invoiceId,
-            invoiceNo: raw.invoice_number || raw.invoice_no || '—',
-            supplier: raw.vendor_name || '—',
-            erpRef: raw.erp_sync_id,
-          });
-        } else if (Date.now() > deadline) {
-          clearInterval(timer);
-          fetchData(true);
-        }
-      } catch {
-        clearInterval(timer);
-        fetchData(true);
-      }
-    }, interval);
-  };
-
   const handleApproveRow = async (id: string) => {
     if (!id) return;
     setLoading(true);
+
+    // Clear any in-flight poll
+    if (tallyPollRef.current) { clearInterval(tallyPollRef.current); tallyPollRef.current = null; }
+    setTallySuccess(null);
+    setTallyError(null);
+
+    // Capture BEFORE updateInvoiceStatus — n8n can write to error log before the HTTP call returns
+    const clickedAt = new Date().toISOString();
+    const record = records.find(r => r.id === id);
+    const invoiceNo = record?.invoiceNo || id;
+    const supplier = record?.supplier || 'Unknown';
+
     try {
       await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
-      toast.success('Posting to Tally — confirming…');
+      toast.info('Posting to Tally — confirming…');
       fetchData(true);
-      pollForTallyConfirmation(id);
+      let attempts = 0;
+      const MAX_ATTEMPTS = 15; // 15 × 2s = 30s
+
+      tallyPollRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const outcome = await getTallyPostStatus(id, clickedAt);
+          if (outcome.status === 'success') {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            setTallySuccess({ invoiceNo, supplier, voucherNumber: outcome.voucherNumber, erpSyncId: outcome.erpSyncId });
+            fetchData(true);
+          } else if (outcome.status === 'soft_failed') {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            setTallyError({ invoiceNo, supplier, reason: outcome.failureReason });
+            fetchData(true);
+          } else if (outcome.status === 'hard_failed') {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            setTallyError({ invoiceNo, supplier, reason: outcome.userMessage });
+            fetchData(true);
+          } else if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            toast.warning('Tally confirmation timed out — check Tally manually');
+          }
+        } catch {
+          if (attempts >= MAX_ATTEMPTS) { clearInterval(tallyPollRef.current!); tallyPollRef.current = null; }
+        }
+      }, 2_000);
     } catch (err) {
       console.error('Approve failed:', err);
       toast.error('Failed to initiate posting');
@@ -2756,7 +2777,7 @@ export default function APWorkspace() {
                 className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-full px-4 py-1.5"
               >
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[12px] font-bold text-emerald-700">Tally Ref: {tallySuccess.erpRef}</span>
+                <span className="text-[12px] font-bold text-emerald-700">{tallySuccess.voucherNumber ? `Voucher: ${tallySuccess.voucherNumber}` : `Ref: ${tallySuccess.erpSyncId}`}</span>
               </motion.div>
 
               {/* Dismiss hint */}
@@ -2769,6 +2790,79 @@ export default function APWorkspace() {
               >
                 Click anywhere to dismiss
               </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Tally Error Overlay ── */}
+      <AnimatePresence>
+        {tallyError && (
+          <motion.div
+            key="tally-error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setTallyError(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.8, y: 30, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+              onClick={e => e.stopPropagation()}
+              className="relative bg-white rounded-[20px] shadow-[0_32px_80px_rgba(0,0,0,0.25)] p-[36px_44px] flex flex-col items-center gap-4 min-w-[340px] max-w-[420px]"
+            >
+              {/* Pulsing red ring */}
+              <motion.div
+                className="absolute inset-0 rounded-[20px]"
+                animate={{ boxShadow: ['0 0 0 0px rgba(239,68,68,0.35)', '0 0 0 14px rgba(239,68,68,0)'] }}
+                transition={{ duration: 1.4, repeat: Infinity }}
+              />
+
+              {/* Icon */}
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 350, damping: 18, delay: 0.1 }}
+                className="w-[68px] h-[68px] rounded-full bg-red-50 border-2 border-red-200 flex items-center justify-center"
+              >
+                <AlertCircle className="w-9 h-9 text-red-500" />
+              </motion.div>
+
+              {/* Text */}
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="text-center flex flex-col gap-1.5"
+              >
+                <div className="text-[20px] font-black text-[#1A2640] tracking-tight">Tally Posting Failed</div>
+                <div className="text-[13px] font-semibold text-slate-600">{tallyError.invoiceNo}</div>
+                <div className="text-[12px] text-slate-400">{tallyError.supplier}</div>
+              </motion.div>
+
+              {/* Reason pill */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.25 }}
+                className="w-full bg-red-50 border border-red-200 rounded-[10px] px-4 py-3 text-center"
+              >
+                <span className="text-[12px] font-medium text-red-700 leading-snug">{tallyError.reason}</span>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.5 }}
+                className="text-[11px] text-slate-400"
+              >
+                Please check Tally manually · Click anywhere to dismiss
+              </motion.div>
             </motion.div>
           </motion.div>
         )}
