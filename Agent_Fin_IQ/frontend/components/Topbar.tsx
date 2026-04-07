@@ -9,6 +9,30 @@ import { toast } from 'sonner';
 
 type Theme = 'color' | 'mono';
 
+type SyncDotStatus = 'idle' | 'syncing' | 'success' | 'failure' | 'timeout';
+
+interface SyncStatusRow {
+    workflow_name: string;
+    sync_status: 'success' | 'failure';
+    user_message: string | null;
+    error_category: string | null;
+    created_at: string;
+}
+
+function deriveSyncDot(rows: SyncStatusRow[]): { dot: 'success' | 'failure'; tooltip: string } {
+    const failRow = rows.find(r => r.sync_status === 'failure');
+    if (failRow) {
+        return {
+            dot: 'failure',
+            tooltip: `${failRow.workflow_name}: ${failRow.user_message || 'Failed'}`,
+        };
+    }
+    return {
+        dot: 'success',
+        tooltip: 'Sync success',
+    };
+}
+
 /**
  * Connection status for a single service.
  */
@@ -260,11 +284,44 @@ export function Topbar({
     const [companyOpen, setCompanyOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isErpSyncing, setIsErpSyncing] = useState(false);
+    const [syncDot, setSyncDot] = useState<SyncDotStatus>('idle');
+    const [syncTooltip, setSyncTooltip] = useState<string>('Sync ERP');
     const dropRef = useRef<HTMLDivElement>(null);
     const companyDropRef = useRef<HTMLDivElement>(null);
+    const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const active = themes.find(t => t.id === theme)!;
 
     const currentCompany = selectedCompany || 'All Companies';
+
+    // On mount: show last known sync status from DB
+    useEffect(() => {
+        const fetchInitialStatus = async () => {
+            try {
+                const api = (window as any).api;
+                if (!api?.invoke) return;
+                const result = await api.invoke('sync:get-latest-status', {});
+                if (!result?.success || !result.rows?.length) return;
+                // Group rows from the same sync cycle: within 15s of the most recent row
+                const latestTime = new Date(result.rows[0].created_at).getTime();
+                const batchRows = (result.rows as SyncStatusRow[]).filter(
+                    r => latestTime - new Date(r.created_at).getTime() <= 15_000
+                );
+                const { dot, tooltip } = deriveSyncDot(batchRows);
+                setSyncDot(dot);
+                setSyncTooltip(`Last sync · ${tooltip}`);
+            } catch {
+                // non-critical — dot stays idle
+            }
+        };
+        fetchInitialStatus();
+    }, []);
+
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => {
+            if (syncPollRef.current) clearInterval(syncPollRef.current);
+        };
+    }, []);
 
     const handleRefresh = async () => {
         if (isRefreshing) return;
@@ -277,6 +334,18 @@ export function Topbar({
     const handleErpSync = async () => {
         if (isErpSyncing) return;
         setIsErpSyncing(true);
+
+        // Clear any in-flight poll from a previous click
+        if (syncPollRef.current) {
+            clearInterval(syncPollRef.current);
+            syncPollRef.current = null;
+        }
+
+        // Capture timestamp before firing — used as the lower-bound for polling
+        const clickedAt = new Date().toISOString();
+        setSyncDot('syncing');
+        setSyncTooltip('Syncing with ERP…');
+
         const syncPromise = (async () => {
             const api = (window as any).api;
             if (!api?.invoke) throw new Error('API bridge not available');
@@ -293,6 +362,52 @@ export function Topbar({
 
         try {
             await syncPromise;
+            // Webhook fired — poll until row count stabilises (no new rows for one full interval)
+            // This ensures we capture all workflows even if they write at different times
+            let attempts = 0;
+            let lastRowCount = -1;
+            const MAX_ATTEMPTS = 12; // 12 × 5s = 60s hard cap
+            syncPollRef.current = setInterval(async () => {
+                attempts++;
+                try {
+                    const api = (window as any).api;
+                    const result = await api.invoke('sync:get-latest-status', { since: clickedAt });
+                    const currentCount = result?.success ? (result.rows?.length ?? 0) : 0;
+
+                    if (currentCount > 0 && currentCount === lastRowCount) {
+                        // Count unchanged — all workflows have finished writing
+                        clearInterval(syncPollRef.current!);
+                        syncPollRef.current = null;
+                        const { dot, tooltip } = deriveSyncDot(result.rows as SyncStatusRow[]);
+                        setSyncDot(dot);
+                        setSyncTooltip(`Just now · ${tooltip}`);
+                    } else if (attempts >= MAX_ATTEMPTS) {
+                        // Hard timeout — show whatever we have, or gray if nothing
+                        clearInterval(syncPollRef.current!);
+                        syncPollRef.current = null;
+                        if (currentCount > 0) {
+                            const { dot, tooltip } = deriveSyncDot(result.rows as SyncStatusRow[]);
+                            setSyncDot(dot);
+                            setSyncTooltip(`Just now · ${tooltip}`);
+                        } else {
+                            setSyncDot('timeout');
+                            setSyncTooltip('Sync result not yet available');
+                        }
+                    }
+                    lastRowCount = currentCount;
+                } catch {
+                    if (attempts >= MAX_ATTEMPTS) {
+                        clearInterval(syncPollRef.current!);
+                        syncPollRef.current = null;
+                        setSyncDot('timeout');
+                        setSyncTooltip('Sync result not yet available');
+                    }
+                }
+            }, 5_000);
+        } catch {
+            // Webhook itself failed — don't poll, reset dot
+            setSyncDot('idle');
+            setSyncTooltip('Sync ERP');
         } finally {
             setIsErpSyncing(false);
         }
@@ -475,13 +590,30 @@ export function Topbar({
 
                 <button
                     onClick={handleErpSync}
-                    title="Sync ERP"
-                    className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all"
+                    title={syncTooltip}
+                    className="relative w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all"
                     disabled={isErpSyncing}
                 >
-                    <motion.div animate={{ rotate: isErpSyncing ? 360 : 0 }} transition={{ duration: 1, repeat: isErpSyncing ? Infinity : 0, ease: 'linear' }}>
+                    <motion.div animate={{ rotate: isErpSyncing || syncDot === 'syncing' ? 360 : 0 }} transition={{ duration: 1, repeat: isErpSyncing || syncDot === 'syncing' ? Infinity : 0, ease: 'linear' }}>
                         <Database size={14} />
                     </motion.div>
+                    {syncDot !== 'idle' && (
+                        <span
+                            className="absolute top-[7px] right-[7px] w-[6px] h-[6px] rounded-full"
+                            style={{
+                                backgroundColor:
+                                    syncDot === 'success' ? '#22C55E' :
+                                    syncDot === 'failure' ? '#EF4444' :
+                                    syncDot === 'syncing' ? '#EAB308' :
+                                    '#94A3B8',
+                                boxShadow:
+                                    syncDot === 'syncing' ? '0 0 5px #EAB30899' :
+                                    syncDot === 'success' ? '0 0 5px #22C55E80' :
+                                    syncDot === 'failure' ? '0 0 5px #EF444480' :
+                                    'none',
+                            }}
+                        />
+                    )}
                 </button>
 
                 {notifications.length > 0 && (

@@ -26,7 +26,7 @@ import { Separator } from '../components/ui/separator';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { useDateFilter } from '../context/DateContext';
 import { useProcessing } from '../context/ProcessingContext';
-import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice } from '../lib/api';
+import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, getTallyPostStatus, type TallyPostOutcome } from '../lib/api';
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
@@ -344,6 +344,9 @@ export default function APWorkspace() {
     posted: 1,
   });
   const [pageSize, setPageSize] = useState(10);
+  const [tallySuccess, setTallySuccess] = useState<{ invoiceNo: string; supplier: string; voucherNumber: string | null; erpSyncId: string } | null>(null);
+  const [tallyError, setTallyError] = useState<{ invoiceNo: string; supplier: string; reason: string } | null>(null);
+  const tallyPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);

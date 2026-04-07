@@ -429,4 +429,42 @@ export async function getTallySyncStats(companyId?: string): Promise<TallySyncSt
     return invoke<TallySyncStats>('dashboard:tally-sync', { companyId });
 }
 
+// ─── TALLY POST STATUS ────────────────────────────────────
+
+export type TallyPostOutcome =
+    | { status: 'success';      voucherNumber: string | null; erpSyncId: string }
+    | { status: 'soft_failed';  failureReason: string }
+    | { status: 'hard_failed';  userMessage: string; nodeName: string | null }
+    | { status: 'pending' };
+
+/**
+ * Poll this after clicking "Post to Tally".
+ * Pass `since` as the ISO timestamp of the click — prevents reading stale data.
+ */
+export async function getTallyPostStatus(invoiceId: string, since: string): Promise<TallyPostOutcome> {
+    const res = await invoke<{ success: boolean } & TallyPostOutcome>(
+        'invoices:get-tally-post-status', { invoiceId, since }
+    );
+    return res;
+}
+
+// ─── SYNC STATUS ──────────────────────────────────────────
+
+export interface SyncStatusRow {
+    workflow_name: string;
+    sync_status: 'success' | 'failure';
+    user_message: string | null;
+    error_category: string | null;
+    created_at: string;
+}
+
+/**
+ * Fetch rows from sync_status_log (written by n8n).
+ * Pass `since` to only get rows newer than a given ISO timestamp —
+ * prevents reading a previous sync's results when polling after a button click.
+ */
+export async function getSyncLatestStatus(since?: string, companyId?: string): Promise<{ success: boolean; rows: SyncStatusRow[]; error?: string }> {
+    return invoke<{ success: boolean; rows: SyncStatusRow[]; error?: string }>('sync:get-latest-status', { since, companyId });
+}
+
 
