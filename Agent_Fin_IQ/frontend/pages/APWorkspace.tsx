@@ -451,7 +451,7 @@ export default function APWorkspace() {
 
           // ─── CANONICAL READY-TO-POST RULE ───
           // Must pass all required checks AND NOT be a duplicate
-          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && (!isGoods || lMatch);
+          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && lMatch;
           const n8nAllPassed = mandatoryChecksPassed && isDupPassed;
 
           if (inv.erp_sync_id) {
@@ -470,7 +470,7 @@ export default function APWorkspace() {
             status = 'ready';
           } else if (!bVerif || !gValid || !dValid || isUnknownFile || isUnknownInv) {
             status = 'handoff';
-          } else if (!vVerif || (isGoods && !lMatch)) {
+          } else if (!vVerif || !lMatch) {
             status = 'input';
           } else if (bStatus === 'processing') {
             // Processing only if not already failed/passed via other rules
