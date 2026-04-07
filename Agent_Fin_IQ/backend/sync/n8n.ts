@@ -267,7 +267,7 @@ export async function sendMasterCreationToN8n(payload: Record<string, any>): Pro
         return {
             success: false,
             message: isTimeout
-                ? 'Tally did not respond in time. Please check that Tally is open and the bridge is running.'
+                ? 'Tally did not respond in time. Please check that Tally desktop is open.'
                 : (error.message || 'Network error')
         };
     }
