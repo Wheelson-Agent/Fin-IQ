@@ -741,98 +741,116 @@ export function registerIpcHandlers() {
                 error
             );
 
-            const preOcrStartedAt = new Date();
-            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
+            // ── PRE-OCR TOGGLE ────────────────────────────────────────────────
+            // Controlled by PRE_OCR in config/.env ("on" = run pipeline, "off" = bypass)
+            const preOcrEnabled = (process.env.PRE_OCR ?? 'on').toLowerCase().trim() === 'on';
 
-            const fileBuffer = fs.readFileSync(filePath);
-            const result = await runFullPipeline(fileBuffer, fileName, { invoiceId });
-            pipelineDecision = result.decision;
-            console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
+            if (preOcrEnabled) {
+                const preOcrStartedAt = new Date();
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Started', `Analyzing document quality and type: ${fileName}`);
 
-            // ── PRE-OCR REJECTION HANDLER [added: mapped labels for all rejection routes] ──
-            // Reads actual reason codes from job stages (not the vague decision.reasons strings)
-            // and maps them to user-facing labels + machine-readable pre_ocr_status codes.
-            // All rejections route to Handoff so the user can review and re-upload.
+                const fileBuffer = fs.readFileSync(filePath);
+                const result = await runFullPipeline(fileBuffer, fileName, { invoiceId });
+                pipelineDecision = result.decision;
+                console.log(`[IPC] runFullPipeline result for ${fileName}:`, JSON.stringify(result.decision, null, 2));
 
-            // Flatten all reason codes across every stage for easy lookup
-            const allStageCodes: string[] = Object.values(result.job.stages)
-                .flatMap((s: any) => s.reasonCodes as string[]);
+                // ── PRE-OCR REJECTION HANDLER [added: mapped labels for all rejection routes] ──
+                // Reads actual reason codes from job stages (not the vague decision.reasons strings)
+                // and maps them to user-facing labels + machine-readable pre_ocr_status codes.
+                // All rejections route to Handoff so the user can review and re-upload.
 
-            // MANUAL_REVIEW — encrypted PDF, engine never routes this to FAILED
-            if (result.decision.route === 'MANUAL_REVIEW') {
-                const preOcrCompletedAt = new Date();
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: encrypted PDF`);
-                await queries.markInvoicePreOcrRejection(invoiceId, 'Invalid doc- encrypted', 'ENCRYPTED');
-                await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
-                    route: result.decision.route,
-                    reason_codes: allStageCodes
-                }, 'Invalid doc- encrypted');
-                return { success: false, error: 'Invalid doc- encrypted' };
-            }
+                // Flatten all reason codes across every stage for easy lookup
+                const allStageCodes: string[] = Object.values(result.job.stages)
+                    .flatMap((s: any) => s.reasonCodes as string[]);
 
-            // FAILED — map specific reason codes to proper labels; fall back to generic for unmapped ones
-            if (result.decision.route === 'FAILED') {
-                let failureReason: string;
-                let preOcrStatus: string;
-
-                if (allStageCodes.includes('FILE_TOO_LARGE')) {
-                    failureReason = 'Invalid doc- file too large';
-                    preOcrStatus = 'FILE_TOO_LARGE';
-                } else if (allStageCodes.includes('EMPTY_PDF') || allStageCodes.includes('ALL_BLANK_PAGES')) {
-                    failureReason = 'Invalid doc- empty-doc';
-                    preOcrStatus = 'EMPTY_DOC';
-                } else {
-                    // Other failures (CORRUPT, RASTERIZATION_FAILED, etc.) — generic for now
-                    failureReason = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
-                    preOcrStatus = 'FAILED';
+                // MANUAL_REVIEW — encrypted PDF, engine never routes this to FAILED
+                if (result.decision.route === 'MANUAL_REVIEW') {
+                    const preOcrCompletedAt = new Date();
+                    batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: encrypted PDF`);
+                    await queries.markInvoicePreOcrRejection(invoiceId, 'Invalid doc- encrypted', 'ENCRYPTED');
+                    await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                        route: result.decision.route,
+                        reason_codes: allStageCodes
+                    }, 'Invalid doc- encrypted');
+                    return { success: false, error: 'Invalid doc- encrypted' };
                 }
 
+                // FAILED — map specific reason codes to proper labels; fall back to generic for unmapped ones
+                if (result.decision.route === 'FAILED') {
+                    let failureReason: string;
+                    let preOcrStatus: string;
+
+                    if (allStageCodes.includes('FILE_TOO_LARGE')) {
+                        failureReason = 'Invalid doc- file too large';
+                        preOcrStatus = 'FILE_TOO_LARGE';
+                    } else if (allStageCodes.includes('EMPTY_PDF') || allStageCodes.includes('ALL_BLANK_PAGES')) {
+                        failureReason = 'Invalid doc- empty-doc';
+                        preOcrStatus = 'EMPTY_DOC';
+                    } else {
+                        // Other failures (CORRUPT, RASTERIZATION_FAILED, etc.) — generic for now
+                        failureReason = result.decision.reasons.join(', ') || 'Pipeline quality check failed';
+                        preOcrStatus = 'FAILED';
+                    }
+
+                    const preOcrCompletedAt = new Date();
+                    batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Pre-OCR failed: ${failureReason}`);
+                    await queries.markInvoicePreOcrRejection(invoiceId, failureReason, preOcrStatus);
+                    await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                        route: result.decision.route,
+                        pre_ocr_status: preOcrStatus,
+                        reason_codes: allStageCodes
+                    }, failureReason);
+                    return { success: false, error: failureReason };
+                }
+
+                // ENHANCE_REQUIRED — blur rejection
+                // >50% of pages failed the blur quality check; route to Handoff for user re-upload
+                if (result.decision.route === 'ENHANCE_REQUIRED') {
+                    const preOcrCompletedAt = new Date();
+                    batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: image too blurry for OCR`);
+                    await queries.markInvoiceBlur(invoiceId);
+                    await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                        route: result.decision.route,
+                        reason_codes: allStageCodes
+                    }, 'Invalid doc- blur');
+                    return { success: false, error: 'Invalid doc- blur' };
+                }
+                // ── END PRE-OCR REJECTION HANDLER ────────────────────────────────────
+
+                // ── PRE-OCR PASS STATUS [added: track pre_ocr_status in DB] ───────
+                // Record that pre-OCR passed so the column is never left as null on success.
+                await queries.updatePreOcrStatus(invoiceId, 'PASSED');
+                // ── END PRE-OCR PASS STATUS ────────────────────────────────────────
+
                 const preOcrCompletedAt = new Date();
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Pre-OCR failed: ${failureReason}`);
-                await queries.markInvoicePreOcrRejection(invoiceId, failureReason, preOcrStatus);
-                await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
+                const preOcrArtifactPath = result.outputArtifactPath;
+                ocrInputSource = 'original-fallback';
+
+                if (preOcrArtifactPath && fs.existsSync(preOcrArtifactPath)) {
+                    ocrInputPath = preOcrArtifactPath;
+                    ocrInputSource = 'preocr-artifact';
+                } else {
+                    console.warn(`[IPC] OCR fallback to original input for ${fileName}; missing Pre-OCR artifact: ${preOcrArtifactPath || 'none'}`);
+                }
+                await recordPipelineStage('PRE_OCR', 'PASSED', preOcrStartedAt, preOcrCompletedAt, {
                     route: result.decision.route,
-                    pre_ocr_status: preOcrStatus,
-                    reason_codes: allStageCodes
-                }, failureReason);
-                return { success: false, error: failureReason };
-            }
-
-            // ENHANCE_REQUIRED — blur rejection
-            // >50% of pages failed the blur quality check; route to Handoff for user re-upload
-            if (result.decision.route === 'ENHANCE_REQUIRED') {
-                const preOcrCompletedAt = new Date();
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Failed', `Document rejected: image too blurry for OCR`);
-                await queries.markInvoiceBlur(invoiceId);
-                await recordPipelineStage('PRE_OCR', 'FAILED', preOcrStartedAt, preOcrCompletedAt, {
-                    route: result.decision.route,
-                    reason_codes: allStageCodes
-                }, 'Invalid doc- blur');
-                return { success: false, error: 'Invalid doc- blur' };
-            }
-            // ── END PRE-OCR REJECTION HANDLER ────────────────────────────────────
-
-            // ── PRE-OCR PASS STATUS [added: track pre_ocr_status in DB] ───────
-            // Record that pre-OCR passed so the column is never left as null on success.
-            await queries.updatePreOcrStatus(invoiceId, 'PASSED');
-            // ── END PRE-OCR PASS STATUS ────────────────────────────────────────
-
-            const preOcrCompletedAt = new Date();
-            batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Completed', 'Document quality analysis passed');
-            const preOcrArtifactPath = result.outputArtifactPath;
-            ocrInputSource = 'original-fallback';
-
-            if (preOcrArtifactPath && fs.existsSync(preOcrArtifactPath)) {
-                ocrInputPath = preOcrArtifactPath;
-                ocrInputSource = 'preocr-artifact';
+                    ocr_input_source: ocrInputSource,
+                    artifact_path: preOcrArtifactPath || null
+                });
             } else {
-                console.warn(`[IPC] OCR fallback to original input for ${fileName}; missing Pre-OCR artifact: ${preOcrArtifactPath || 'none'}`);
+                // PRE_OCR=off — bypass pipeline, send original file directly to Google Document AI
+                const preOcrStartedAt = new Date();
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Skipped', 'Pre-OCR bypassed (PRE_OCR=off) — sending original file to OCR');
+                console.log(`[IPC] Pre-OCR BYPASSED for ${fileName} (PRE_OCR=off in config)`);
+                await queries.updatePreOcrStatus(invoiceId, 'BYPASSED');
+                const preOcrCompletedAt = new Date();
+                await recordPipelineStage('PRE_OCR', 'BYPASSED', preOcrStartedAt, preOcrCompletedAt, {
+                    ocr_input_source: ocrInputSource,
+                    reason: 'PRE_OCR disabled in config/.env'
+                });
             }
-            await recordPipelineStage('PRE_OCR', 'PASSED', preOcrStartedAt, preOcrCompletedAt, {
-                route: result.decision.route,
-                ocr_input_source: ocrInputSource,
-                artifact_path: preOcrArtifactPath || null
-            });
+            // ── END PRE-OCR TOGGLE ───────────────────────────────────────────
 
             const ocrStartedAt = new Date();
             batchLogger.addLog(batchName, fileName, 'OCR', 'Started', `Extracting structured text via OCR engine (${ocrInputSource})`);
