@@ -464,6 +464,24 @@ export default function DetailView() {
   const [zoom, setZoom] = useState(100);
   const [page, setPage] = useState(1);
   const fromTab = searchParams.get('from') || 'received';
+
+  const navIds: string[] = (() => {
+    try { return JSON.parse(sessionStorage.getItem('apWorkspaceNavIds') || '[]'); } catch { return []; }
+  })();
+  const navIdx = (() => {
+    const v = sessionStorage.getItem('apWorkspaceNavIdx');
+    return v !== null ? Number(v) : navIds.indexOf(id || '');
+  })();
+  const hasPrev = navIdx > 0;
+  const hasNext = navIdx < navIds.length - 1;
+
+  const navigateToRecord = (targetIdx: number) => {
+    const targetId = navIds[targetIdx];
+    if (!targetId) return;
+    sessionStorage.setItem('apWorkspaceNavIdx', String(targetIdx));
+    navigate(`/detail/${targetId}?from=${fromTab}`);
+  };
+
   const tabNames: Record<string, string> = {
     received: 'Received',
     handoff: 'Handoff',
@@ -908,6 +926,11 @@ export default function DetailView() {
             const qty = Number(item?.qty ?? item?.quantity ?? 1);
             const rate = Number(item?.rate ?? item?.unit_price ?? item?.unitPrice ?? item?.rate_per_pcs ?? 0);
             const discount = Number(item?.discount ?? 0);
+            const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+            const safeRate = Number.isFinite(rate) ? rate : 0;
+            const safeDiscount = Number.isFinite(discount) ? discount : 0;
+            const rawAmount = Number(item?.total_amount ?? item?.amount ?? item?.line_amount);
+            const amount = Number.isFinite(rawAmount) && rawAmount !== 0 ? rawAmount : safeQty * safeRate * (1 - safeDiscount / 100);
             return {
               id: item?.id ?? `${Date.now()}_${idx}`,
               description: item?.description ?? item?.item_description ?? '',
@@ -919,9 +942,10 @@ export default function DetailView() {
               match_status: item?.match_status ?? '',
               hsn_sac: item?.hsn_sac ?? item?.hsn ?? '',
               tax: item?.tax ?? item?.tax_rate ?? '',
-              qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
-              rate: Number.isFinite(rate) ? rate : 0,
-              discount: Number.isFinite(discount) ? discount : 0,
+              qty: safeQty,
+              rate: safeRate,
+              discount: safeDiscount,
+              amount,
             };
           });
           setLineItems(mappedItems);
@@ -941,6 +965,7 @@ export default function DetailView() {
             qty: 1,
             rate: 0,
             discount: 0,
+            amount: 0,
           }];
           setLineItems(defaultItems);
           setOriginalLineItems(JSON.parse(JSON.stringify(defaultItems)));
@@ -1252,6 +1277,7 @@ export default function DetailView() {
         qty: 1,
         rate: 0,
         discount: 0,
+        amount: 0,
       },
     ]);
   };
@@ -1436,6 +1462,28 @@ export default function DetailView() {
           </button>
 
           <div className="h-10 w-[1px] bg-slate-200 mx-1" />
+
+          {navIds.length > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => navigateToRecord(navIdx - 1)}
+                disabled={!hasPrev}
+                title="Previous record"
+                className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} />
+              </button>
+              <span className="text-[11px] font-bold text-slate-400 select-none px-1">{navIdx + 1}/{navIds.length}</span>
+              <button
+                onClick={() => navigateToRecord(navIdx + 1)}
+                disabled={!hasNext}
+                title="Next record"
+                className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                <ChevronRight size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
 
           <div className="flex flex-col">
             <h1 className="text-[17px] font-black text-slate-900 leading-tight flex items-center gap-3">
@@ -1868,14 +1916,15 @@ export default function DetailView() {
 
                     <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
                       <div className="overflow-x-auto">
-                        <table className="w-full table-fixed text-left border-collapse min-w-[760px]">
+                        <table className="w-full table-fixed text-left border-collapse min-w-[860px]">
                           <colgroup>
+                            <col style={{ width: '22%' }} />
                             <col style={{ width: '24%' }} />
-                            <col style={{ width: '26%' }} />
+                            <col style={{ width: '100px' }} />
+                            <col style={{ width: '80px' }} />
                             <col style={{ width: '110px' }} />
-                            <col style={{ width: '88px' }} />
-                            <col style={{ width: '120px' }} />
-                            <col style={{ width: '96px' }} />
+                            <col style={{ width: '90px' }} />
+                            <col style={{ width: '110px' }} />
                             {!readOnly && <col style={{ width: '52px' }} />}
                           </colgroup>
                           <thead className="bg-slate-50/80 border-b border-slate-200">
@@ -1886,6 +1935,7 @@ export default function DetailView() {
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Quantity</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Unit Rate</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Discount</th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right whitespace-nowrap">Amount</th>
                               {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
                             </tr>
                           </thead>
@@ -2023,6 +2073,18 @@ export default function DetailView() {
                                     />
                                     {!readOnly && <span className="absolute right-2 text-[12px] text-[#8899AA] font-bold">%</span>}
                                   </div>
+                                </td>
+                                <td className="p-3 align-top min-w-[110px]">
+                                  <input
+                                    disabled={readOnly}
+                                    type="number"
+                                    className={`w-full border p-2 rounded-[6px] text-[13px] text-right font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`}
+                                    value={item.amount}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setLineItems(lineItems.map((ln, i) => i === index ? { ...ln, amount: Number.isFinite(val) ? val : 0 } : ln));
+                                    }}
+                                  />
                                 </td>
                                 {!readOnly && (
                                   <td className="p-3 text-center align-top pt-[14px]">

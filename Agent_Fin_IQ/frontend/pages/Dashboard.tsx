@@ -770,7 +770,7 @@ function TallySyncWidget({ data }: { data: any }) {
 
       {/* Recent sync events */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {data.recent.map((event, i) => {
+        {data.recent.map((event: TallySyncStats['recent'][number], i: number) => {
           const cfg = SYNC_STATUS_CONFIG[event.status];
           return (
             <div key={i} style={{
