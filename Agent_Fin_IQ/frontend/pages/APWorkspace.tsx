@@ -26,7 +26,8 @@ import { Separator } from '../components/ui/separator';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { useDateFilter } from '../context/DateContext';
 import { useProcessing } from '../context/ProcessingContext';
-import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice } from '../lib/api';
+import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, bulkDeleteInvoices } from '../lib/api';
+import { useCompany } from '../context/CompanyContext';
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
@@ -314,6 +315,7 @@ const createDefaultBatchName = () => {
 };
 
 export default function APWorkspace() {
+  const { selectedCompany } = useCompany();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [records, setRecords] = useState<APRecord[]>([]);
@@ -382,7 +384,7 @@ export default function APWorkspace() {
   const fetchData = async (background = false) => {
     if (!background) setLoading(true);
     try {
-      const invoices = await getInvoices();
+      const invoices = await getInvoices(selectedCompany);
       if (invoices && Array.isArray(invoices)) {
         // Map backend Invoice type to frontend APRecord type
         const mapped: APRecord[] = invoices.map((inv: any) => {
@@ -577,7 +579,7 @@ export default function APWorkspace() {
     return () => {
       window.removeEventListener('app:refresh', handleRefresh);
     };
-  }, []);
+  }, [selectedCompany]);
 
   useEffect(() => {
     (async () => {
@@ -719,29 +721,38 @@ export default function APWorkspace() {
   }, [searchQuery, dateFilter.from?.getTime(), dateFilter.to?.getTime(), pageSize]);
 
 
-  const confirmUpload = async () => {
-    if (!pendingUploads) return;
+    const confirmUpload = async () => {
+        if (!pendingUploads) return;
 
-    const validTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-    const uploadQueue = Array.from(pendingUploads).filter(f => validTypes.includes(f.type));
+        const validTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        const uploadQueue = Array.from(pendingUploads).filter(f => validTypes.includes(f.type));
 
-    const fileNames: string[] = [];
-    const filePaths: string[] = [];
-    const fileDataArrays: number[][] = [];
+        const fileNames: string[] = [];
+        const filePaths: string[] = [];
+        const fileDataArrays: number[][] = [];
 
-    for (const file of uploadQueue) {
-      const buffer = await file.arrayBuffer();
-      const dataArray = Array.from(new Uint8Array(buffer));
-      fileNames.push(file.name);
-      filePaths.push((file as any).path || file.name);
-      fileDataArrays.push(dataArray);
-    }
+        for (const file of uploadQueue) {
+            const buffer = await file.arrayBuffer();
+            const dataArray = Array.from(new Uint8Array(buffer));
+            fileNames.push(file.name);
+            filePaths.push((file as any).path || file.name);
+            fileDataArrays.push(dataArray);
+        }
 
-    startProcessing({ fileNames, filePaths, fileDataArrays, batchName });
-    setShowBatchDialog(false);
-    setPendingUploads(null);
-    setActiveTab('processing');
-  };
+        const effectiveCompanyId = selectedCompany !== 'ALL' ? selectedCompany : null;
+        console.log(`[APWorkspace] Starting upload. Effective companyId: ${effectiveCompanyId || 'NULL (ALL selected)'}`);
+
+        startProcessing({
+            fileNames,
+            filePaths,
+            fileDataArrays,
+            batchName,
+            companyId: effectiveCompanyId
+        });
+        setShowBatchDialog(false);
+        setPendingUploads(null);
+        setActiveTab('processing');
+    };
 
   const handleUploadFiles = (files: FileList | File[]) => {
     setPendingUploads(files);
@@ -1830,6 +1841,7 @@ export default function APWorkspace() {
                     batchName={pipelineData.batchName}
                     pipelineRunId={pipelineData.pipelineRunId}
                     pipelineStartedAt={pipelineData.pipelineStartedAt}
+                    companyId={selectedCompany !== 'ALL' ? selectedCompany : null}
                     uploaderName="User"
                     stages={pipelineStages || undefined}
                     onStagesChange={onStagesChange}
