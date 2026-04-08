@@ -3406,3 +3406,90 @@ export async function reEvaluateAutoPostStatuses(companyId?: string) {
         client.release();
     }
 }
+
+// ─── SYNC STATUS ──────────────────────────────────────────
+
+export interface SyncStatusRow {
+    workflow_name: string;
+    sync_status: 'success' | 'failure';
+    user_message: string | null;
+    error_category: string | null;
+    created_at: string;
+}
+
+/**
+ * Returns sync_status_log rows written by n8n.
+ * Pass `since` (ISO string) to only get rows newer than a given timestamp —
+ * used for post-click polling so we never read a previous sync's results.
+ */
+// ─── TALLY POST STATUS ────────────────────────────────────
+
+export type TallyPostOutcome =
+    | { status: 'success';      voucherNumber: string | null; erpSyncId: string }
+    | { status: 'soft_failed';  failureReason: string }
+    | { status: 'hard_failed';  userMessage: string; nodeName: string | null }
+    | { status: 'pending' };
+
+/**
+ * Checks all three signals for a post-to-Tally result:
+ *   1. ap_invoices.erp_sync_id  → success
+ *   2. ap_invoices.erp_sync_status = 'failed' → soft failure (Tally rejected)
+ *   3. fc_tally_module_error_log created after `since` → hard failure (node crash)
+ */
+export async function getTallyPostStatus(invoiceId: string, since: string): Promise<TallyPostOutcome> {
+    const [invResult, errResult] = await Promise.all([
+        query(
+            `SELECT erp_sync_id, erp_sync_status, failure_reason, voucher_number
+             FROM ap_invoices WHERE id = $1`,
+            [invoiceId]
+        ),
+        query(
+            `SELECT user_message, technical_node_name
+             FROM fc_tally_module_error_log
+             WHERE workflow_name = 'FC_tally_module'
+               AND created_at > $1
+             ORDER BY created_at DESC LIMIT 1`,
+            [since]
+        ),
+    ]);
+
+    const inv = invResult.rows[0];
+    if (inv?.erp_sync_id) {
+        return { status: 'success', erpSyncId: inv.erp_sync_id, voucherNumber: inv.voucher_number ?? null };
+    }
+    if (inv?.erp_sync_status === 'failed') {
+        return { status: 'soft_failed', failureReason: inv.failure_reason || 'Tally rejected the posting' };
+    }
+    const errRow = errResult.rows[0];
+    if (errRow) {
+        return { status: 'hard_failed', userMessage: errRow.user_message || 'Unexpected n8n error', nodeName: errRow.technical_node_name ?? null };
+    }
+    return { status: 'pending' };
+}
+
+export async function getLatestSyncStatus(since?: string, companyId?: string): Promise<SyncStatusRow[]> {
+    const conditions: string[] = [];
+    const vals: any[] = [];
+    let idx = 1;
+
+    if (since) {
+        conditions.push(`created_at > $${idx++}`);
+        vals.push(since);
+    }
+    if (companyId && companyId !== 'ALL') {
+        conditions.push(`company_id = $${idx++}`);
+        vals.push(companyId);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await query(
+        `SELECT workflow_name, sync_status, user_message, error_category, created_at
+         FROM sync_status_log
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT 20`,
+        vals
+    );
+    return result.rows as SyncStatusRow[];
+}

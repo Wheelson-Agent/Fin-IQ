@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, startTransition } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, History, BarChart2, CheckCircle2, AlertTriangle, AlertCircle, Search, MoreVertical, Filter,
@@ -26,8 +26,9 @@ import { Separator } from '../components/ui/separator';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { useDateFilter } from '../context/DateContext';
 import { useProcessing } from '../context/ProcessingContext';
-import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, bulkDeleteInvoices } from '../lib/api';
 import { useCompany } from '../context/CompanyContext';
+
+import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, getTallyPostStatus, type TallyPostOutcome } from '../lib/api';
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
@@ -53,6 +54,7 @@ interface APRecord {
   items: number;
   fileName: string;
   erpRef?: string;
+  voucherNumber?: string;
   reason?: string;
   remarks?: string;
   requiredField?: string;
@@ -315,7 +317,6 @@ const createDefaultBatchName = () => {
 };
 
 export default function APWorkspace() {
-  const { selectedCompany } = useCompany();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [records, setRecords] = useState<APRecord[]>([]);
@@ -346,6 +347,11 @@ export default function APWorkspace() {
     posted: 1,
   });
   const [pageSize, setPageSize] = useState(10);
+  const [tallyError, setTallyError] = useState<{ invoiceNo: string; supplier: string; reason: string } | null>(null);
+  const tallyPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const { selectedCompany } = useCompany();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
@@ -368,12 +374,24 @@ export default function APWorkspace() {
   } = useProcessing();
 
   // Tally success celebration
-  const [tallySuccess, setTallySuccess] = useState<{ id: string; invoiceNo: string; supplier: string; erpRef: string } | null>(null);
+  const [tallySuccess, setTallySuccess] = useState<{ invoiceNo: string; supplier: string; voucherNumber: string | null; erpSyncId: string } | null>(null);
   useEffect(() => {
     if (!tallySuccess) return;
     const t = setTimeout(() => setTallySuccess(null), 5000);
     return () => clearTimeout(t);
   }, [tallySuccess]);
+
+  // Tally error overlay — auto-dismiss after 8s
+  useEffect(() => {
+    if (!tallyError) return;
+    const t = setTimeout(() => setTallyError(null), 8000);
+    return () => clearTimeout(t);
+  }, [tallyError]);
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => { if (tallyPollRef.current) clearInterval(tallyPollRef.current); };
+  }, []);
 
   // Local-only dialog state
   const [showBatchDialog, setShowBatchDialog] = useState(false);
@@ -384,7 +402,9 @@ export default function APWorkspace() {
   const fetchData = async (background = false) => {
     if (!background) setLoading(true);
     try {
-      const invoices = await getInvoices(selectedCompany);
+      const companyId = selectedCompany === 'ALL' ? undefined : selectedCompany;
+      const invoices = await getInvoices(companyId);
+
       if (invoices && Array.isArray(invoices)) {
         // Map backend Invoice type to frontend APRecord type
         const mapped: APRecord[] = invoices.map((inv: any) => {
@@ -453,7 +473,7 @@ export default function APWorkspace() {
 
           // ─── CANONICAL READY-TO-POST RULE ───
           // Must pass all required checks AND NOT be a duplicate
-          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && (!isGoods || lMatch);
+          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && lMatch;
           const n8nAllPassed = mandatoryChecksPassed && isDupPassed;
 
           if (inv.erp_sync_id) {
@@ -472,7 +492,7 @@ export default function APWorkspace() {
             status = 'ready';
           } else if (!bVerif || !gValid || !dValid || isUnknownFile || isUnknownInv) {
             status = 'handoff';
-          } else if (!vVerif || (isGoods && !lMatch)) {
+          } else if (!vVerif || !lMatch) {
             status = 'input';
           } else if (bStatus === 'processing') {
             // Processing only if not already failed/passed via other rules
@@ -534,6 +554,7 @@ export default function APWorkspace() {
             createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : new Date().toISOString(),
             updatedAt: inv.updated_at ? new Date(inv.updated_at).toISOString() : new Date().toISOString(),
             erpRef: inv.erp_sync_id || undefined,
+            voucherNumber: inv.voucher_number || undefined,
             taxAmount: Number(inv.gst || inv.tax_total || 0),
             uploadedAt: inv.uploaded_date ? new Date(inv.uploaded_date).toISOString() : 'Unknown',
             docTypeLabel: docTypeLabel,
@@ -580,6 +601,7 @@ export default function APWorkspace() {
       window.removeEventListener('app:refresh', handleRefresh);
     };
   }, [selectedCompany]);
+
 
   useEffect(() => {
     (async () => {
@@ -720,39 +742,43 @@ export default function APWorkspace() {
     resetAllPages();
   }, [searchQuery, dateFilter.from?.getTime(), dateFilter.to?.getTime(), pageSize]);
 
+  useEffect(() => {
+    const saved = sessionStorage.getItem('apWorkspaceScrollTop');
+    if (saved && tableScrollRef.current) {
+      tableScrollRef.current.scrollTop = Number(saved);
+      sessionStorage.removeItem('apWorkspaceScrollTop');
+    }
+  }, [records]);
 
-    const confirmUpload = async () => {
-        if (!pendingUploads) return;
+  const confirmUpload = async () => {
+    if (!pendingUploads) return;
 
-        const validTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-        const uploadQueue = Array.from(pendingUploads).filter(f => validTypes.includes(f.type));
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    const uploadQueue = Array.from(pendingUploads).filter(f => validTypes.includes(f.type));
 
-        const fileNames: string[] = [];
-        const filePaths: string[] = [];
-        const fileDataArrays: number[][] = [];
+    const fileNames: string[] = [];
+    const filePaths: string[] = [];
+    const fileDataArrays: number[][] = [];
 
-        for (const file of uploadQueue) {
-            const buffer = await file.arrayBuffer();
-            const dataArray = Array.from(new Uint8Array(buffer));
-            fileNames.push(file.name);
-            filePaths.push((file as any).path || file.name);
-            fileDataArrays.push(dataArray);
-        }
+    for (const file of uploadQueue) {
+      const buffer = await file.arrayBuffer();
+      const dataArray = Array.from(new Uint8Array(buffer));
+      fileNames.push(file.name);
+      filePaths.push((file as any).path || file.name);
+      fileDataArrays.push(dataArray);
+    }
 
-        const effectiveCompanyId = selectedCompany !== 'ALL' ? selectedCompany : null;
-        console.log(`[APWorkspace] Starting upload. Effective companyId: ${effectiveCompanyId || 'NULL (ALL selected)'}`);
-
-        startProcessing({
-            fileNames,
-            filePaths,
-            fileDataArrays,
-            batchName,
-            companyId: effectiveCompanyId
-        });
-        setShowBatchDialog(false);
-        setPendingUploads(null);
-        setActiveTab('processing');
-    };
+    startProcessing({ 
+      fileNames, 
+      filePaths, 
+      fileDataArrays, 
+      batchName, 
+      companyId: selectedCompany === 'ALL' ? null : selectedCompany 
+    });
+    setShowBatchDialog(false);
+    setPendingUploads(null);
+    setActiveTab('processing');
+  };
 
   const handleUploadFiles = (files: FileList | File[]) => {
     setPendingUploads(files);
@@ -904,42 +930,52 @@ export default function APWorkspace() {
     }
   };
 
-  // Poll until erp_sync_id appears on the invoice (truth = posted to Tally)
-  const pollForTallyConfirmation = (invoiceId: string, maxWaitMs = 30000) => {
-    const interval = 2000;
-    const deadline = Date.now() + maxWaitMs;
-    const timer = setInterval(async () => {
-      try {
-        const fresh = await getInvoices();
-        const raw = (fresh as any[]).find((inv: any) => inv.id === invoiceId);
-        if (raw?.erp_sync_id) {
-          clearInterval(timer);
-          fetchData(true);
-          setTallySuccess({
-            id: invoiceId,
-            invoiceNo: raw.invoice_number || raw.invoice_no || '—',
-            supplier: raw.vendor_name || '—',
-            erpRef: raw.erp_sync_id,
-          });
-        } else if (Date.now() > deadline) {
-          clearInterval(timer);
-          fetchData(true);
-        }
-      } catch {
-        clearInterval(timer);
-        fetchData(true);
-      }
-    }, interval);
-  };
-
   const handleApproveRow = async (id: string) => {
     if (!id) return;
     setLoading(true);
+
+    // Clear any in-flight poll
+    if (tallyPollRef.current) { clearInterval(tallyPollRef.current); tallyPollRef.current = null; }
+    setTallySuccess(null);
+    setTallyError(null);
+
+    // Capture BEFORE updateInvoiceStatus — n8n can write to error log before the HTTP call returns
+    const clickedAt = new Date().toISOString();
+    const record = records.find(r => r.id === id);
+    const invoiceNo = record?.invoiceNo || id;
+    const supplier = record?.supplier || 'Unknown';
+
     try {
       await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
-      toast.success('Posting to Tally — confirming…');
+      toast.info('Posting to Tally — confirming…');
       fetchData(true);
-      pollForTallyConfirmation(id);
+      let attempts = 0;
+      const MAX_ATTEMPTS = 15; // 15 × 2s = 30s
+
+      tallyPollRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const outcome = await getTallyPostStatus(id, clickedAt);
+          if (outcome.status === 'success') {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            setTallySuccess({ invoiceNo, supplier, voucherNumber: outcome.voucherNumber, erpSyncId: outcome.erpSyncId });
+            fetchData(true);
+          } else if (outcome.status === 'soft_failed') {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            setTallyError({ invoiceNo, supplier, reason: outcome.failureReason });
+            fetchData(true);
+          } else if (outcome.status === 'hard_failed') {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            setTallyError({ invoiceNo, supplier, reason: outcome.userMessage });
+            fetchData(true);
+          } else if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            toast.warning('Tally confirmation timed out — check Tally manually');
+          }
+        } catch {
+          if (attempts >= MAX_ATTEMPTS) { clearInterval(tallyPollRef.current!); tallyPollRef.current = null; }
+        }
+      }, 2_000);
     } catch (err) {
       console.error('Approve failed:', err);
       toast.error('Failed to initiate posting');
@@ -949,6 +985,14 @@ export default function APWorkspace() {
   };
 
   const handleRowClick = (record: APRecord) => {
+    if (tableScrollRef.current) {
+      sessionStorage.setItem('apWorkspaceScrollTop', String(tableScrollRef.current.scrollTop));
+    }
+    const pageRecords = getPaginatedData(activeTab);
+    const ids = pageRecords.map(r => r.id);
+    const idx = ids.indexOf(record.id);
+    sessionStorage.setItem('apWorkspaceNavIds', JSON.stringify(ids));
+    sessionStorage.setItem('apWorkspaceNavIdx', String(idx));
     navigate(`/detail/${record.id}?from=${activeTab}`);
   };
 
@@ -1078,20 +1122,25 @@ export default function APWorkspace() {
     }, {} as Record<TableTab, APRecord[]>);
   }, [filtersByTab, statusMatchedRecordsByTab, valueLimitConfig]);
 
-  const getVisibleTabRecords = (targetTab: string) => {
-    if (!isTableTab(targetTab)) return [];
-
-    let base = structuredRecordsByTab[targetTab];
-    const tabFilter = tabFilters[targetTab];
-    if (tabFilter) {
-      const q = tabFilter.toLowerCase();
-      base = base.filter(r =>
-        r.invoiceNo.toLowerCase().includes(q) ||
-        r.supplier.toLowerCase().includes(q)
-      );
+  const visibleRecordsByTab = useMemo<Record<string, APRecord[]>>(() => {
+    const result: Record<string, APRecord[]> = {};
+    for (const tab of TABLE_TABS) {
+      let base = structuredRecordsByTab[tab];
+      const tabFilter = tabFilters[tab];
+      if (tabFilter) {
+        const q = tabFilter.toLowerCase();
+        base = base.filter(r =>
+          r.invoiceNo.toLowerCase().includes(q) ||
+          r.supplier.toLowerCase().includes(q)
+        );
+      }
+      result[tab] = base;
     }
-    return base;
-  };
+    return result;
+  }, [structuredRecordsByTab, tabFilters]);
+
+  const getVisibleTabRecords = (targetTab: string): APRecord[] =>
+    visibleRecordsByTab[targetTab] ?? [];
 
   // Derived filtered data
   const counts = {
@@ -1777,10 +1826,12 @@ export default function APWorkspace() {
           <Tabs
             value={activeTab}
             onValueChange={(val) => {
-              setActiveTab(val);
-              setSelectedIds(new Set());
-              setFilterPanelTab(null);
-              setSearchParams({ tab: val });
+              startTransition(() => {
+                setActiveTab(val);
+                setSelectedIds(new Set());
+                setFilterPanelTab(null);
+                setSearchParams({ tab: val });
+              });
             }}
             className="flex-1 flex flex-col w-full h-full"
           >
@@ -1829,7 +1880,7 @@ export default function APWorkspace() {
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-auto bg-white p-0">
+            <div ref={tableScrollRef} className="flex-1 overflow-auto bg-white p-0">
               {/* --- PROCESSING TAB --- */}
               {isProcessing && (
                 <TabsContent value="processing" className="m-0 h-full border-none p-0 outline-none">
@@ -1841,7 +1892,6 @@ export default function APWorkspace() {
                     batchName={pipelineData.batchName}
                     pipelineRunId={pipelineData.pipelineRunId}
                     pipelineStartedAt={pipelineData.pipelineStartedAt}
-                    companyId={selectedCompany !== 'ALL' ? selectedCompany : null}
                     uploaderName="User"
                     stages={pipelineStages || undefined}
                     onStagesChange={onStagesChange}
@@ -1912,8 +1962,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('received').length > 0 && getVisibleTabRecords('received').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('received'))}
+                          checked={getPaginatedData('received').length > 0 && getPaginatedData('received').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('received'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%]">Supplier Reference</TableHead>
@@ -2100,8 +2150,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('ready').length > 0 && getVisibleTabRecords('ready').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('ready'))}
+                          checked={getPaginatedData('ready').length > 0 && getPaginatedData('ready').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('ready'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
@@ -2270,8 +2320,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('input').length > 0 && getVisibleTabRecords('input').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('input'))}
+                          checked={getPaginatedData('input').length > 0 && getPaginatedData('input').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('input'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
@@ -2422,8 +2472,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('handoff').length > 0 && getVisibleTabRecords('handoff').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('handoff'))}
+                          checked={getPaginatedData('handoff').length > 0 && getPaginatedData('handoff').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('handoff'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
@@ -2558,8 +2608,8 @@ export default function APWorkspace() {
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[40px] h-10 px-6">
                         <Checkbox
-                          checked={getVisibleTabRecords('posted').length > 0 && getVisibleTabRecords('posted').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('posted'))}
+                          checked={getPaginatedData('posted').length > 0 && getPaginatedData('posted').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('posted'))}
                         />
                       </TableHead>
                       <TableHead className="font-semibold text-slate-700 h-10 w-[45%] px-6">Supplier Reference</TableHead>
@@ -2592,10 +2642,13 @@ export default function APWorkspace() {
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center gap-2">
-                              <div className="flex items-center gap-1.5 text-emerald-700">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                <span className="text-xs font-semibold">Ref: {record.erpRef || 'N/A'}</span>
+                            <div className="flex items-start gap-2">
+                              <div className="flex items-start gap-1.5 text-emerald-700">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 mt-1.5" />
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-sm font-bold text-emerald-800 leading-none">Vch No: {record.voucherNumber || 'N/A'}</span>
+                                  <span className="text-[10px] text-emerald-600/80 leading-tight">Ref: {record.erpRef || 'N/A'}</span>
+                                </div>
                               </div>
                               <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 uppercase px-1 py-0 shadow-none h-4">Synced</Badge>
                             </div>
@@ -2765,7 +2818,7 @@ export default function APWorkspace() {
                 className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-full px-4 py-1.5"
               >
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[12px] font-bold text-emerald-700">Tally Ref: {tallySuccess.erpRef}</span>
+                <span className="text-[12px] font-bold text-emerald-700">{tallySuccess.voucherNumber ? `Voucher: ${tallySuccess.voucherNumber}` : `Ref: ${tallySuccess.erpSyncId}`}</span>
               </motion.div>
 
               {/* Dismiss hint */}
@@ -2778,6 +2831,79 @@ export default function APWorkspace() {
               >
                 Click anywhere to dismiss
               </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Tally Error Overlay ── */}
+      <AnimatePresence>
+        {tallyError && (
+          <motion.div
+            key="tally-error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setTallyError(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.8, y: 30, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+              onClick={e => e.stopPropagation()}
+              className="relative bg-white rounded-[20px] shadow-[0_32px_80px_rgba(0,0,0,0.25)] p-[36px_44px] flex flex-col items-center gap-4 min-w-[340px] max-w-[420px]"
+            >
+              {/* Pulsing red ring */}
+              <motion.div
+                className="absolute inset-0 rounded-[20px]"
+                animate={{ boxShadow: ['0 0 0 0px rgba(239,68,68,0.35)', '0 0 0 14px rgba(239,68,68,0)'] }}
+                transition={{ duration: 1.4, repeat: Infinity }}
+              />
+
+              {/* Icon */}
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 350, damping: 18, delay: 0.1 }}
+                className="w-[68px] h-[68px] rounded-full bg-red-50 border-2 border-red-200 flex items-center justify-center"
+              >
+                <AlertCircle className="w-9 h-9 text-red-500" />
+              </motion.div>
+
+              {/* Text */}
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="text-center flex flex-col gap-1.5"
+              >
+                <div className="text-[20px] font-black text-[#1A2640] tracking-tight">Tally Posting Failed</div>
+                <div className="text-[13px] font-semibold text-slate-600">{tallyError.invoiceNo}</div>
+                <div className="text-[12px] text-slate-400">{tallyError.supplier}</div>
+              </motion.div>
+
+              {/* Reason pill */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.25 }}
+                className="w-full bg-red-50 border border-red-200 rounded-[10px] px-4 py-3 text-center"
+              >
+                <span className="text-[12px] font-medium text-red-700 leading-snug">{tallyError.reason}</span>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.5 }}
+                className="text-[11px] text-slate-400"
+              >
+                Please check Tally manually · Click anywhere to dismiss
+              </motion.div>
             </motion.div>
           </motion.div>
         )}

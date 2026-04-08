@@ -86,6 +86,10 @@ const ALLOWED_CHANNELS = [
     'config:get-extended-criteria',
     'config:save-extended-criteria',
     'items:get-all',
+    // Tally post status
+    'invoices:get-tally-post-status',
+    // Sync status
+    'sync:get-latest-status',
 ];
 
 /**

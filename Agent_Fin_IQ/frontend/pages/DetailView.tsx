@@ -464,6 +464,24 @@ export default function DetailView() {
   const [zoom, setZoom] = useState(100);
   const [page, setPage] = useState(1);
   const fromTab = searchParams.get('from') || 'received';
+
+  const navIds: string[] = (() => {
+    try { return JSON.parse(sessionStorage.getItem('apWorkspaceNavIds') || '[]'); } catch { return []; }
+  })();
+  const navIdx = (() => {
+    const v = sessionStorage.getItem('apWorkspaceNavIdx');
+    return v !== null ? Number(v) : navIds.indexOf(id || '');
+  })();
+  const hasPrev = navIdx > 0;
+  const hasNext = navIdx < navIds.length - 1;
+
+  const navigateToRecord = (targetIdx: number) => {
+    const targetId = navIds[targetIdx];
+    if (!targetId) return;
+    sessionStorage.setItem('apWorkspaceNavIdx', String(targetIdx));
+    navigate(`/detail/${targetId}?from=${fromTab}`);
+  };
+
   const tabNames: Record<string, string> = {
     received: 'Received',
     handoff: 'Handoff',
@@ -665,6 +683,10 @@ export default function DetailView() {
   };
 
   const [isSyncingVendor, setIsSyncingVendor] = useState(false);
+  const [vendorSyncError, setVendorSyncError] = useState<string | null>(null);
+  const [vendorSyncSuccess, setVendorSyncSuccess] = useState<string | null>(null);
+  const [masterSyncError, setMasterSyncError] = useState<string | null>(null);
+  const [masterSyncSuccess, setMasterSyncSuccess] = useState<string | null>(null);
 
   const [ledgerOptions, setLedgerOptions] = useState<string[]>([]);
   const [itemOptions, setItemOptions] = useState<string[]>([]);
@@ -904,6 +926,11 @@ export default function DetailView() {
             const qty = Number(item?.qty ?? item?.quantity ?? 1);
             const rate = Number(item?.rate ?? item?.unit_price ?? item?.unitPrice ?? item?.rate_per_pcs ?? 0);
             const discount = Number(item?.discount ?? 0);
+            const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+            const safeRate = Number.isFinite(rate) ? rate : 0;
+            const safeDiscount = Number.isFinite(discount) ? discount : 0;
+            const rawAmount = Number(item?.total_amount ?? item?.amount ?? item?.line_amount);
+            const amount = Number.isFinite(rawAmount) && rawAmount !== 0 ? rawAmount : safeQty * safeRate * (1 - safeDiscount / 100);
             return {
               id: item?.id ?? `${Date.now()}_${idx}`,
               description: item?.description ?? item?.item_description ?? '',
@@ -915,9 +942,10 @@ export default function DetailView() {
               match_status: item?.match_status ?? '',
               hsn_sac: item?.hsn_sac ?? item?.hsn ?? '',
               tax: item?.tax ?? item?.tax_rate ?? '',
-              qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
-              rate: Number.isFinite(rate) ? rate : 0,
-              discount: Number.isFinite(discount) ? discount : 0,
+              qty: safeQty,
+              rate: safeRate,
+              discount: safeDiscount,
+              amount,
             };
           });
           setLineItems(mappedItems);
@@ -937,6 +965,7 @@ export default function DetailView() {
             qty: 1,
             rate: 0,
             discount: 0,
+            amount: 0,
           }];
           setLineItems(defaultItems);
           setOriginalLineItems(JSON.parse(JSON.stringify(defaultItems)));
@@ -1248,6 +1277,7 @@ export default function DetailView() {
         qty: 1,
         rate: 0,
         discount: 0,
+        amount: 0,
       },
     ]);
   };
@@ -1432,6 +1462,28 @@ export default function DetailView() {
           </button>
 
           <div className="h-10 w-[1px] bg-slate-200 mx-1" />
+
+          {navIds.length > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => navigateToRecord(navIdx - 1)}
+                disabled={!hasPrev}
+                title="Previous record"
+                className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                <ChevronLeft size={18} strokeWidth={2.5} />
+              </button>
+              <span className="text-[11px] font-bold text-slate-400 select-none px-1">{navIdx + 1}/{navIds.length}</span>
+              <button
+                onClick={() => navigateToRecord(navIdx + 1)}
+                disabled={!hasNext}
+                title="Next record"
+                className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+              >
+                <ChevronRight size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
 
           <div className="flex flex-col">
             <h1 className="text-[17px] font-black text-slate-900 leading-tight flex items-center gap-3">
@@ -1864,14 +1916,15 @@ export default function DetailView() {
 
                     <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
                       <div className="overflow-x-auto">
-                        <table className="w-full table-fixed text-left border-collapse min-w-[760px]">
+                        <table className="w-full table-fixed text-left border-collapse min-w-[860px]">
                           <colgroup>
+                            <col style={{ width: '22%' }} />
                             <col style={{ width: '24%' }} />
-                            <col style={{ width: '26%' }} />
+                            <col style={{ width: '100px' }} />
+                            <col style={{ width: '80px' }} />
                             <col style={{ width: '110px' }} />
-                            <col style={{ width: '88px' }} />
-                            <col style={{ width: '120px' }} />
-                            <col style={{ width: '96px' }} />
+                            <col style={{ width: '90px' }} />
+                            <col style={{ width: '110px' }} />
                             {!readOnly && <col style={{ width: '52px' }} />}
                           </colgroup>
                           <thead className="bg-slate-50/80 border-b border-slate-200">
@@ -1882,6 +1935,7 @@ export default function DetailView() {
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Quantity</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Unit Rate</th>
                               <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Discount</th>
+                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right whitespace-nowrap">Amount</th>
                               {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
                             </tr>
                           </thead>
@@ -2020,6 +2074,18 @@ export default function DetailView() {
                                     {!readOnly && <span className="absolute right-2 text-[12px] text-[#8899AA] font-bold">%</span>}
                                   </div>
                                 </td>
+                                <td className="p-3 align-top min-w-[110px]">
+                                  <input
+                                    disabled={readOnly}
+                                    type="number"
+                                    className={`w-full border p-2 rounded-[6px] text-[13px] text-right font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`}
+                                    value={item.amount}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setLineItems(lineItems.map((ln, i) => i === index ? { ...ln, amount: Number.isFinite(val) ? val : 0 } : ln));
+                                    }}
+                                  />
+                                </td>
                                 {!readOnly && (
                                   <td className="p-3 text-center align-top pt-[14px]">
                                     <button onClick={() => handleRemoveLineItem(item.id)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-1 rounded-[6px] cursor-pointer border-none bg-transparent transition-colors">
@@ -2128,8 +2194,21 @@ export default function DetailView() {
                   </div>
                 </div>
               </div>
+              {vendorSyncSuccess && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </div>
+                  <span className="text-[12px] text-emerald-700 font-medium leading-snug">{vendorSyncSuccess}</span>
+                </div>
+              )}
+              {vendorSyncError && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 font-medium leading-snug">
+                  {vendorSyncError}
+                </div>
+              )}
               <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => setShowVendorSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
+                <Button variant="ghost" onClick={() => { setShowVendorSlideout(false); setVendorSyncError(null); setVendorSyncSuccess(null); }} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
                 <Button
                   disabled={isSyncingVendor}
                   onClick={async () => {
@@ -2194,20 +2273,19 @@ export default function DetailView() {
                     };
                     console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
                     setIsSyncingVendor(true);
-                    toast.info('Vendor creation started');
+                    setVendorSyncError(null);
                     try {
                       const result = await syncVendorWithTally(payload);
                       console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
                       if (result.success) {
-                        toast.success(result.message || 'Vendor created successfully in ERP');
-                        setShowVendorSlideout(false);
+                        setVendorSyncSuccess(result.message || 'Vendor created successfully in Tally');
                       } else {
-                        toast.error(result.message || 'Vendor sync with ERP failed');
+                        setVendorSyncError(result.message || 'Vendor sync with ERP failed');
                       }
                     } catch (err) {
                       const msg = err instanceof Error ? err.message : 'Vendor sync failed';
                       console.error('[DetailView] syncVendorWithTally error:', err);
-                      toast.error(msg);
+                      setVendorSyncError(msg);
                     } finally {
                       setIsSyncingVendor(false);
                     }
@@ -2276,8 +2354,21 @@ export default function DetailView() {
                 )}
               </div>
 
+              {masterSyncSuccess && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </div>
+                  <span className="text-[12px] text-emerald-700 font-medium leading-snug">{masterSyncSuccess}</span>
+                </div>
+              )}
+              {masterSyncError && (
+                <div className="mx-8 mb-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 font-medium leading-snug">
+                  {masterSyncError}
+                </div>
+              )}
               <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => setShowLedgerSlideout(false)} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={saving}>Cancel</Button>
+                <Button variant="ghost" onClick={() => { setShowLedgerSlideout(false); setMasterSyncError(null); setMasterSyncSuccess(null); }} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={saving}>Cancel</Button>
                 <Button
                   disabled={saving}
                   onClick={async () => {
@@ -2295,6 +2386,8 @@ export default function DetailView() {
                     const isGoods = label.toLowerCase().includes('goods');
 
                     setSaving(true);
+                    setMasterSyncError(null);
+                    setMasterSyncSuccess(null);
                     try {
                       if (creationMode === 'STOCK_ITEM') {
                         const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
@@ -2322,7 +2415,7 @@ export default function DetailView() {
                         const createdName = result.item.item_name || name;
                         setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
                         applyGoodsStockItemSelection(activeLedgerIndex, createdName);
-                        toast.success('Stock item created and synced');
+                        setMasterSyncSuccess(result.message || 'Stock item created successfully in Tally');
                       } else {
                         const { name, underGroup, buyerName, gstApplicable } = newLedger;
                         if (!name.trim()) throw new Error('Ledger name is required');
@@ -2352,17 +2445,15 @@ export default function DetailView() {
                           if (converted) {
                             // Conversion flow already surfaces its own persisted success message.
                           } else {
-                            toast.success('Ledger created');
-                            toast.info('Goods invoice remains unchanged until you confirm the conversion');
+                            setMasterSyncSuccess(result.message || 'Ledger created successfully in Tally');
                           }
                         } else {
                           applyLedgerSelection(activeLedgerIndex, createdName, createdId);
-                          toast.success('Ledger created and synced');
+                          setMasterSyncSuccess(result.message || 'Ledger created successfully in Tally');
                         }
                       }
-                      setShowLedgerSlideout(false);
                     } catch (err: any) {
-                      toast.error(err.message || 'Creation failed');
+                      setMasterSyncError(err.message || 'Creation failed');
                     } finally {
                       setSaving(false);
                     }
