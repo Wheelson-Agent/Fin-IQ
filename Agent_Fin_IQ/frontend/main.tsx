@@ -30,6 +30,14 @@ import Reports from './pages/Reports';
 import UserProfile from './pages/UserProfile';
 import NotFound from './pages/NotFound';
 
+/* SUPPLIER_360_START — remove this block to uninstall Supplier 360 */
+import SupplierList from './pages/supplier360/SupplierList';
+import SupplierDetail from './pages/supplier360/SupplierDetail';
+import ComplianceTower from './pages/supplier360/ComplianceTower';
+import GSTIntelligence from './pages/supplier360/GSTIntelligence';
+import ProcurementControl from './pages/supplier360/ProcurementControl';
+/* SUPPLIER_360_END */
+
 // Global styles
 import './styles/index.css';
 
@@ -55,6 +63,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/agent" element={<AgentPage />} />
                     <Route path="/reports" element={<Reports />} />
                     <Route path="/profile" element={<UserProfile />} />
+                    {/* SUPPLIER_360_START — remove routes below to uninstall Supplier 360 */}
+                    <Route path="/supplier360" element={<SupplierList />} />
+                    <Route path="/supplier360/detail/:id" element={<SupplierDetail />} />
+                    <Route path="/supplier360/compliance" element={<ComplianceTower />} />
+                    <Route path="/supplier360/gst" element={<GSTIntelligence />} />
+                    <Route path="/supplier360/procurement" element={<ProcurementControl />} />
+                    {/* SUPPLIER_360_END */}
                 </Route>
 
                 {/* 404 */}

@@ -3,7 +3,8 @@ import { NavLink } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, FileText, CreditCard, Eye, ClipboardList, CheckSquare, XCircle,
-  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal
+  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal,
+  /* SUPPLIER_360_START */ TrendingUp /* SUPPLIER_360_END */
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -20,6 +21,9 @@ const navItemsMain = [
 
 const navItemsManage = [
   { id: 'reports', label: 'Reports', path: '/reports', icon: BarChart3 },
+  /* SUPPLIER_360_START — remove this line to uninstall Supplier 360 */
+  { id: 'supplier360', label: 'Supplier 360', path: '/supplier360', icon: TrendingUp, badge: 'NEW', badgeColor: 'bg-[#10B981]' },
+  /* SUPPLIER_360_END */
 ];
 
 const navItemsSettings = [

@@ -9,11 +9,11 @@ import { useCompany } from '../context/CompanyContext';
 // ============================================================
 
 const C = {
-  ink:        '#0F1923',
-  paper:      '#F8F5EF',
+  ink:        '#0F172A',
+  paper:      '#F8FAFC',
   surface:    '#FFFFFF',
-  inkMuted:   '#6B7280',
-  inkGhost:   '#C4BFB5',
+  inkMuted:   '#64748B',
+  inkGhost:   '#CBD5E1',
   tealDeep:   '#0F6E56',
   tealMid:    '#1D9E75',
   tealLight:  '#E1F5EE',
@@ -268,7 +268,7 @@ function PulseCard({ label, children, delay = 0, accentColor }: {
         background:   C.surface,
         border:       `0.5px solid ${hovered ? C.navy : C.inkGhost}`,
         borderTop:    accentColor ? `2.5px solid ${accentColor}` : `0.5px solid ${hovered ? C.navy : C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px 18px',
         cursor:       'pointer',
         transform:    hovered ? 'translateY(-2px)' : 'translateY(0)',
@@ -280,7 +280,7 @@ function PulseCard({ label, children, delay = 0, accentColor }: {
         fontSize:     '12px',
         color:        C.inkMuted,
         marginBottom: '10px',
-        fontFamily:   '"DM Sans", sans-serif',
+        fontFamily:   'inherit',
         fontWeight:   400,
         letterSpacing:'0.01em',
         textTransform:'uppercase',
@@ -325,13 +325,13 @@ function ActivityWidget({ data }: { data: ActivityData }) {
       style={{
         background:   C.surface,
         border:       `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Recent activity
         </span>
       </div>
@@ -356,7 +356,7 @@ function ActivityWidget({ data }: { data: ActivityData }) {
             }} />
 
             {/* Event text */}
-            <span style={{ flex: 1, fontSize: '12px', lineHeight: 1.5, fontFamily: '"DM Sans", sans-serif' }}>
+            <span style={{ flex: 1, fontSize: '12px', lineHeight: 1.5, fontFamily: 'inherit' }}>
               {renderBold(ev.text, C.inkMuted)}
             </span>
 
@@ -365,7 +365,7 @@ function ActivityWidget({ data }: { data: ActivityData }) {
               flexShrink: 0,
               fontSize:   '12px',
               color:      C.inkGhost,
-              fontFamily: '"DM Sans", sans-serif',
+              fontFamily: 'inherit',
               whiteSpace: 'nowrap',
             }}>
               {timeAgo(ev.ts)}
@@ -396,8 +396,8 @@ function BriefingWidget({ data }: { data: BriefingData }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: 'easeOut', delay: 0.4 }}
       style={{
-        background:     C.paper,
-        borderRadius:   '6px',
+        background:     C.surface,
+        borderRadius:   '12px',
         border:         `0.5px solid ${C.inkGhost}`,
         borderLeft:     `3px solid ${C.navy}`,
         padding:        '20px 24px',
@@ -407,7 +407,7 @@ function BriefingWidget({ data }: { data: BriefingData }) {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           CFO briefing
         </span>
       </div>
@@ -418,13 +418,13 @@ function BriefingWidget({ data }: { data: BriefingData }) {
         color:      C.inkMuted,
         lineHeight: 1.6,
         margin:     0,
-        fontFamily: '"DM Sans", sans-serif',
+        fontFamily: 'inherit',
       }}>
         {renderBold(data.message, C.inkMuted)}
       </p>
 
       {/* Sent time */}
-      <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: '"DM Sans", sans-serif' }}>
+      <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: 'inherit' }}>
         Sent {new Date(data.sent_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
       </span>
 
@@ -435,12 +435,12 @@ function BriefingWidget({ data }: { data: BriefingData }) {
           width:        '100%',
           padding:      '8px',
           fontSize:     '12px',
-          fontFamily:   '"DM Sans", sans-serif',
+          fontFamily:   'inherit',
           fontWeight:   500,
           color:        resent ? C.tealDeep : C.navy,
           background:   resent ? C.tealLight : 'transparent',
           border:       `0.5px solid ${resent ? C.tealMid : C.navy}`,
-          borderRadius: '6px',
+          borderRadius: '12px',
           cursor:       'pointer',
           transition:   'all 200ms ease',
         }}
@@ -470,13 +470,13 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
       style={{
         background:   C.surface,
         border:       `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Supplier360 alerts
         </span>
       </div>
@@ -493,7 +493,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
           borderRadius:   '5px',
           border:         `0.5px solid ${C.redMid}`,
         }}>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: C.redDeep, fontFamily: '"DM Sans", sans-serif' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: C.redDeep, fontFamily: 'inherit' }}>
             ITC at risk
           </span>
           <span style={{
@@ -534,7 +534,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
                 borderRadius: '20px',
                 background:   cfg.bg,
                 color:        cfg.text,
-                fontFamily:   '"DM Sans", sans-serif',
+                fontFamily:   'inherit',
                 whiteSpace:   'nowrap',
               }}>
                 {cfg.label}
@@ -545,12 +545,12 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
                 <span style={{
                   fontSize:   '12px',
                   color:      C.ink,
-                  fontFamily: '"DM Sans", sans-serif',
+                  fontFamily: 'inherit',
                   fontWeight: 500,
                 }}>
                   {a.name}
                 </span>
-                <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+                <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
                   {' '}— {a.note}
                 </span>
               </div>
@@ -580,7 +580,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
             fontSize:      '11px',
             fontWeight:    500,
             color:         C.amberDeep,
-            fontFamily:    '"DM Sans", sans-serif',
+            fontFamily:    'inherit',
             letterSpacing: '0.04em',
             textTransform: 'uppercase',
           }}>
@@ -597,7 +597,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
                 flex:         1,
                 fontSize:     '12px',
                 color:        C.ink,
-                fontFamily:   '"DM Sans", sans-serif',
+                fontFamily:   'inherit',
                 overflow:     'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace:   'nowrap',
@@ -672,13 +672,13 @@ function TallySyncWidget({ data }: { data: any }) {
       style={{
         background:   C.surface,
         border:       `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Tally sync
         </span>
       </div>
@@ -692,7 +692,7 @@ function TallySyncWidget({ data }: { data: any }) {
         ] as const).map(({ label, value, cfg }) => (
           <div key={label} style={{
             background:   cfg.bg,
-            borderRadius: '6px',
+            borderRadius: '12px',
             padding:      '12px',
             textAlign:    'center',
           }}>
@@ -706,7 +706,7 @@ function TallySyncWidget({ data }: { data: any }) {
             }}>
               {value}
             </div>
-            <div style={{ fontSize: '11px', color: cfg.text, fontFamily: '"DM Sans", sans-serif' }}>
+            <div style={{ fontSize: '11px', color: cfg.text, fontFamily: 'inherit' }}>
               {label}
             </div>
           </div>
@@ -724,7 +724,7 @@ function TallySyncWidget({ data }: { data: any }) {
         borderRadius:   '5px',
         border:         `0.5px solid ${successRateColor}`,
       }}>
-        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: 'inherit' }}>
           Sync success rate
         </span>
         <span style={{
@@ -750,10 +750,10 @@ function TallySyncWidget({ data }: { data: any }) {
           border:         `0.5px solid ${C.amberMid}`,
         }}>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif', fontWeight: 500 }}>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: 'inherit', fontWeight: 500 }}>
               Handoff reasons
             </span>
-            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif' }}>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: 'inherit' }}>
               {data.blocked.duplicate} dup · {data.blocked.invalid_gstin} GSTIN
             </span>
           </div>
@@ -794,7 +794,7 @@ function TallySyncWidget({ data }: { data: any }) {
                 flex:         1,
                 fontSize:     '12px',
                 color:        C.ink,
-                fontFamily:   '"DM Sans", sans-serif',
+                fontFamily:   'inherit',
                 overflow:     'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace:   'nowrap',
@@ -812,7 +812,7 @@ function TallySyncWidget({ data }: { data: any }) {
                 borderRadius: '20px',
                 background:   cfg.bg,
                 color:        cfg.text,
-                fontFamily:   '"DM Sans", sans-serif',
+                fontFamily:   'inherit',
               }}>
                 {cfg.label}
               </span>
@@ -834,7 +834,7 @@ function TallySyncWidget({ data }: { data: any }) {
                 flexShrink: 0,
                 fontSize:   '11px',
                 color:      C.inkGhost,
-                fontFamily: '"DM Sans", sans-serif',
+                fontFamily: 'inherit',
                 width:      '48px',
                 textAlign:  'right',
               }}>
@@ -871,13 +871,13 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
       style={{
         background: C.surface,
         border: `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding: '20px 24px',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Tally sync
         </span>
       </div>
@@ -899,7 +899,7 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
             }}>
               {value}
             </div>
-            <div style={{ fontSize: '11px', color: cfg.text, fontFamily: '"DM Sans", sans-serif' }}>
+            <div style={{ fontSize: '11px', color: cfg.text, fontFamily: 'inherit' }}>
               {label}
             </div>
           </div>
@@ -916,7 +916,7 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
         borderRadius: '5px',
         border: `0.5px solid ${successRateColor}`,
       }}>
-        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: 'inherit' }}>
           Sync success rate
         </span>
         <span style={{
@@ -941,10 +941,10 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
           border: `0.5px solid ${C.amberMid}`,
         }}>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif', fontWeight: 500 }}>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: 'inherit', fontWeight: 500 }}>
               Handoff reasons
             </span>
-            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: '"DM Sans", sans-serif' }}>
+            <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: 'inherit' }}>
               {reasonEntries.slice(0, 2).map(item => `${item.value} ${item.label}`).join(' · ')}
             </span>
           </div>
@@ -981,21 +981,21 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
                 <div style={{
                   fontSize: '12px',
                   color: C.ink,
-                  fontFamily: '"DM Sans", sans-serif',
+                  fontFamily: 'inherit',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}>
                   {event.vendor}
                 </div>
-                <div style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+                <div style={{ fontSize: '11px', color: C.inkMuted, fontFamily: 'inherit' }}>
                   {cfg.label} · {formatINRAbbr(event.amount)}
                 </div>
               </div>
               <span style={{
                 fontSize: '11px',
                 color: C.inkGhost,
-                fontFamily: '"DM Sans", sans-serif',
+                fontFamily: 'inherit',
                 flexShrink: 0,
               }}>
                 {timeAgo(event.ts)}
@@ -1028,14 +1028,14 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
       style={{
         background:   C.surface,
         border:       `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px',
       }}
     >
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Top suppliers · 30 days
         </span>
       </div>
@@ -1063,7 +1063,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
               flexShrink: 0,
               fontSize:   '11px',
               color:      C.inkGhost,
-              fontFamily: '"DM Sans", sans-serif',
+              fontFamily: 'inherit',
               textAlign:  'right',
             }}>
               {s.rank}
@@ -1074,7 +1074,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
               flex:         1,
               fontSize:     '13px',
               color:        C.ink,
-              fontFamily:   '"DM Sans", sans-serif',
+              fontFamily:   'inherit',
               overflow:     'hidden',
               textOverflow: 'ellipsis',
               whiteSpace:   'nowrap',
@@ -1126,7 +1126,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
         alignItems:  'center',
       }}>
         {/* KPI-19: new suppliers this month */}
-        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
           <span style={{
             fontFamily: '"JetBrains Mono", monospace',
             fontWeight: 600,
@@ -1138,7 +1138,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
         </span>
 
         {/* KPI-20: spend concentration */}
-        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
           Top 3&nbsp;=&nbsp;
           <span style={{
             fontFamily: '"JetBrains Mono", monospace',
@@ -1174,14 +1174,14 @@ function AgingWidget({ data }: { data: AgingData }) {
       style={{
         background:   C.surface,
         border:       `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px',
       }}
     >
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '18px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Payables aging
         </span>
       </div>
@@ -1197,7 +1197,7 @@ function AgingWidget({ data }: { data: AgingData }) {
               flexShrink: 0,
               fontSize:   '12px',
               color:      C.inkMuted,
-              fontFamily: '"DM Sans", sans-serif',
+              fontFamily: 'inherit',
             }}>
               {bucket.label}
             </div>
@@ -1244,7 +1244,7 @@ function AgingWidget({ data }: { data: AgingData }) {
         paddingTop:     '12px',
         borderTop:      `0.5px solid ${C.inkGhost}`,
       }}>
-        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
           {formatINRAbbr(data.next_30_days)} due in next 30 days
         </span>
         <span style={{
@@ -1305,7 +1305,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
       style={{
         background:   C.surface,
         border:       `0.5px solid ${C.inkGhost}`,
-        borderRadius: '6px',
+        borderRadius: '12px',
         padding:      '20px 24px',
       }}
     >
@@ -1317,7 +1317,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
         gap:          '10px',
       }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
           Invoice pipeline
         </span>
       </div>
@@ -1333,7 +1333,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
               style={{
                 background:   seg.bg,
                 border:       `0.5px solid ${seg.border}`,
-                borderRadius: '6px',
+                borderRadius: '12px',
                 padding:      '16px',
                 cursor:       'pointer',
                 transition:   'opacity 120ms ease',
@@ -1346,7 +1346,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
                 fontWeight:    500,
                 letterSpacing: '0.06em',
                 color:         seg.textDeep,
-                fontFamily:    '"DM Sans", sans-serif',
+                fontFamily:    'inherit',
                 marginBottom:  '10px',
               }}>
                 {seg.label}
@@ -1361,7 +1361,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
               }}>
                 {d.count}
               </div>
-              <div style={{ fontSize: '12px', color: seg.textMuted, marginBottom: '6px', fontFamily: '"DM Sans", sans-serif' }}>
+              <div style={{ fontSize: '12px', color: seg.textMuted, marginBottom: '6px', fontFamily: 'inherit' }}>
                 {seg.sublabel}
               </div>
               <div style={{
@@ -1379,7 +1379,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
                   paddingTop:   '8px',
                   borderTop:    `0.5px solid ${seg.border}`,
                   fontSize:     '11px',
-                  fontFamily:   '"DM Sans", sans-serif',
+                  fontFamily:   'inherit',
                   color:        data.oldest_unreviewed_days > 3 ? seg.textDeep : seg.textMuted,
                   fontWeight:   data.oldest_unreviewed_days > 3 ? 600 : 400,
                 }}>
@@ -1401,7 +1401,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
         paddingTop:    '12px',
         borderTop:     `0.5px solid ${C.inkGhost}`,
       }}>
-        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
           Touchless rate this month
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1413,7 +1413,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
           }}>
             {data.touchless_rate.toFixed(1)}%
           </span>
-          <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+          <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
             {rateDelta >= 0 ? '↑' : '↓'} from {data.touchless_rate_prev.toFixed(1)}% last month
           </span>
         </div>
@@ -1428,7 +1428,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
         paddingTop:     '8px',
         borderTop:      `0.5px solid ${C.inkGhost}`,
       }}>
-        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+        <span style={{ fontSize: '11px', color: C.inkMuted, fontFamily: 'inherit' }}>
           Avg processing time
         </span>
         <div style={{ display: 'flex', gap: '12px' }}>
@@ -1437,7 +1437,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
             { label: 'Hybrid',    value: `${data.avg_time.hybrid_hours}h`,   color: C.amberDeep },
             { label: 'Manual',    value: `${data.avg_time.manual_days}d`,    color: C.redDeep   },
           ] as const).map(({ label, value, color }) => (
-            <span key={label} style={{ fontSize: '11px', color: C.inkMuted, fontFamily: '"DM Sans", sans-serif' }}>
+            <span key={label} style={{ fontSize: '11px', color: C.inkMuted, fontFamily: 'inherit' }}>
               {label}&nbsp;
               <span style={{ fontFamily: '"JetBrains Mono", monospace', fontWeight: 600, color }}>
                 {value}
@@ -1464,7 +1464,7 @@ export default function Dashboard() {
     const link = document.createElement('link');
     link.id   = id;
     link.rel  = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap';
     document.head.appendChild(link);
   }, []);
 
@@ -1516,10 +1516,10 @@ export default function Dashboard() {
 
   return (
     <div style={{
-      background: `linear-gradient(180deg, rgba(27,79,138,0.04) 0px, transparent 180px), ${C.paper}`,
+      background: C.paper,
       minHeight:  '100vh',
       padding:    '36px 52px 52px',
-      fontFamily: '"DM Sans", sans-serif',
+      fontFamily: 'inherit',
     }}>
 
       {/* ── PAGE HEADER ────────────────────────────────────────── */}
@@ -1533,21 +1533,21 @@ export default function Dashboard() {
       }}>
         <div>
           <h1 style={{
-            fontFamily:  '"DM Serif Display", serif',
-            fontSize:    '34px',
-            fontWeight:  400,
-            color:       C.ink,
-            margin:      0,
-            lineHeight:  1.1,
-            letterSpacing: '-0.01em',
+            fontFamily:    'inherit',
+            fontSize:      '24px',
+            fontWeight:    700,
+            color:         C.ink,
+            margin:        0,
+            lineHeight:    1.2,
+            letterSpacing: '-0.02em',
           }}>
             AP dashboard
           </h1>
           <p style={{
-            fontSize:   '13px',
+            fontSize:   '14px',
             color:      C.inkMuted,
-            margin:     '8px 0 0',
-            fontFamily: '"DM Sans", sans-serif',
+            margin:     '4px 0 0',
+            fontFamily: 'inherit',
             fontWeight: 400,
           }}>
             Morning snapshot&nbsp;·&nbsp;
@@ -1565,11 +1565,11 @@ export default function Dashboard() {
             padding:      '4px 10px',
           }}>
             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: C.tealMid, animation: 'pulse 2s infinite' }} />
-            <span style={{ fontSize: '11px', color: C.tealDeep, fontWeight: 500, fontFamily: '"DM Sans", sans-serif' }}>
+            <span style={{ fontSize: '11px', color: C.tealDeep, fontWeight: 500, fontFamily: 'inherit' }}>
               Live · 20 KPIs
             </span>
           </div>
-          <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: '"DM Sans", sans-serif' }}>
+          <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: 'inherit' }}>
             Phase 1 · AP Intelligence
           </span>
         </div>
@@ -1669,7 +1669,7 @@ export default function Dashboard() {
               fontWeight:   500,
               padding:      '2px 8px',
               borderRadius: '4px',
-              fontFamily:   '"DM Sans", sans-serif',
+              fontFamily:   'inherit',
             }}>
               Overdue: {formatINRAbbr(pulse.due_today.overdue)}
             </div>
@@ -1699,7 +1699,7 @@ export default function Dashboard() {
             padding:      '2px 8px',
             borderRadius: '4px',
             border:       `0.5px solid ${ratioBorder}`,
-            fontFamily:   '"DM Sans", sans-serif',
+            fontFamily:   'inherit',
           }}>
             {ratio.toFixed(1)}x covered
           </div>
@@ -1745,11 +1745,11 @@ export default function Dashboard() {
         marginBottom:  '16px',
       }}>
         <span style={{
-          fontFamily:    '"DM Serif Display", serif',
-          fontSize:      '16px',
-          fontWeight:    400,
-          color:         C.ink,
-          letterSpacing: '-0.01em',
+          fontFamily:    'inherit',
+          fontSize:      '13px',
+          fontWeight:    600,
+          color:         C.inkMuted,
+          letterSpacing: '0.01em',
         }}>
           AP Intelligence
         </span>
@@ -1782,7 +1782,7 @@ export default function Dashboard() {
 
       {/* ── BOTTOM SECTION LABEL ───────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-        <span style={{ fontFamily: '"DM Serif Display", serif', fontSize: '16px', fontWeight: 400, color: C.ink, letterSpacing: '-0.01em' }}>
+        <span style={{ fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, color: C.inkMuted, letterSpacing: '0.01em' }}>
           Operations
         </span>
         <div style={{ flex: 1, height: '0.5px', background: C.inkGhost }} />
@@ -1797,7 +1797,7 @@ export default function Dashboard() {
       }}>
         {tallySync
           ? <TallySyncWidgetV2 data={tallySync} />
-          : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '6px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: '"DM Sans", sans-serif' }}>Loading Tally sync…</div>
+          : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '12px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: 'inherit' }}>Loading Tally sync…</div>
         }
         <ActivityWidget  data={MOCK_ACTIVITY}   />
         <BriefingWidget  data={MOCK_BRIEFING}   />
