@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, ChevronUp, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { Toaster } from '../components/ui/sonner';
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
 import { CommandPalette } from '../components/CommandPalette';
@@ -244,6 +245,7 @@ function AppShell() {
       <CommandPalette open={cmdOpen} setOpen={setCmdOpen} />
       <NotificationPanel open={notifOpen} />
       <FloatingAgent />
+      <Toaster position="top-center" richColors />
 
       {/* Floating processing panel — visible on any route except AP Workspace */}
       <PipelineOverlay />

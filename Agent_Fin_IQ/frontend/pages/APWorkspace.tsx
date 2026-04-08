@@ -347,6 +347,7 @@ export default function APWorkspace() {
   const [pageSize, setPageSize] = useState(10);
   const [tallyError, setTallyError] = useState<{ invoiceNo: string; supplier: string; reason: string } | null>(null);
   const tallyPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const bulkPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
@@ -384,9 +385,12 @@ export default function APWorkspace() {
     return () => clearTimeout(t);
   }, [tallyError]);
 
-  // Cleanup poll on unmount
+  // Cleanup polls on unmount
   useEffect(() => {
-    return () => { if (tallyPollRef.current) clearInterval(tallyPollRef.current); };
+    return () => {
+      if (tallyPollRef.current) clearInterval(tallyPollRef.current);
+      if (bulkPollRef.current) clearInterval(bulkPollRef.current);
+    };
   }, []);
 
   // Local-only dialog state
@@ -899,22 +903,63 @@ export default function APWorkspace() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
 
+    // Clear any in-flight bulk poll
+    if (bulkPollRef.current) { clearInterval(bulkPollRef.current); bulkPollRef.current = null; }
+
     setLoading(true);
+    const clickedAt = new Date().toISOString();
     try {
       for (const id of ids) {
-        // Triggering 'Auto-Posted' in backend initiates the Tally sync
         await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
       }
-      toast.success(`Initiated Tally Posting for ${ids.length} invoices`);
+      toast.info(`Posting ${ids.length} invoice${ids.length > 1 ? 's' : ''} to Tally…`);
       setSelectedIds(new Set());
-      // Refresh to see status changes
       fetchData(true);
     } catch (err) {
       console.error('Bulk approve failed:', err);
       toast.error('Failed to initiate posting for some invoices');
+      setLoading(false);
+      return;
     } finally {
       setLoading(false);
     }
+
+    // Poll for results — track each invoice independently
+    const pending = new Set(ids);
+    let passed = 0;
+    let failed = 0;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 20; // 20 × 3s = 60s
+
+    bulkPollRef.current = setInterval(async () => {
+      attempts++;
+      await Promise.all(
+        Array.from(pending).map(async (id) => {
+          try {
+            const outcome = await getTallyPostStatus(id, clickedAt);
+            if (outcome.status === 'success') { pending.delete(id); passed++; }
+            else if (outcome.status === 'soft_failed' || outcome.status === 'hard_failed') { pending.delete(id); failed++; }
+          } catch { /* non-fatal — keep polling */ }
+        })
+      );
+
+      const allDone = pending.size === 0 || attempts >= MAX_ATTEMPTS;
+      if (allDone) {
+        clearInterval(bulkPollRef.current!); bulkPollRef.current = null;
+        fetchData(true);
+
+        if (attempts >= MAX_ATTEMPTS && pending.size > 0) {
+          // Some timed out — count as unknown
+          toast.warning(`${passed} posted, ${failed} failed, ${pending.size} unconfirmed — check Tally manually`);
+        } else if (failed === 0) {
+          toast.success(`All ${passed} invoice${passed > 1 ? 's' : ''} posted to Tally successfully`);
+        } else if (passed === 0) {
+          toast.error(`Tally posting failed for all ${failed} invoice${failed > 1 ? 's' : ''}`);
+        } else {
+          toast.warning(`${passed} posted, ${failed} failed — check Handoff tab for failures`);
+        }
+      }
+    }, 3_000);
   };
 
   const handleApproveRow = async (id: string) => {
@@ -980,7 +1025,8 @@ export default function APWorkspace() {
     const idx = ids.indexOf(record.id);
     sessionStorage.setItem('apWorkspaceNavIds', JSON.stringify(ids));
     sessionStorage.setItem('apWorkspaceNavIdx', String(idx));
-    navigate(`/detail/${record.id}?from=${activeTab}`);
+    const fromTab = activeTab === 'received' ? record.status : activeTab;
+    navigate(`/detail/${record.id}?from=${fromTab}`);
   };
 
   const toEndOfDay = (date?: Date) => {
@@ -2718,107 +2764,25 @@ export default function APWorkspace() {
         </Card>
       )}
 
-      {/* ── Tally Success Celebration Overlay ── */}
+      {/* ── Tally Success Banner ── */}
       <AnimatePresence>
         {tallySuccess && (
           <motion.div
             key="tally-success"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
-            onClick={() => setTallySuccess(null)}
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            transition={{ duration: 0.2 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 bg-white border border-emerald-200 rounded-xl shadow-lg px-4 py-3"
           >
-            {/* Confetti particles */}
-            {Array.from({ length: 28 }).map((_, i) => (
-              <motion.div
-                key={i}
-                className="absolute rounded-full pointer-events-none"
-                style={{
-                  width: 8 + (i % 5) * 4,
-                  height: 8 + (i % 5) * 4,
-                  left: `${5 + (i * 3.4) % 90}%`,
-                  top: '-20px',
-                  background: ['#22C55E','#1E6FD9','#F59E0B','#A855F7','#EF4444','#06B6D4'][i % 6],
-                  borderRadius: i % 3 === 0 ? '2px' : '50%',
-                }}
-                animate={{
-                  y: ['0vh', '110vh'],
-                  rotate: [0, 360 * (i % 2 === 0 ? 1 : -1)],
-                  opacity: [1, 1, 0],
-                }}
-                transition={{
-                  duration: 2.2 + (i % 5) * 0.3,
-                  delay: (i % 7) * 0.08,
-                  ease: 'easeIn',
-                  repeat: Infinity,
-                  repeatDelay: 0.5,
-                }}
-              />
-            ))}
-
-            {/* Card */}
-            <motion.div
-              initial={{ scale: 0.7, y: 40, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.85, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-              onClick={e => e.stopPropagation()}
-              className="relative bg-white rounded-[24px] shadow-[0_32px_80px_rgba(0,0,0,0.3)] p-[40px_48px] flex flex-col items-center gap-5 min-w-[340px] max-w-[420px]"
-            >
-              {/* Pulsing ring */}
-              <motion.div
-                className="absolute inset-0 rounded-[24px]"
-                animate={{ boxShadow: ['0 0 0 0px rgba(34,197,94,0.4)', '0 0 0 16px rgba(34,197,94,0)'] }}
-                transition={{ duration: 1.2, repeat: Infinity }}
-              />
-
-              {/* Icon */}
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', stiffness: 350, damping: 18, delay: 0.1 }}
-                className="w-[72px] h-[72px] rounded-full bg-emerald-50 border-2 border-emerald-200 flex items-center justify-center"
-              >
-                <CheckCircle2 className="w-9 h-9 text-emerald-500" />
-              </motion.div>
-
-              {/* Text */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-                className="text-center flex flex-col gap-1.5"
-              >
-                <div className="text-[22px] font-black text-[#1A2640] tracking-tight">Posted to Tally!</div>
-                <div className="text-[14px] font-semibold text-slate-600">{tallySuccess.invoiceNo}</div>
-                <div className="text-[13px] text-slate-500">{tallySuccess.supplier}</div>
-              </motion.div>
-
-              {/* ERP ref pill */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.3 }}
-                className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-full px-4 py-1.5"
-              >
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[12px] font-bold text-emerald-700">{tallySuccess.voucherNumber ? `Voucher: ${tallySuccess.voucherNumber}` : `Ref: ${tallySuccess.erpSyncId}`}</span>
-              </motion.div>
-
-              {/* Dismiss hint */}
-              <motion.button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.8 }}
-                onClick={() => setTallySuccess(null)}
-                className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors mt-1 cursor-pointer"
-              >
-                Click anywhere to dismiss
-              </motion.button>
-            </motion.div>
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            <div className="flex flex-col">
+              <span className="text-[13px] font-semibold text-slate-800">Posted to Tally — {tallySuccess.invoiceNo}</span>
+              <span className="text-[11px] text-slate-500">{tallySuccess.voucherNumber ? `Voucher: ${tallySuccess.voucherNumber}` : `Ref: ${tallySuccess.erpSyncId}`}</span>
+            </div>
+            <button onClick={() => setTallySuccess(null)} className="ml-2 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

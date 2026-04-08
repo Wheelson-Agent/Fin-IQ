@@ -1195,7 +1195,7 @@ export default function DetailView() {
   }
 
   const bStatus = (invoice.status || '').toLowerCase();
-  const isPosted = bStatus === 'posted' || bStatus === 'auto-posted';
+  const isPosted = (bStatus === 'posted' || bStatus === 'auto-posted') && !!invoice.erp_sync_id;
   const readOnly = isPosted;
   const allowCategorizedLineItemPicker = fromTab === 'input' || fromTab === 'handoff' || fromTab === 'ready';
   const allowLineItemCreateCta = !readOnly && allowCategorizedLineItemPicker;

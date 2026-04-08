@@ -663,7 +663,8 @@ function shouldInvoiceAutoPostWithRules(args: {
 
 async function shouldAutoPostInvoice(grandTotal: any, invoiceDate: any, invoiceVendorGst: any, docType: any, lineItems: any[] = [], companyId?: string) {
     const postingRules = await getAppConfig('posting_rules', companyId || undefined);
-    if (postingRules?.postingMode === 'manual') return false;
+    // No config saved → treat as manual (safe default: never auto-post without explicit opt-in)
+    if (!postingRules || postingRules?.postingMode === 'manual') return false;
     // Fall back to the legacy config key so previously saved date ranges still work during the production migration.
     const invoiceDateRange = postingRules?.criteria?.filter_invoice_date_enabled !== undefined
         ? postingRules
