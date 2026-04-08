@@ -1,0 +1,770 @@
+/* ============================================================
+   SUPPLIER 360 — SCOPED CSS
+   Self-contained styles. No global pollution.
+   Uses .s360 namespace to prevent collisions.
+   Font: Sora — matches the rest of the app (loaded globally).
+   ============================================================ */
+
+/* ─── Root vars (scoped to .s360-root) ─────────────────────── */
+.s360-root {
+  --s360-bg: #F0F4FA;
+  --s360-surface: #FFFFFF;
+  --s360-surface2: #F8FAFC;
+  --s360-border: #E2E8F0;
+  --s360-border-soft: #EEF2F8;
+  --s360-text-primary: #0F172A;
+  --s360-text-secondary: #475569;
+  --s360-text-muted: #94A3B8;
+  --s360-navy: #0F172A;
+  --s360-navy-hover: #1E293B;
+  --s360-blue: #2563EB;
+  --s360-green: #10B981;
+  --s360-green-bg: #ECFDF5;
+  --s360-amber: #F59E0B;
+  --s360-amber-bg: #FFFBEB;
+  --s360-red: #EF4444;
+  --s360-red-bg: #FEF2F2;
+  --s360-purple: #8B5CF6;
+  --s360-shadow-sm: 0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --s360-shadow: 0 4px 16px rgba(15,23,42,0.08), 0 1px 4px rgba(15,23,42,0.04);
+  --s360-shadow-lg: 0 10px 40px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06);
+  --s360-radius: 12px;
+  --s360-radius-sm: 8px;
+  --s360-radius-lg: 16px;
+  font-family: inherit;
+  background: var(--s360-bg);
+  min-height: 100%;
+  color: var(--s360-text-primary);
+}
+
+/* ─── Layout ────────────────────────────────────────────────── */
+.s360-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.s360-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.s360-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.s360-grid-5 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  .s360-grid-5 { grid-template-columns: repeat(3, 1fr); }
+  .s360-grid-3 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .s360-grid-2, .s360-grid-3, .s360-grid-5 { grid-template-columns: 1fr; }
+}
+
+/* ─── Page Header ───────────────────────────────────────────── */
+.s360-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.s360-page-header-left h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--s360-text-primary);
+  margin: 0 0 2px 0;
+  line-height: 1.2;
+}
+
+.s360-page-header-left p {
+  font-size: 13px;
+  color: var(--s360-text-muted);
+  margin: 0;
+}
+
+/* ─── Stat Card ─────────────────────────────────────────────── */
+.s360-stat-card {
+  background: var(--s360-surface);
+  border: 1px solid var(--s360-border);
+  border-radius: var(--s360-radius);
+  padding: 18px 20px;
+  box-shadow: var(--s360-shadow-sm);
+  transition: box-shadow 0.18s, transform 0.18s;
+  cursor: default;
+}
+
+.s360-stat-card:hover {
+  box-shadow: var(--s360-shadow);
+  transform: translateY(-1px);
+}
+
+.s360-stat-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--s360-text-muted);
+  margin-bottom: 8px;
+}
+
+.s360-stat-card-value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--s360-text-primary);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.s360-stat-card-sub {
+  font-size: 12px;
+  color: var(--s360-text-muted);
+}
+
+.s360-stat-card-accent {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+/* ─── Widget Card ───────────────────────────────────────────── */
+.s360-card {
+  background: var(--s360-surface);
+  border: 1px solid var(--s360-border);
+  border-radius: var(--s360-radius);
+  padding: 20px 22px;
+  box-shadow: var(--s360-shadow-sm);
+}
+
+.s360-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--s360-text-primary);
+  margin: 0 0 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.s360-card-title-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── Risk Badge ─────────────────────────────────────────────── */
+.s360-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.s360-badge-low { background: var(--s360-green-bg); color: var(--s360-green); }
+.s360-badge-medium { background: var(--s360-amber-bg); color: #B45309; }
+.s360-badge-high { background: var(--s360-red-bg); color: #DC2626; }
+.s360-badge-info { background: #EFF6FF; color: #1D4ED8; }
+.s360-badge-purple { background: #F5F3FF; color: #6D28D9; }
+
+/* ─── Table ─────────────────────────────────────────────────── */
+.s360-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--s360-radius);
+  border: 1px solid var(--s360-border);
+  box-shadow: var(--s360-shadow-sm);
+}
+
+.s360-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--s360-surface);
+  font-size: 13px;
+}
+
+.s360-table thead tr {
+  background: var(--s360-surface2);
+  border-bottom: 1px solid var(--s360-border);
+}
+
+.s360-table th {
+  padding: 11px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--s360-text-muted);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.s360-table td {
+  padding: 12px 16px;
+  color: var(--s360-text-secondary);
+  border-bottom: 1px solid var(--s360-border-soft);
+  vertical-align: middle;
+}
+
+.s360-table tbody tr:last-child td { border-bottom: none; }
+
+.s360-table tbody tr {
+  transition: background 0.12s;
+}
+
+.s360-table tbody tr:hover {
+  background: var(--s360-surface2);
+}
+
+.s360-table-link {
+  color: var(--s360-blue);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.12s;
+}
+
+.s360-table-link:hover { color: #1D4ED8; text-decoration: underline; }
+
+/* ─── Progress Bar ──────────────────────────────────────────── */
+.s360-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.s360-progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--s360-border);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.s360-progress-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+
+.s360-progress-label {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ─── Filter Bar ─────────────────────────────────────────────── */
+.s360-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.s360-search {
+  flex: 1;
+  min-width: 220px;
+  max-width: 320px;
+  position: relative;
+}
+
+.s360-search input {
+  width: 100%;
+  padding: 8px 12px 8px 36px;
+  border: 1px solid var(--s360-border);
+  border-radius: var(--s360-radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--s360-surface);
+  color: var(--s360-text-primary);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+}
+
+.s360-search input:focus {
+  border-color: var(--s360-blue);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.10);
+}
+
+.s360-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--s360-text-muted);
+  pointer-events: none;
+}
+
+.s360-select {
+  padding: 8px 12px;
+  border: 1px solid var(--s360-border);
+  border-radius: var(--s360-radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--s360-surface);
+  color: var(--s360-text-secondary);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.s360-select:focus { border-color: var(--s360-blue); }
+
+/* ─── Buttons ────────────────────────────────────────────────── */
+.s360-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--s360-radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+
+.s360-btn:active { transform: scale(0.98); }
+
+.s360-btn-primary {
+  background: var(--s360-navy);
+  color: #fff;
+}
+
+.s360-btn-primary:hover { background: var(--s360-navy-hover); box-shadow: var(--s360-shadow-sm); }
+
+.s360-btn-outline {
+  background: transparent;
+  color: var(--s360-text-secondary);
+  border: 1px solid var(--s360-border);
+}
+
+.s360-btn-outline:hover { background: var(--s360-surface2); }
+
+.s360-btn-blue {
+  background: var(--s360-blue);
+  color: #fff;
+}
+
+.s360-btn-blue:hover { background: #1D4ED8; }
+
+/* ─── Executive Header (Detail page) ───────────────────────── */
+.s360-exec-header {
+  background: var(--s360-navy);
+  border-radius: var(--s360-radius-lg);
+  padding: 24px 28px;
+  margin-bottom: 20px;
+  color: #fff;
+  box-shadow: var(--s360-shadow);
+}
+
+.s360-exec-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.s360-exec-header h2 {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px 0;
+}
+
+.s360-exec-header p {
+  font-size: 12px;
+  color: #94A3B8;
+  margin: 0;
+}
+
+.s360-exec-meta {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.s360-exec-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.s360-exec-meta-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748B;
+}
+
+.s360-exec-meta-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.s360-exec-meta-value.green { color: #34D399; }
+.s360-exec-meta-value.amber { color: #FCD34D; }
+.s360-exec-meta-value.red { color: #FCA5A5; }
+
+/* ─── AI Insights Card ──────────────────────────────────────── */
+.s360-ai-card {
+  background: linear-gradient(135deg, #0F172A 0%, #1E3A5F 100%);
+  border-radius: var(--s360-radius);
+  padding: 20px 22px;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.s360-ai-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 14px 0;
+}
+
+.s360-ai-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border-left: 3px solid #60A5FA;
+  font-size: 12.5px;
+  color: #CBD5EF;
+  line-height: 1.5;
+}
+
+/* ─── Alerts Panel ───────────────────────────────────────────── */
+.s360-alert-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid;
+}
+
+.s360-alert-high {
+  background: #FEF2F2;
+  border-color: #FECACA;
+}
+
+.s360-alert-medium {
+  background: #FFFBEB;
+  border-color: #FDE68A;
+}
+
+.s360-alert-low {
+  background: #ECFDF5;
+  border-color: #A7F3D0;
+}
+
+.s360-alert-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.s360-alert-sub {
+  font-size: 11.5px;
+  color: var(--s360-text-muted);
+}
+
+/* ─── Compliance Score Ring ──────────────────────────────────── */
+.s360-score-ring-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ─── Tabs ───────────────────────────────────────────────────── */
+.s360-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--s360-surface2);
+  border-radius: var(--s360-radius-sm);
+  padding: 4px;
+  border: 1px solid var(--s360-border);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.s360-tab {
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--s360-text-muted);
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.s360-tab:hover { color: var(--s360-text-secondary); }
+
+.s360-tab.active {
+  background: var(--s360-surface);
+  color: var(--s360-text-primary);
+  box-shadow: var(--s360-shadow-sm);
+}
+
+/* ─── Nav breadcrumb ─────────────────────────────────────────── */
+.s360-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--s360-text-muted);
+  margin-bottom: 16px;
+}
+
+.s360-breadcrumb-link {
+  color: var(--s360-blue);
+  cursor: pointer;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.s360-breadcrumb-link:hover { text-decoration: underline; }
+
+/* ─── Section spacing ────────────────────────────────────────── */
+.s360-section { margin-bottom: 20px; }
+
+.s360-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--s360-text-muted);
+  margin: 0 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ─── Score circle ───────────────────────────────────────────── */
+.s360-score-circle {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+
+.s360-score-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.s360-score-sublabel {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--s360-text-muted);
+  margin-top: 2px;
+}
+
+/* ─── ITC metric ─────────────────────────────────────────────── */
+.s360-itc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--s360-border-soft);
+}
+
+.s360-itc-row:last-child { border-bottom: none; }
+
+/* ─── Action items ───────────────────────────────────────────── */
+.s360-action-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--s360-border-soft);
+  font-size: 12.5px;
+  color: var(--s360-text-secondary);
+  line-height: 1.45;
+}
+
+.s360-action-item:last-child { border-bottom: none; }
+
+.s360-action-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+/* ─── Sub-nav (module nav bar) ───────────────────────────────── */
+.s360-module-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--s360-surface);
+  border: 1px solid var(--s360-border);
+  border-radius: var(--s360-radius-sm);
+  margin-bottom: 24px;
+  box-shadow: var(--s360-shadow-sm);
+  flex-wrap: wrap;
+}
+
+.s360-module-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  color: var(--s360-text-muted);
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+  text-decoration: none;
+}
+
+.s360-module-nav-item:hover { color: var(--s360-text-secondary); background: var(--s360-surface2); }
+
+.s360-module-nav-item.active {
+  background: var(--s360-navy);
+  color: #fff;
+}
+
+/* ─── Chip ───────────────────────────────────────────────────── */
+.s360-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ─── Document row ───────────────────────────────────────────── */
+.s360-doc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--s360-border-soft);
+  font-size: 12.5px;
+}
+
+.s360-doc-row:last-child { border-bottom: none; }
+
+/* ─── Risk driver row ────────────────────────────────────────── */
+.s360-risk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--s360-border-soft);
+}
+
+.s360-risk-row:last-child { border-bottom: none; }
+
+.s360-risk-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--s360-border);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.s360-risk-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+}
+
+/* ─── Empty & Loading ────────────────────────────────────────── */
+.s360-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--s360-text-muted);
+  font-size: 13px;
+}
+
+/* ─── Compliance flag list ───────────────────────────────────── */
+.s360-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.s360-flag.red { background: var(--s360-red-bg); color: #B91C1C; }
+.s360-flag.amber { background: var(--s360-amber-bg); color: #92400E; }
+.s360-flag.green { background: var(--s360-green-bg); color: #065F46; }
+.s360-flag.blue { background: #EFF6FF; color: #1E40AF; }
+
+/* ─── Divider ────────────────────────────────────────────────── */
+.s360-divider {
+  height: 1px;
+  background: var(--s360-border);
+  margin: 16px 0;
+}
+
+/* ─── Utility spacing ────────────────────────────────────────── */
+.s360-mb-4 { margin-bottom: 4px; }
+.s360-mb-8 { margin-bottom: 8px; }
+.s360-mb-16 { margin-bottom: 16px; }
+.s360-mb-20 { margin-bottom: 20px; }
+
+/* ─── Full-span ──────────────────────────────────────────────── */
+.s360-col-span-2 { grid-column: span 2; }
+
+@media (max-width: 900px) {
+  .s360-col-span-2 { grid-column: span 1; }
+}
