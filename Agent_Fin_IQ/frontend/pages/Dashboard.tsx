@@ -5,7 +5,7 @@ import { getTallySyncStats, type TallySyncStats } from '../lib/api';
 import { useCompany } from '../context/CompanyContext';
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” DESIGN TOKENS
+// Accounts Payable  KPI DASHBOARD — DESIGN TOKENS
 // ============================================================
 
 const C = {
@@ -28,17 +28,17 @@ const C = {
 } as const;
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” UTILITIES
+// Accounts Payable  KPI DASHBOARD — UTILITIES
 // ============================================================
 
 function formatINR(v: number): string {
-  return 'â‚¹' + v.toLocaleString('en-IN');
+  return '₹' + v.toLocaleString('en-IN');
 }
 
 function formatINRAbbr(v: number): string {
-  if (v >= 10_000_000) return `â‚¹${(v / 10_000_000).toFixed(1)}Cr`;
-  if (v >= 100_000)    return `â‚¹${(v / 100_000).toFixed(1)}L`;
-  if (v >= 1_000)      return `â‚¹${(v / 1_000).toFixed(0)}K`;
+  if (v >= 10_000_000) return `₹${(v / 10_000_000).toFixed(1)}Cr`;
+  if (v >= 100_000)    return `₹${(v / 100_000).toFixed(1)}L`;
+  if (v >= 1_000)      return `₹${(v / 1_000).toFixed(0)}K`;
   return formatINR(v);
 }
 
@@ -49,7 +49,7 @@ function formatTime(isoStr: string): string {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” TYPES
+// Accounts Payable  KPI DASHBOARD — TYPES
 // ============================================================
 
 interface PulseData {
@@ -77,7 +77,7 @@ interface PulseData {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” TYPES (continued)
+// Accounts Payable  KPI DASHBOARD — TYPES (continued)
 // ============================================================
 
 interface PipelineData {
@@ -95,7 +95,7 @@ interface PipelineData {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” MOCK DATA (swap for IPC calls in backend phase)
+// Accounts Payable  KPI DASHBOARD — MOCK DATA (swap for IPC calls in backend phase)
 // ============================================================
 
 const MOCK_PULSE: PulseData = {
@@ -156,39 +156,39 @@ interface BriefingData {
 
 const MOCK_SUPPLIER_ALERTS: SupplierAlertsData = {
   alerts: [
-    { name: 'ABC Traders',      gstin: '07ABCTR1234F1Z5', risk_level: 'high_risk', note: 'GST lapsed Â· ITC risk',   score: 28 },
+    { name: 'ABC Traders',      gstin: '07ABCTR1234F1Z5', risk_level: 'high_risk', note: 'GST lapsed · ITC risk',   score: 28 },
     { name: 'Priya Logistics',  gstin: '07PQRST3456M4Z3', risk_level: 'review',    note: 'New supplier',             score: 52 },
-    { name: 'Rajan Traders',    gstin: '29ABCDE1234F1Z5', risk_level: 'good',      note: 'Score improved â†‘',         score: 81 },
+    { name: 'Rajan Traders',    gstin: '29ABCDE1234F1Z5', risk_level: 'good',      note: 'Score improved ↑',         score: 81 },
   ],
   price_variance: [
     { name: 'Rajan Traders',    hsn: '7208', change_pct: +14.2 },
     { name: 'Mehta Steel Works', hsn: '7306', change_pct: -11.8 },
   ],
-  itc_risk_amount: 42500, // KPI-15: â‚¹42,500 at risk from GST-lapsed supplier (ABC Traders)
+  itc_risk_amount: 42500, // KPI-15: ₹42,500 at risk from GST-lapsed supplier (ABC Traders)
 };
 
 const MOCK_ACTIVITY: ActivityData = {
   events: [
-    { type: 'sync_failed',    text: 'Tally sync failed â€” **Rajan Traders** INV-881. Reconnect Tally.',      ts: new Date(Date.now() - 10  * 60000).toISOString() },
-    { type: 'hybrid_flagged', text: 'Hybrid flagged â€” **Priya Logistics** â‚¹58K. New supplier rule.',         ts: new Date(Date.now() - 28  * 60000).toISOString() },
-    { type: 'auto_posted',    text: 'Auto-posted â€” **Sharma & Co** INV-441 â‚¹28.5K to Tally.',               ts: new Date(Date.now() - 55  * 60000).toISOString() },
-    { type: 'blocked',        text: 'Blocked â€” **ABC Traders** INV-209. Duplicate invoice detected.',        ts: new Date(Date.now() - 110 * 60000).toISOString() },
-    { type: 'ocr_processed',  text: 'OCR extracted â€” **Mehta Steel Works** INV-330. Awaiting validation.',  ts: new Date(Date.now() - 180 * 60000).toISOString() },
+    { type: 'sync_failed',    text: 'Tally sync failed — **Rajan Traders** INV-881. Reconnect Tally.',      ts: new Date(Date.now() - 10  * 60000).toISOString() },
+    { type: 'hybrid_flagged', text: 'Hybrid flagged — **Priya Logistics** ₹58K. New supplier rule.',         ts: new Date(Date.now() - 28  * 60000).toISOString() },
+    { type: 'auto_posted',    text: 'Auto-posted — **Sharma & Co** INV-441 ₹28.5K to Tally.',               ts: new Date(Date.now() - 55  * 60000).toISOString() },
+    { type: 'blocked',        text: 'Blocked — **ABC Traders** INV-209. Duplicate invoice detected.',        ts: new Date(Date.now() - 110 * 60000).toISOString() },
+    { type: 'ocr_processed',  text: 'OCR extracted — **Mehta Steel Works** INV-330. Awaiting validation.',  ts: new Date(Date.now() - 180 * 60000).toISOString() },
   ],
 };
 
 const MOCK_BRIEFING: BriefingData = {
-  message: '**â‚¹85,000 is due today** from 2 invoices across 1 supplier. Cash coverage is healthy at 2.6x. 1 Tally sync failure needs attention â€” Rajan Traders INV-881. Touchless rate is 66% this month, up from 58% last month.',
+  message: '**₹85,000 is due today** from 2 invoices across 1 supplier. Cash coverage is healthy at 2.6x. 1 Tally sync failure needs attention — Rajan Traders INV-881. Touchless rate is 66% this month, up from 58% last month.',
   sent_at: new Date(new Date().setHours(8, 0, 0, 0)).toISOString(),
 };
 
-// MOCK_TALLY_SYNC removed â€” TallySyncWidget now uses live data via dashboard:tally-sync IPC
+// MOCK_TALLY_SYNC removed — TallySyncWidget now uses live data via dashboard:tally-sync IPC
 
 const MOCK_AGING: AgingData = {
   buckets: [
-    { label: '0â€“30 days',  amount: 640000, width_pct: 100  },
-    { label: '31â€“60 days', amount: 320000, width_pct: 50   },
-    { label: '61â€“90 days', amount: 110000, width_pct: 17.2 },
+    { label: '0–30 days',  amount: 640000, width_pct: 100  },
+    { label: '31–60 days', amount: 320000, width_pct: 50   },
+    { label: '61–90 days', amount: 110000, width_pct: 17.2 },
     { label: '90+ days',   amount: 45000,  width_pct: 7    },
   ],
   total_outstanding: 1115000,
@@ -208,13 +208,13 @@ interface SupplierAlertsData {
     hsn:        string;
     change_pct: number;    // positive = increase, negative = decrease
   }>;
-  itc_risk_amount: number; // KPI-15: total â‚¹ value of invoices from GST-lapsed suppliers
+  itc_risk_amount: number; // KPI-15: total ₹ value of invoices from GST-lapsed suppliers
 }
 
 interface TallySyncData {
   posted:  number;
   pending: number;
-  handoff: number;            // renamed from failed â€” matches Accounts Payable  tab "Handoff" tab
+  handoff: number;            // renamed from failed — matches Accounts Payable  tab "Handoff" tab
   recent:  Array<{
     vendor: string;
     status: 'posted' | 'handoff';
@@ -246,7 +246,7 @@ const MOCK_SUPPLIERS: SuppliersData = {
 };
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” PULSE CARD WRAPPER
+// Accounts Payable  KPI DASHBOARD — PULSE CARD WRAPPER
 // ============================================================
 
 function PulseCard({ label, children, delay = 0, accentColor }: {
@@ -293,7 +293,7 @@ function PulseCard({ label, children, delay = 0, accentColor }: {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” SHARED UTILITY: bold text renderer
+// Accounts Payable  KPI DASHBOARD — SHARED UTILITY: bold text renderer
 // ============================================================
 
 function renderBold(text: string, baseColor: string) {
@@ -305,7 +305,7 @@ function renderBold(text: string, baseColor: string) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” ACTIVITY FEED WIDGET
+// Accounts Payable  KPI DASHBOARD — ACTIVITY FEED WIDGET
 // ============================================================
 
 const ACTIVITY_DOT: Record<ActivityEventType, string> = {
@@ -378,7 +378,7 @@ function ActivityWidget({ data }: { data: ActivityData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” CFO BRIEFING WIDGET
+// Accounts Payable  KPI DASHBOARD — CFO BRIEFING WIDGET
 // ============================================================
 
 function BriefingWidget({ data }: { data: BriefingData }) {
@@ -477,7 +477,7 @@ function BriefingWidget({ data }: { data: BriefingData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” SUPPLIER360 ALERTS WIDGET
+// Accounts Payable  KPI DASHBOARD — SUPPLIER360 ALERTS WIDGET
 // ============================================================
 
 const RISK_CONFIG = {
@@ -506,7 +506,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
         </span>
       </div>
 
-      {/* KPI-15: ITC risk banner â€” any value > 0 is immediate red alert */}
+      {/* KPI-15: ITC risk banner — any value > 0 is immediate red alert */}
       {data.itc_risk_amount > 0 && (
         <div style={{
           display:        'flex',
@@ -538,7 +538,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
           return (
             <div
               key={a.gstin}
-              onClick={() => { /* TODO: navigate to Supplier360 â€” gstin: a.gstin */ }}
+              onClick={() => { /* TODO: navigate to Supplier360 — gstin: a.gstin */ }}
               style={{
                 display:      'flex',
                 alignItems:   'center',
@@ -576,7 +576,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
                   {a.name}
                 </span>
                 <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
-                  {' '}â€” {a.note}
+                  {' '}— {a.note}
                 </span>
               </div>
 
@@ -656,7 +656,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” TALLY SYNC WIDGET
+// Accounts Payable  KPI DASHBOARD — TALLY SYNC WIDGET
 // ============================================================
 
 function timeAgo(isoStr: string): string {
@@ -779,7 +779,7 @@ function TallySyncWidget({ data }: { data: any }) {
               Handoff reasons
             </span>
             <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: 'inherit' }}>
-              {data.blocked.duplicate} dup Â· {data.blocked.invalid_gstin} GSTIN
+              {data.blocked.duplicate} dup · {data.blocked.invalid_gstin} GSTIN
             </span>
           </div>
           <span style={{
@@ -970,7 +970,7 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
               Handoff reasons
             </span>
             <span style={{ fontSize: '11px', color: C.amberDeep, fontFamily: 'inherit' }}>
-              {reasonEntries.slice(0, 2).map(item => `${item.value} ${item.label}`).join(' Â· ')}
+              {reasonEntries.slice(0, 2).map(item => `${item.value} ${item.label}`).join(' · ')}
             </span>
           </div>
           <span style={{
@@ -1014,7 +1014,7 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
                   {event.vendor}
                 </div>
                 <div style={{ fontSize: '11px', color: C.inkMuted, fontFamily: 'inherit' }}>
-                  {cfg.label} Â· {formatINRAbbr(event.amount)}
+                  {cfg.label} · {formatINRAbbr(event.amount)}
                 </div>
               </div>
               <span style={{
@@ -1034,7 +1034,7 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” TOP SUPPLIERS WIDGET
+// Accounts Payable  KPI DASHBOARD — TOP SUPPLIERS WIDGET
 // ============================================================
 
 function SuppliersWidget({ data }: { data: SuppliersData }) {
@@ -1061,7 +1061,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
         <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
         <span style={{ fontSize: '13px', fontWeight: 500, color: C.ink, fontFamily: 'inherit' }}>
-          Top suppliers Â· 30 days
+          Top suppliers · 30 days
         </span>
       </div>
 
@@ -1070,7 +1070,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
         {data.top_suppliers.map((s, i) => (
           <div
             key={s.gstin}
-            onClick={() => { /* TODO: navigate to Supplier360 profile â€” gstin: s.gstin */ }}
+            onClick={() => { /* TODO: navigate to Supplier360 profile — gstin: s.gstin */ }}
             style={{
               display:       'flex',
               alignItems:    'center',
@@ -1141,7 +1141,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
         ))}
       </div>
 
-      {/* Footer â€” spend concentration + KPI-19 new suppliers */}
+      {/* Footer — spend concentration + KPI-19 new suppliers */}
       <div style={{
         marginTop:   '12px',
         paddingTop:  '12px',
@@ -1180,7 +1180,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” AGING WIDGET
+// Accounts Payable  KPI DASHBOARD — AGING WIDGET
 // ============================================================
 
 function AgingWidget({ data }: { data: AgingData }) {
@@ -1286,7 +1286,7 @@ function AgingWidget({ data }: { data: AgingData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” PIPELINE WIDGET
+// Accounts Payable  KPI DASHBOARD — PIPELINE WIDGET
 // ============================================================
 
 const PIPELINE_SEGMENTS = [
@@ -1354,7 +1354,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
           return (
             <div
               key={seg.key}
-              onClick={() => { /* TODO: navigate to filtered invoice list â€” filter: seg.key */ }}
+              onClick={() => { /* TODO: navigate to filtered invoice list — filter: seg.key */ }}
               style={{
                 background:   seg.bg,
                 border:       `0.5px solid ${seg.border}`,
@@ -1397,7 +1397,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
                 {formatINRAbbr(d.amount)}
               </div>
 
-              {/* KPI-13: oldest unreviewed â€” shown only on HYBRID card */}
+              {/* KPI-13: oldest unreviewed — shown only on HYBRID card */}
               {seg.key === 'hybrid' && (
                 <div style={{
                   marginTop:    '8px',
@@ -1409,7 +1409,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
                   fontWeight:   data.oldest_unreviewed_days > 3 ? 600 : 400,
                 }}>
                   Oldest: {data.oldest_unreviewed_days}d
-                  {data.oldest_unreviewed_days > 3 && ' âš '}
+                  {data.oldest_unreviewed_days > 3 && ' ⚠'}
                 </div>
               )}
             </div>
@@ -1417,7 +1417,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
         })}
       </div>
 
-      {/* Footer â€” touchless rate row */}
+      {/* Footer — touchless rate row */}
       <div style={{
         display:       'flex',
         justifyContent:'space-between',
@@ -1439,12 +1439,12 @@ function PipelineWidget({ data }: { data: PipelineData }) {
             {data.touchless_rate.toFixed(1)}%
           </span>
           <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
-            {rateDelta >= 0 ? 'â†‘' : 'â†“'} from {data.touchless_rate_prev.toFixed(1)}% last month
+            {rateDelta >= 0 ? '↑' : '↓'} from {data.touchless_rate_prev.toFixed(1)}% last month
           </span>
         </div>
       </div>
 
-      {/* KPI-11: Avg processing time â€” second footer row */}
+      {/* KPI-11: Avg processing time — second footer row */}
       <div style={{
         display:        'flex',
         justifyContent: 'space-between',
@@ -1476,13 +1476,13 @@ function PipelineWidget({ data }: { data: PipelineData }) {
 }
 
 // ============================================================
-// Accounts Payable  KPI DASHBOARD â€” MAIN COMPONENT
+// Accounts Payable  KPI DASHBOARD — MAIN COMPONENT
 // ============================================================
 
 export default function Dashboard() {
   const { selectedCompany } = useCompany();
 
-  // â€” Font injection (scoped to dashboard mount, no index.html changes needed)
+  // — Font injection (scoped to dashboard mount, no index.html changes needed)
   useEffect(() => {
     const id = 'ap-dashboard-fonts';
     if (document.getElementById(id)) return;
@@ -1493,10 +1493,10 @@ export default function Dashboard() {
     document.head.appendChild(link);
   }, []);
 
-  // â€” Pulse row state (MOCK â€” replace with window.api.invoke('dashboard:ap-pulse') in backend phase)
+  // — Pulse row state (MOCK — replace with window.api.invoke('dashboard:ap-pulse') in backend phase)
   const [pulse] = useState<PulseData>(MOCK_PULSE);
 
-  // â€” Tally sync live state (connected to backend via dashboard:tally-sync IPC)
+  // — Tally sync live state (connected to backend via dashboard:tally-sync IPC)
   const [tallySync, setTallySync] = useState<TallySyncStats | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -1514,7 +1514,7 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(interval); };
   }, [selectedCompany]);
 
-  // â€” Cash position inline edit
+  // — Cash position inline edit
   const [cashEditing,   setCashEditing]   = useState(false);
   const [cashBalance,   setCashBalance]   = useState(MOCK_PULSE.cash_position.balance);
   const [cashInput,     setCashInput]     = useState('');
@@ -1533,7 +1533,7 @@ export default function Dashboard() {
     setCashInput('');
   }
 
-  // â€” Coverage ratio colour logic
+  // — Coverage ratio colour logic
   const ratio      = pulse.due_this_week.coverage_ratio;
   const ratioBg    = ratio < 1.0 ? C.redLight   : ratio < 1.5 ? C.amberLight : C.tealLight;
   const ratioText  = ratio < 1.0 ? C.redDeep    : ratio < 1.5 ? C.amberDeep  : C.tealDeep;
@@ -1547,7 +1547,7 @@ export default function Dashboard() {
       fontFamily: 'inherit',
     }}>
 
-      {/* â”€â”€ PAGE HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── PAGE HEADER ────────────────────────────────────────── */}
       <div style={{
         display:        'flex',
         justifyContent: 'space-between',
@@ -1575,14 +1575,14 @@ export default function Dashboard() {
             fontFamily: 'inherit',
             fontWeight: 400,
           }}>
-            Morning snapshot&nbsp;Â·&nbsp;
+            Morning snapshot&nbsp;·&nbsp;
             {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
       </div>
-      {/* â”€â”€ END PAGE HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── END PAGE HEADER ────────────────────────────────────── */}
 
-      {/* â”€â”€ CFO PULSE ROW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── CFO PULSE ROW ──────────────────────────────────────── */}
       <div style={{
         display:             'grid',
         gridTemplateColumns: 'repeat(4, 1fr)',
@@ -1590,7 +1590,7 @@ export default function Dashboard() {
         marginBottom:        '28px',
       }}>
 
-        {/* Card 1 â€” Cash Position */}
+        {/* Card 1 — Cash Position */}
         <PulseCard label="Cash position" delay={0} accentColor={C.navy}>
           {cashEditing ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1651,7 +1651,7 @@ export default function Dashboard() {
           </div>
         </PulseCard>
 
-        {/* Card 2 â€” Due Today */}
+        {/* Card 2 — Due Today */}
         <PulseCard label="Due today" delay={0.04} accentColor={pulse.due_today.amount > 0 ? C.redMid : C.tealMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
@@ -1708,7 +1708,7 @@ export default function Dashboard() {
           )}
         </PulseCard>
 
-        {/* Card 3 â€” Due This Week */}
+        {/* Card 3 — Due This Week */}
         <PulseCard label="Due this week" delay={0.08} accentColor={C.amberMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
@@ -1764,7 +1764,7 @@ export default function Dashboard() {
           </div>
         </PulseCard>
 
-        {/* Card 4 â€” Net This Month */}
+        {/* Card 4 — Net This Month */}
         <PulseCard label="Net this month" delay={0.12} accentColor={C.tealMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
@@ -1801,15 +1801,15 @@ export default function Dashboard() {
             {pulse.net_this_month.trend_pct >= 0
               ? <TrendingUp  size={12} />
               : <TrendingDown size={12} />}
-            {pulse.net_this_month.trend_pct >= 0 ? 'â–²' : 'â–¼'}&nbsp;
+            {pulse.net_this_month.trend_pct >= 0 ? '▲' : '▼'}&nbsp;
             {Math.abs(pulse.net_this_month.trend_pct).toFixed(1)}% vs last month
           </div>
         </PulseCard>
 
       </div>
-      {/* â”€â”€ END CFO PULSE ROW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── END CFO PULSE ROW ──────────────────────────────────── */}
 
-      {/* â”€â”€ SECTION LABEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── SECTION LABEL ──────────────────────────────────────── */}
       <div style={{
         display:       'flex',
         alignItems:    'center',
@@ -1827,9 +1827,9 @@ export default function Dashboard() {
         </span>
         <div style={{ flex: 1, height: '0.5px', background: C.inkGhost }} />
       </div>
-      {/* â”€â”€ END SECTION LABEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── END SECTION LABEL ──────────────────────────────────── */}
 
-      {/* â”€â”€ MAIN CONTENT GRID (1.4fr left | 1fr right) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── MAIN CONTENT GRID (1.4fr left | 1fr right) ─────────── */}
       <div style={{
         display:             'grid',
         gridTemplateColumns: '1.4fr 1fr',
@@ -1837,31 +1837,31 @@ export default function Dashboard() {
         marginBottom:        '20px',
       }}>
 
-        {/* LEFT COLUMN â€” Pipeline + Aging */}
+        {/* LEFT COLUMN — Pipeline + Aging */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <PipelineWidget data={MOCK_PIPELINE} />
           <AgingWidget    data={MOCK_AGING}    />
         </div>
 
-        {/* RIGHT COLUMN â€” Top Suppliers + Supplier360 Alerts */}
+        {/* RIGHT COLUMN — Top Suppliers + Supplier360 Alerts */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <SuppliersWidget      data={MOCK_SUPPLIERS}       />
           <SupplierAlertsWidget data={MOCK_SUPPLIER_ALERTS} />
         </div>
 
       </div>
-      {/* â”€â”€ END MAIN CONTENT GRID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── END MAIN CONTENT GRID ──────────────────────────────── */}
 
-      {/* â”€â”€ BOTTOM SECTION LABEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── BOTTOM SECTION LABEL ───────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
         <span style={{ fontFamily: 'inherit', fontSize: '13px', fontWeight: 600, color: C.inkMuted, letterSpacing: '0.01em' }}>
           Operations
         </span>
         <div style={{ flex: 1, height: '0.5px', background: C.inkGhost }} />
       </div>
-      {/* â”€â”€ END BOTTOM SECTION LABEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── END BOTTOM SECTION LABEL ───────────────────────────── */}
 
-      {/* â”€â”€ BOTTOM ROW (1fr | 1.4fr | 1fr) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── BOTTOM ROW (1fr | 1.4fr | 1fr) ────────────────────── */}
       <div style={{
         display:             'grid',
         gridTemplateColumns: '1fr 1.4fr 1fr',
@@ -1869,12 +1869,12 @@ export default function Dashboard() {
       }}>
         {tallySync
           ? <TallySyncWidgetV2 data={tallySync} />
-          : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '12px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: 'inherit' }}>Loading Tally syncâ€¦</div>
+          : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '12px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: 'inherit' }}>Loading Tally sync…</div>
         }
         <ActivityWidget  data={MOCK_ACTIVITY}   />
         <BriefingWidget  data={MOCK_BRIEFING}   />
       </div>
-      {/* â”€â”€ END BOTTOM ROW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── END BOTTOM ROW ─────────────────────────────────────── */}
 
     </div>
   );
