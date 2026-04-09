@@ -278,7 +278,8 @@ export function registerIpcHandlers() {
      * Input: { filePath: string, fileName: string, batchId?: string, fileData?: number[] }
      * Output: Created invoice row
      */
-    ipcMain.handle('invoices:upload', async (_event, { filePath, fileName, batchId, fileData, userName }) => {
+    ipcMain.handle('invoices:upload', async (_event, { filePath, fileName, batchId, fileData, userName, companyId }) => {
+        console.log(`[IPC] invoices:upload received companyId: ${companyId || 'MISSING'}`);
         // Step 1: Ensure Batch Folder Structure
         let currentBatch = batchId;
         if (!currentBatch) {
@@ -328,7 +329,8 @@ export function registerIpcHandlers() {
             file_location: targetPath, // Initial location is the source folder
             batch_id: currentBatch,
             status: 'Processing',
-            uploader_name: userName || 'System'
+            uploader_name: userName || 'System',
+            company_id: companyId || null
         });
 
 
@@ -892,6 +894,10 @@ export function registerIpcHandlers() {
                 entities = ocrResult.documentai_document.entities;
             }
 
+            // [FIX] Fetch company_id from DB to ensure it's passed to n8n
+            const currentInvoice = await queries.getInvoiceById(invoiceId);
+            const companyId = currentInvoice?.company_id || null;
+
             const payload = {
                 file_name: fileName,
                 processed_at: ocrResult.processed_at,
@@ -901,6 +907,7 @@ export function registerIpcHandlers() {
                 },
                 ocr_input_source: ocrInputSource,
                 ocr_input_path: ocrInputPath,
+                company_id: companyId, // [FIX] Added company_id to payload
             };
 
             const n8nStartedAt = new Date();
@@ -1226,34 +1233,32 @@ export function registerIpcHandlers() {
     // ─── CONFIGURATION ──────────────────────────────────────────
 
     ipcMain.handle('config:get-rules', async (_event, { companyId } = {}) => {
-        const rules = await queries.getAppConfig('posting_rules', companyId);
-        const legacyDateRange = await queries.getAppConfig('global_invoice_date_range');
-
-        if (!legacyDateRange) return rules;
-        if (rules?.criteria?.filter_invoice_date_enabled !== undefined) return rules;
-
-        return {
-            ...(rules || {}),
-            criteria: {
-                ...((rules && rules.criteria) || {}),
-                filter_invoice_date_enabled: legacyDateRange.filter_invoice_date_enabled === true,
-                filter_invoice_date_from: legacyDateRange.filter_invoice_date_from || '',
-                filter_invoice_date_to: legacyDateRange.filter_invoice_date_to || '',
-            }
-        };
+        console.log(`[CONFIG:GET-RULES] companyId=${companyId}`);
+        // Use strict mode to prevent global fallback if companyId is provided
+        const rules = await queries.getAppConfig('posting_rules', companyId, !!companyId);
+        console.log(`[CONFIG:GET-RULES] found rules for companyId=${companyId}:`, rules ? 'YES' : 'NULL');
+        if (rules) console.log('[CONFIG:GET-RULES] rules snapshot:', JSON.stringify(rules).substring(0, 300));
+        
+        // REMOVED LEGACY FALLBACK: If we are in a company-specific context, we should NOT 
+        // fallback to global settings, as this causes data bleed.
+        return rules;
     });
 
-    ipcMain.handle('config:save-rules', async (_event, { rules }) => {
-        // Always save globally (company_id = null) — invoices have company_id = null,
-        // so a company-scoped save would never be found by getAppConfig.
-        await queries.setAppConfig('posting_rules', rules, undefined);
-        // Re-evaluate is_high_amount and statuses for all active invoices atomically.
-        await queries.reEvaluateHighAmountFlags(rules);
+    ipcMain.handle('config:save-rules', async (_event, { rules, companyId }) => {
+        console.log(`[CONFIG:SAVE-RULES] Saving rules for companyId=${companyId}`);
+        // Save config FIRST — this is the critical step that must not fail
+        await queries.setAppConfig('posting_rules', rules, companyId);
+        console.log(`[CONFIG:SAVE-RULES] Rules saved to DB for companyId=${companyId}`);
+        // Re-evaluate invoice statuses in the background — non-blocking.
+        // If this fails it must NOT block the save from being reported as successful.
+        queries.reEvaluateHighAmountFlags(rules, companyId).catch((err: any) => {
+            console.error('[CONFIG:SAVE-RULES] reEvaluateHighAmountFlags failed (non-critical):', err);
+        });
         return { success: true };
     });
 
     ipcMain.handle('config:get-extended-criteria', async (_event, { companyId }) => {
-        return await queries.getAppConfig('auto_post_criteria_extended', companyId);
+        return await queries.getAppConfig('auto_post_criteria_extended', companyId, !!companyId);
     });
 
     ipcMain.handle('config:save-extended-criteria', async (_event, { criteria, companyId }) => {
@@ -1264,12 +1269,26 @@ export function registerIpcHandlers() {
     /**
      * Handlers for Storage Configuration (Local, S3, etc.)
      */
-    ipcMain.handle('config:get-storage-path', async () => {
-        return await queries.getAppConfig('storage_config');
+    ipcMain.handle('config:get-storage-path', async (_event, { companyId } = {}) => {
+        return await queries.getAppConfig('storage_config', companyId, !!companyId);
     });
 
-    ipcMain.handle('config:set-storage-path', async (_event, config) => {
-        await queries.setAppConfig('storage_config', config);
+    ipcMain.handle('config:set-storage-path', async (_event, { config, companyId }) => {
+        await queries.setAppConfig('storage_config', config, companyId);
+        return { success: true };
+    });
+
+    /**
+     * Complete configuration sync (Sources, ERP, Reports, etc.)
+     */
+    ipcMain.handle('config:get-full', async (_event, { companyId }) => {
+        if (!companyId) return null;
+        return await queries.getAppConfig('full_config', companyId, true);
+    });
+
+    ipcMain.handle('config:save-full', async (_event, { config, companyId }) => {
+        if (!companyId) throw new Error('Missing companyId');
+        await queries.setAppConfig('full_config', config, companyId);
         return { success: true };
     });
 

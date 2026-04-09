@@ -94,8 +94,8 @@ export async function getInvoiceDocumentView(id: string): Promise<InvoiceDocumen
  * @param fileData - Optional raw file data as byte array (used when filePath is unavailable)
  * @returns Created invoice record
  */
-export async function uploadInvoice(filePath: string, fileName: string, batchId?: string, fileData?: Uint8Array, userName?: string): Promise<Invoice> {
-    return invoke<Invoice>('invoices:upload', { filePath, fileName, batchId, fileData, userName });
+export async function uploadInvoice(filePath: string, fileName: string, batchId?: string, fileData?: Uint8Array, userName?: string, companyId?: string): Promise<Invoice> {
+    return invoke<Invoice>('invoices:upload', { filePath, fileName, batchId, fileData, userName, companyId });
 }
 
 /**

@@ -26,6 +26,8 @@ import { Separator } from '../components/ui/separator';
 import { useIsMobile } from '../components/ui/use-mobile';
 import { useDateFilter } from '../context/DateContext';
 import { useProcessing } from '../context/ProcessingContext';
+import { useCompany } from '../context/CompanyContext';
+
 import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, getTallyPostStatus, type TallyPostOutcome } from '../lib/api';
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
@@ -347,7 +349,9 @@ export default function APWorkspace() {
   const [pageSize, setPageSize] = useState(10);
   const [tallyError, setTallyError] = useState<{ invoiceNo: string; supplier: string; reason: string } | null>(null);
   const tallyPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const { selectedCompany } = useCompany();
   const tableScrollRef = useRef<HTMLDivElement>(null);
+
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
@@ -398,7 +402,9 @@ export default function APWorkspace() {
   const fetchData = async (background = false) => {
     if (!background) setLoading(true);
     try {
-      const invoices = await getInvoices();
+      const companyId = selectedCompany === 'ALL' ? undefined : selectedCompany;
+      const invoices = await getInvoices(companyId);
+
       if (invoices && Array.isArray(invoices)) {
         // Map backend Invoice type to frontend APRecord type
         const mapped: APRecord[] = invoices.map((inv: any) => {
@@ -594,7 +600,8 @@ export default function APWorkspace() {
     return () => {
       window.removeEventListener('app:refresh', handleRefresh);
     };
-  }, []);
+  }, [selectedCompany]);
+
 
   useEffect(() => {
     (async () => {
@@ -761,7 +768,13 @@ export default function APWorkspace() {
       fileDataArrays.push(dataArray);
     }
 
-    startProcessing({ fileNames, filePaths, fileDataArrays, batchName });
+    startProcessing({ 
+      fileNames, 
+      filePaths, 
+      fileDataArrays, 
+      batchName, 
+      companyId: selectedCompany === 'ALL' ? null : selectedCompany 
+    });
     setShowBatchDialog(false);
     setPendingUploads(null);
     setActiveTab('processing');

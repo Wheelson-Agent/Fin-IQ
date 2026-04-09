@@ -112,7 +112,7 @@ export default function AuditTrail() {
       const result = await getAuditLogs({
         page: p, pageSize: ps,
         eventType: type !== 'All' ? type : undefined,
-        companyId: companyId !== 'ALL' ? companyId : undefined,
+        companyId: (companyId && companyId !== 'ALL') ? companyId : undefined,
         ...dateRange,
       });
       setEvents(result.rows);
@@ -405,6 +405,16 @@ export default function AuditTrail() {
                                   <Clock size={12} className="text-[#94A3B8]" />
                                   <span className="text-[11px] font-semibold text-[#64748B] font-mono tracking-tight">{formatTimestamp(event.timestamp)}</span>
                                 </div>
+                                {(event as any).company_name && (
+                                  <>
+                                    <span className="text-[#CBD5E1]">•</span>
+                                    <div className="flex items-center gap-[6px]">
+                                      <span className="text-[10px] font-bold text-[#8899AA] uppercase tracking-tight bg-white px-1.5 py-0.5 rounded border border-[#D0D9E8]">
+                                        {(event as any).company_name}
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
                                 <span className="text-[#CBD5E1]">•</span>
                                 <div className="flex items-center gap-[6px]">
                                   <div className="w-[16px] h-[16px] rounded-full bg-[#1E6FD9] text-white flex items-center justify-center text-[9px] font-bold">

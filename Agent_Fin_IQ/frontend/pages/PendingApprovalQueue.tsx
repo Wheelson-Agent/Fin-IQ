@@ -6,6 +6,7 @@ import { SectionHeader } from '../components/at/SectionHeader';
 
 import { getInvoices } from '../lib/api';
 import type { Invoice } from '../lib/types';
+import { useCompany } from '../context/CompanyContext';
 
 const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
@@ -13,6 +14,7 @@ type SortField = 'vendor' | 'date' | 'amount' | 'approvalDelayTime' | null;
 type SortDir = 'asc' | 'desc';
 
 export default function PendingApprovalQueue() {
+    const { selectedCompany } = useCompany();
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [sortField, setSortField] = useState<SortField>(null);
@@ -21,8 +23,8 @@ export default function PendingApprovalQueue() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        getInvoices().then(data => setInvoices(data || [])).catch(err => console.error('[PendingQueue] Failed:', err));
-    }, []);
+        getInvoices(selectedCompany).then(data => setInvoices(data || [])).catch(err => console.error('[PendingQueue] Failed:', err));
+    }, [selectedCompany]);
 
     // Filter only pending documents
     const pendingInvoices = invoices.filter(inv => inv.status === 'Pending Approval');
