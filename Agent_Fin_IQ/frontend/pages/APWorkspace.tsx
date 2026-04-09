@@ -560,8 +560,8 @@ export default function APWorkspace() {
           if (!gValid) reasons.push('Missing GST');
           if (!dValid) reasons.push('Data OCR Fail');
           if (!isDupPassed) reasons.push('Duplicate Found');
-          if (!vVerif) reasons.push('Vendor mapping required');
-          if (isGoods && !lMatch) reasons.push('Ledger mapping required');
+          if (!vVerif) reasons.push('Vendor setup required');
+          if (!lMatch) reasons.push(isGoods ? 'Stock item mapping required' : 'Ledger mapping required');
 
           const docTypeLabel = isUnknownInv ? 'Unknown' : (inv.doc_type_label || (inv.doc_type || 'Invoice (Service)'));
 
@@ -744,7 +744,20 @@ export default function APWorkspace() {
   const normalizeText = (value?: string | null) => value?.trim() || '';
   const hasRemarks = (record: APRecord) => normalizeText(record.remarks).length > 0;
   const isRoutedRecord = (record: APRecord) => Boolean(record.isHighAmount && valueLimitConfig?.enabled);
-  const getInputRequirementLabel = (record: APRecord) => normalizeText(record.reason) || normalizeText(record.requiredField) || 'Pending Input';
+  const getInputRequirementLabel = (record: APRecord) => {
+    const normalizeReason = (value?: string | null) => {
+      const text = normalizeText(value);
+      if (!text) return '';
+      return text
+        .replace(/Vendor mapping required/gi, 'Vendor setup required')
+        .replace(/Ledger\/Stock item not matched/gi, String(record.docTypeLabel || '').toLowerCase().includes('goods') ? 'Stock item mapping required' : 'Ledger mapping required')
+        .replace(/Stock item not matched/gi, 'Stock item mapping required')
+        .replace(/Ledger not matched/gi, 'Ledger mapping required')
+        .replace(/Pending Input/gi, '');
+    };
+
+    return normalizeReason(record.reason) || normalizeReason(record.requiredField) || 'Pending Input';
+  };
   const getFailureReasonLabel = (record: APRecord) => normalizeText(record.reason) || 'Failure';
 
   const getRecordDate = (value?: string) => {
@@ -2518,7 +2531,7 @@ export default function APWorkspace() {
                         <TableCell className="text-right pr-6 font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]">{formatCurrency(record.amount)}</TableCell>
                         <TableCell className="text-center">
                           <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
-                            {record.reason || 'Pending Input'}
+                            {getInputRequirementLabel(record)}
                           </div>
                         </TableCell>
                         <TableCell className="pl-6">
