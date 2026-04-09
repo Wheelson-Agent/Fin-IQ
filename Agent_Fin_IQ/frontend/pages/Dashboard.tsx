@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Edit2, Check, X, TrendingUp, TrendingDown } from 'lucide-react';
+import { Edit2, Check, X, TrendingUp, TrendingDown, MessageCircle, ArrowUpRight } from 'lucide-react';
 import { getTallySyncStats, type TallySyncStats } from '../lib/api';
 import { useCompany } from '../context/CompanyContext';
 
 // ============================================================
-// AP KPI DASHBOARD — DESIGN TOKENS
+// Accounts Payable  KPI DASHBOARD — DESIGN TOKENS
 // ============================================================
 
 const C = {
@@ -28,7 +28,7 @@ const C = {
 } as const;
 
 // ============================================================
-// AP KPI DASHBOARD — UTILITIES
+// Accounts Payable  KPI DASHBOARD — UTILITIES
 // ============================================================
 
 function formatINR(v: number): string {
@@ -49,7 +49,7 @@ function formatTime(isoStr: string): string {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — TYPES
+// Accounts Payable  KPI DASHBOARD — TYPES
 // ============================================================
 
 interface PulseData {
@@ -77,7 +77,7 @@ interface PulseData {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — TYPES (continued)
+// Accounts Payable  KPI DASHBOARD — TYPES (continued)
 // ============================================================
 
 interface PipelineData {
@@ -95,7 +95,7 @@ interface PipelineData {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — MOCK DATA (swap for IPC calls in backend phase)
+// Accounts Payable  KPI DASHBOARD — MOCK DATA (swap for IPC calls in backend phase)
 // ============================================================
 
 const MOCK_PULSE: PulseData = {
@@ -214,7 +214,7 @@ interface SupplierAlertsData {
 interface TallySyncData {
   posted:  number;
   pending: number;
-  handoff: number;            // renamed from failed — matches AP tab "Handoff" tab
+  handoff: number;            // renamed from failed — matches Accounts Payable  tab "Handoff" tab
   recent:  Array<{
     vendor: string;
     status: 'posted' | 'handoff';
@@ -246,7 +246,7 @@ const MOCK_SUPPLIERS: SuppliersData = {
 };
 
 // ============================================================
-// AP KPI DASHBOARD — PULSE CARD WRAPPER
+// Accounts Payable  KPI DASHBOARD — PULSE CARD WRAPPER
 // ============================================================
 
 function PulseCard({ label, children, delay = 0, accentColor }: {
@@ -293,7 +293,7 @@ function PulseCard({ label, children, delay = 0, accentColor }: {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — SHARED UTILITY: bold text renderer
+// Accounts Payable  KPI DASHBOARD — SHARED UTILITY: bold text renderer
 // ============================================================
 
 function renderBold(text: string, baseColor: string) {
@@ -305,7 +305,7 @@ function renderBold(text: string, baseColor: string) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — ACTIVITY FEED WIDGET
+// Accounts Payable  KPI DASHBOARD — ACTIVITY FEED WIDGET
 // ============================================================
 
 const ACTIVITY_DOT: Record<ActivityEventType, string> = {
@@ -378,7 +378,7 @@ function ActivityWidget({ data }: { data: ActivityData }) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — CFO BRIEFING WIDGET
+// Accounts Payable  KPI DASHBOARD — CFO BRIEFING WIDGET
 // ============================================================
 
 function BriefingWidget({ data }: { data: BriefingData }) {
@@ -433,26 +433,51 @@ function BriefingWidget({ data }: { data: BriefingData }) {
         onClick={handleResend}
         style={{
           width:        '100%',
-          padding:      '8px',
+          padding:      '10px 14px',
           fontSize:     '12px',
           fontFamily:   'inherit',
-          fontWeight:   500,
-          color:        resent ? C.tealDeep : C.navy,
-          background:   resent ? C.tealLight : 'transparent',
-          border:       `0.5px solid ${resent ? C.tealMid : C.navy}`,
-          borderRadius: '12px',
+          fontWeight:   700,
+          color:        resent ? '#0F5C4A' : '#166534',
+          background:   resent
+            ? 'linear-gradient(135deg, rgba(209,250,229,0.96), rgba(236,253,245,1))'
+            : 'linear-gradient(135deg, rgba(240,253,244,1), rgba(236,253,245,0.96))',
+          border:       `1px solid ${resent ? '#86EFAC' : '#A7F3D0'}`,
+          borderRadius: '14px',
           cursor:       'pointer',
           transition:   'all 200ms ease',
+          display:      'flex',
+          alignItems:   'center',
+          justifyContent:'center',
+          gap:          '8px',
+          boxShadow:    resent
+            ? '0 10px 24px rgba(16,185,129,0.12)'
+            : '0 12px 28px rgba(16,185,129,0.16)',
         }}
       >
-        {resent ? '✓ Sent to WhatsApp' : 'Resend to WhatsApp'}
+        <span
+          style={{
+            width: '24px',
+            height: '24px',
+            borderRadius: '999px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: resent ? 'rgba(5,150,105,0.14)' : 'rgba(34,197,94,0.14)',
+            color: resent ? '#047857' : '#16A34A',
+            flexShrink: 0,
+          }}
+        >
+          {resent ? <Check size={13} strokeWidth={3} /> : <MessageCircle size={13} strokeWidth={2.6} />}
+        </span>
+        <span>{resent ? 'Sent' : 'WhatsApp'}</span>
+        {!resent && <ArrowUpRight size={13} strokeWidth={2.8} />}
       </button>
     </motion.div>
   );
 }
 
 // ============================================================
-// AP KPI DASHBOARD — SUPPLIER360 ALERTS WIDGET
+// Accounts Payable  KPI DASHBOARD — SUPPLIER360 ALERTS WIDGET
 // ============================================================
 
 const RISK_CONFIG = {
@@ -631,7 +656,7 @@ function SupplierAlertsWidget({ data }: { data: SupplierAlertsData }) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — TALLY SYNC WIDGET
+// Accounts Payable  KPI DASHBOARD — TALLY SYNC WIDGET
 // ============================================================
 
 function timeAgo(isoStr: string): string {
@@ -1009,7 +1034,7 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — TOP SUPPLIERS WIDGET
+// Accounts Payable  KPI DASHBOARD — TOP SUPPLIERS WIDGET
 // ============================================================
 
 function SuppliersWidget({ data }: { data: SuppliersData }) {
@@ -1155,7 +1180,7 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — AGING WIDGET
+// Accounts Payable  KPI DASHBOARD — AGING WIDGET
 // ============================================================
 
 function AgingWidget({ data }: { data: AgingData }) {
@@ -1261,7 +1286,7 @@ function AgingWidget({ data }: { data: AgingData }) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — PIPELINE WIDGET
+// Accounts Payable  KPI DASHBOARD — PIPELINE WIDGET
 // ============================================================
 
 const PIPELINE_SEGMENTS = [
@@ -1451,7 +1476,7 @@ function PipelineWidget({ data }: { data: PipelineData }) {
 }
 
 // ============================================================
-// AP KPI DASHBOARD — MAIN COMPONENT
+// Accounts Payable  KPI DASHBOARD — MAIN COMPONENT
 // ============================================================
 
 export default function Dashboard() {
@@ -1541,7 +1566,7 @@ export default function Dashboard() {
             lineHeight:    1.2,
             letterSpacing: '-0.02em',
           }}>
-            AP dashboard
+            Accounts Payable dashboard
           </h1>
           <p style={{
             fontSize:   '14px',
@@ -1553,25 +1578,6 @@ export default function Dashboard() {
             Morning snapshot&nbsp;·&nbsp;
             {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
-        </div>
-        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
-          <div style={{
-            display:      'flex',
-            alignItems:   'center',
-            gap:          '6px',
-            background:   C.tealLight,
-            border:       `0.5px solid ${C.tealMid}`,
-            borderRadius: '20px',
-            padding:      '4px 10px',
-          }}>
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: C.tealMid, animation: 'pulse 2s infinite' }} />
-            <span style={{ fontSize: '11px', color: C.tealDeep, fontWeight: 500, fontFamily: 'inherit' }}>
-              Live · 20 KPIs
-            </span>
-          </div>
-          <span style={{ fontSize: '11px', color: C.inkGhost, fontFamily: 'inherit' }}>
-            Phase 1 · AP Intelligence
-          </span>
         </div>
       </div>
       {/* ── END PAGE HEADER ────────────────────────────────────── */}
@@ -1655,9 +1661,35 @@ export default function Dashboard() {
           }}>
             {formatINR(pulse.due_today.amount)}
           </div>
-          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
-            {pulse.due_today.count} invoice{pulse.due_today.count !== 1 ? 's' : ''}&nbsp;·&nbsp;
-            {pulse.due_today.suppliers} supplier{pulse.due_today.suppliers !== 1 ? 's' : ''}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 9px',
+              borderRadius: '999px',
+              background: '#F3F7FC',
+              border: '0.5px solid rgba(148,163,184,0.32)',
+              color: C.inkMuted,
+              fontSize: '11px',
+              fontWeight: 500,
+              fontFamily: 'inherit',
+            }}>
+              {pulse.due_today.count} invoice{pulse.due_today.count !== 1 ? 's' : ''}
+            </span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 9px',
+              borderRadius: '999px',
+              background: '#F3F7FC',
+              border: '0.5px solid rgba(148,163,184,0.32)',
+              color: C.inkMuted,
+              fontSize: '11px',
+              fontWeight: 500,
+              fontFamily: 'inherit',
+            }}>
+              {pulse.due_today.suppliers} supplier{pulse.due_today.suppliers !== 1 ? 's' : ''}
+            </span>
           </div>
           {pulse.due_today.overdue > 0 && (
             <div style={{
@@ -1686,8 +1718,35 @@ export default function Dashboard() {
           }}>
             {formatINR(pulse.due_this_week.amount)}
           </div>
-          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
-            {pulse.due_this_week.count} invoices&nbsp;·&nbsp;{pulse.due_this_week.suppliers} suppliers
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 9px',
+              borderRadius: '999px',
+              background: '#F3F7FC',
+              border: '0.5px solid rgba(148,163,184,0.32)',
+              color: C.inkMuted,
+              fontSize: '11px',
+              fontWeight: 500,
+              fontFamily: 'inherit',
+            }}>
+              {pulse.due_this_week.count} invoice{pulse.due_this_week.count !== 1 ? 's' : ''}
+            </span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 9px',
+              borderRadius: '999px',
+              background: '#F3F7FC',
+              border: '0.5px solid rgba(148,163,184,0.32)',
+              color: C.inkMuted,
+              fontSize: '11px',
+              fontWeight: 500,
+              fontFamily: 'inherit',
+            }}>
+              {pulse.due_this_week.suppliers} supplier{pulse.due_this_week.suppliers !== 1 ? 's' : ''}
+            </span>
           </div>
           <div style={{
             display:      'inline-block',
@@ -1715,8 +1774,21 @@ export default function Dashboard() {
           }}>
             {formatINR(pulse.net_this_month.amount)}
           </div>
-          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
-            {pulse.net_this_month.count} invoices processed
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '4px 9px',
+              borderRadius: '999px',
+              background: '#F3F7FC',
+              border: '0.5px solid rgba(148,163,184,0.32)',
+              color: C.inkMuted,
+              fontSize: '11px',
+              fontWeight: 500,
+              fontFamily: 'inherit',
+            }}>
+              {pulse.net_this_month.count} invoice{pulse.net_this_month.count !== 1 ? 's' : ''} processed
+            </span>
           </div>
           <div style={{
             display:    'flex',
@@ -1751,7 +1823,7 @@ export default function Dashboard() {
           color:         C.inkMuted,
           letterSpacing: '0.01em',
         }}>
-          AP Intelligence
+          Accounts Payable  Intelligence
         </span>
         <div style={{ flex: 1, height: '0.5px', background: C.inkGhost }} />
       </div>
@@ -1807,3 +1879,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
+

@@ -70,7 +70,7 @@ export function CommandPalette({ open, setOpen }: CommandPaletteProps) {
                                         <div className="w-[30px] h-[30px] rounded-[8px] bg-[#F0F4FA] flex items-center justify-center text-[#4A5568] shrink-0">
                                             <CreditCard size={18} className="text-[#8899AA] group-hover:text-[#1E6FD9] transition-colors" />
                                         </div>
-                                        AP Workspace
+                                        Accounts Payable  Workspace
                                     </Command.Item>
                                 </Command.Group>
 

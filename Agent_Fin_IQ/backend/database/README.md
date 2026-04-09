@@ -15,7 +15,7 @@ This module handles all PostgreSQL database operations for agent_ai_tally.
 | # | Table | Rows Represent | Used By |
 |---|-------|---------------|---------|
 | 1 | `invoices` | Each uploaded document | Doc Hub, Detail View, Dashboard |
-| 2 | `vendors` | Vendor master records | AP Monitor, Vendor page |
+| 2 | `vendors` | Vendor master records | Accounts Payable  Monitor, Vendor page |
 | 3 | `audit_logs` | Every system action | Audit Trail page |
 | 4 | `processing_jobs` | Pipeline stage tracking | Processing Pipeline UI |
 | 5 | `users` | Login accounts & roles | Login, User Management |

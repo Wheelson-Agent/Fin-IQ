@@ -43,11 +43,11 @@ const RESPONSES: { test: RegExp; reply: string; cards?: React.ReactNode }[] = [
     },
     {
         test: /hello|hi|hey|what can|help/i,
-        reply: `Hey! I'm **agent_w**, your AI-powered AP automation assistant.\n\nI have full real-time access to your Document Processing Queue, vendor database, GST records, and payment ledger. Here's what I can help you with:\n\n→ **Invoice analysis** — drill into any invoice or batch\n→ **Risk detection** — aging payables, duplicate flags, GST mismatches\n→ **Automation insights** — why invoices fail, how to improve your auto-post rate\n→ **Vendor health** — supplier scorecards, format issues, compliance flags\n→ **Reports** — instant summaries, trend analysis, export to Excel\n\nWhat would you like to explore first?`,
+        reply: `Hey! I'm **agent_w**, your AI-powered Accounts Payable  automation assistant.\n\nI have full real-time access to your Document Processing Queue, vendor database, GST records, and payment ledger. Here's what I can help you with:\n\n→ **Invoice analysis** — drill into any invoice or batch\n→ **Risk detection** — aging payables, duplicate flags, GST mismatches\n→ **Automation insights** — why invoices fail, how to improve your auto-post rate\n→ **Vendor health** — supplier scorecards, format issues, compliance flags\n→ **Reports** — instant summaries, trend analysis, export to Excel\n\nWhat would you like to explore first?`,
     },
 ];
 
-const DEFAULT_REPLY = `I'm analyzing your AP data... I found some relevant information but need a bit more context.\n\nCould you be more specific? For example:\n→ "Which invoices are overdue?"\n→ "Why is my automation rate dropping?"\n→ "Show me GST compliance issues"\n→ "What vendors need attention?"`;
+const DEFAULT_REPLY = `I'm analyzing your Accounts Payable  data... I found some relevant information but need a bit more context.\n\nCould you be more specific? For example:\n→ "Which invoices are overdue?"\n→ "Why is my automation rate dropping?"\n→ "Show me GST compliance issues"\n→ "What vendors need attention?"`;
 
 function getReply(q: string) {
     for (const r of RESPONSES) {
@@ -268,7 +268,7 @@ export default function AgentPage() {
                                     <h1 className="text-[22px] font-black text-white tracking-tight leading-none">agent_w</h1>
                                     <span className="text-[10px] font-black uppercase tracking-widest text-[#1E6FD9] bg-[#1E6FD9]/15 border border-[#1E6FD9]/30 px-[8px] py-[3px] rounded-full">AI · Live</span>
                                 </div>
-                                <p className="text-[12px] text-white/40 mt-[3px] font-medium">Your AP intelligence layer — ask anything about your invoices, vendors, or compliance</p>
+                                <p className="text-[12px] text-white/40 mt-[3px] font-medium">Your Accounts Payable  intelligence layer — ask anything about your invoices, vendors, or compliance</p>
                             </div>
                         </div>
                         {hasMessages && (

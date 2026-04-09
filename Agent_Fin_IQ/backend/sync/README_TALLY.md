@@ -18,7 +18,7 @@ This feature enables posting approved invoices directly to Tally Prime via an n8
 5.  **Status Update**:
     - If the webhook returns success (HTTP 200), `erp_sync_status` is set to `processed`.
     - If it fails, `erp_sync_status` is set to `failed`.
-6.  **UI Transition**: Invoices with `erp_sync_status = 'processed'` automatically appear in the **Posted** tab of the AP Workspace.
+6.  **UI Transition**: Invoices with `erp_sync_status = 'processed'` automatically appear in the **Posted** tab of the Accounts Payable  Workspace.
 
 ## Configuration
 

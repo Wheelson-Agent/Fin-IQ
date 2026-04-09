@@ -420,7 +420,7 @@ export interface TallySyncStats {
 }
 
 /**
- * Fetch live Tally sync stats for the AP dashboard widget.
+ * Fetch live Tally sync stats for the Accounts Payable dashboard widget.
  * posted  = invoices with erp_sync_id set
  * pending = invoices in 'Ready to Post' awaiting Tally push
  * handoff = invoices that failed validation

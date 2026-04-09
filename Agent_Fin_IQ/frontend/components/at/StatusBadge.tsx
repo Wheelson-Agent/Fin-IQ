@@ -40,7 +40,7 @@ export function StatusBadge({ status, size = 'md' }: StatusBadgeProps) {
         borderRadius: '100px',
         display: 'inline-block',
         whiteSpace: 'nowrap',
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'inherit',
       }}
     >
       {config.label}
@@ -67,7 +67,7 @@ export function FailureBadge({ type }: FailureBadgeProps) {
         borderRadius: '100px',
         display: 'inline-block',
         whiteSpace: 'nowrap',
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'inherit',
       }}
     >
       {type}
@@ -86,7 +86,7 @@ export function EnhancementBadge() {
         padding: '6px 14px',
         borderRadius: '4px',
         display: 'inline-block',
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'inherit',
         marginBottom: '8px',
       }}
     >

@@ -289,7 +289,7 @@ export default function UserProfile() {
                                     <div>
                                         <div className="text-[11px] text-white/60 font-bold uppercase tracking-wide mb-[2px]">System Role</div>
                                         <div className="text-[16px] font-black text-white">{user.role}</div>
-                                        <div className="text-[11px] text-white/60 mt-[2px]">Full AP access · No user management</div>
+                                        <div className="text-[11px] text-white/60 mt-[2px]">Full Accounts Payable  access · No user management</div>
                                     </div>
                                 </div>
                             </div>

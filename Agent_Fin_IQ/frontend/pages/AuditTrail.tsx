@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Filter, Calendar, CheckCircle, XCircle, Edit3,
+  CheckCircle, XCircle, Edit3,
   RefreshCw, Plus, FileCheck, ChevronDown, Clock, Trash2,
   ChevronLeft, ChevronRight, AlertTriangle, ShieldOff, Cpu,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SectionHeader } from '../components/at/SectionHeader';
 import { getAuditLogs, deleteAuditLog, deleteAuditLogsBulk } from '../lib/api';
 import { RevalidationIcon } from '../components/at/RevalidationIcon';
 import { useCompany } from '../context/CompanyContext';
 import type { AuditEvent } from '../lib/types';
+import { PremiumConfirmDialog } from '../components/PremiumConfirmDialog';
+import { Checkbox } from '../components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
 // ─── Constants ────────────────────────────────────────────────
 const allEventTypes = ['All', 'Created', 'Processed', 'Edited', 'Revalidated', 'Approved', 'Rejected', 'Auto-Posted', 'Deleted'];
@@ -19,27 +21,66 @@ const PAGE_SIZES    = [10, 25, 50, 100];
 const PROTECTED_EVENT_TYPES = new Set(['Created', 'Deleted']);
 
 const eventTypeIcons: Record<string, React.ReactNode> = {
-  Created:      <Plus size={16} className="text-[#1E6FD9]" />,
-  Validated:    <CheckCircle size={16} className="text-[#22C55E]" />,
-  Processed:    <Cpu size={16} className="text-[#0891B2]" />,
-  'Auto-Posted':<FileCheck size={16} className="text-[#22C55E]" />,
-  Edited:       <Edit3 size={16} className="text-[#F59E0B]" />,
-  Revalidated:  <RevalidationIcon size={16} className="text-[#4A90D9]" />,
-  Rejected:     <XCircle size={16} className="text-[#EF4444]" />,
-  Approved:     <CheckCircle size={16} className="text-[#22C55E]" />,
-  Deleted:      <Trash2 size={16} className="text-[#EF4444]" />,
+  Created:      <Plus size={13} className="text-[#1E6FD9]" />,
+  Validated:    <CheckCircle size={13} className="text-[#22C55E]" />,
+  Processed:    <Cpu size={13} className="text-[#0891B2]" />,
+  'Auto-Posted':<FileCheck size={13} className="text-[#22C55E]" />,
+  Edited:       <Edit3 size={13} className="text-[#F59E0B]" />,
+  Revalidated:  <RevalidationIcon size={13} className="text-[#4A90D9]" />,
+  Rejected:     <XCircle size={13} className="text-[#EF4444]" />,
+  Approved:     <CheckCircle size={13} className="text-[#22C55E]" />,
+  Deleted:      <Trash2 size={13} className="text-[#EF4444]" />,
 };
 
-const eventTypeStyles: Record<string, string> = {
-  Created:      'bg-[#EBF3FF] border-[#1E6FD9] text-[#1E6FD9]',
-  Validated:    'bg-[#D1FAE5] border-[#22C55E] text-[#059669]',
-  Processed:    'bg-[#E0F2FE] border-[#0891B2] text-[#0369A1]',
-  'Auto-Posted':'bg-[#D1FAE5] border-[#22C55E] text-[#059669]',
-  Edited:       'bg-[#FEF3C7] border-[#F59E0B] text-[#D97706]',
-  Revalidated:  'bg-[#F0F4FA] border-[#4A90D9] text-[#4A90D9]',
-  Rejected:     'bg-[#FEE2E2] border-[#EF4444] text-[#DC2626]',
-  Approved:     'bg-[#D1FAE5] border-[#22C55E] text-[#059669]',
-  Deleted:      'bg-[#FEE2E2] border-[#EF4444] text-[#DC2626]',
+// Dot color for the small indicator next to event type label on cards
+const eventTypeDotColor: Record<string, string> = {
+  Created:      'bg-[#1E6FD9]',
+  Validated:    'bg-[#22C55E]',
+  Processed:    'bg-[#0891B2]',
+  'Auto-Posted':'bg-[#22C55E]',
+  Edited:       'bg-[#F59E0B]',
+  Revalidated:  'bg-[#4A90D9]',
+  Rejected:     'bg-[#EF4444]',
+  Approved:     'bg-[#22C55E]',
+  Deleted:      'bg-[#EF4444]',
+};
+
+const eventTypeTextColor: Record<string, string> = {
+  Created:      'text-[#1E6FD9]',
+  Validated:    'text-[#059669]',
+  Processed:    'text-[#0369A1]',
+  'Auto-Posted':'text-[#059669]',
+  Edited:       'text-[#D97706]',
+  Revalidated:  'text-[#4A90D9]',
+  Rejected:     'text-[#DC2626]',
+  Approved:     'text-[#059669]',
+  Deleted:      'text-[#DC2626]',
+};
+
+// Icon bg for the timeline dot circle
+const eventTypeIconBg: Record<string, string> = {
+  Created:      'bg-[#EBF3FF] border-[#BFDBFE]',
+  Validated:    'bg-[#D1FAE5] border-[#6EE7B7]',
+  Processed:    'bg-[#E0F2FE] border-[#7DD3FC]',
+  'Auto-Posted':'bg-[#D1FAE5] border-[#6EE7B7]',
+  Edited:       'bg-[#FEF3C7] border-[#FCD34D]',
+  Revalidated:  'bg-[#EFF6FF] border-[#BFDBFE]',
+  Rejected:     'bg-[#FEE2E2] border-[#FECACA]',
+  Approved:     'bg-[#D1FAE5] border-[#6EE7B7]',
+  Deleted:      'bg-[#FEE2E2] border-[#FECACA]',
+};
+
+// Left border accent color per event type (always visible)
+const eventTypeAccentBorder: Record<string, string> = {
+  Created:      'border-l-[#1E6FD9]',
+  Validated:    'border-l-[#22C55E]',
+  Processed:    'border-l-[#0891B2]',
+  'Auto-Posted':'border-l-[#22C55E]',
+  Edited:       'border-l-[#F59E0B]',
+  Revalidated:  'border-l-[#4A90D9]',
+  Rejected:     'border-l-[#EF4444]',
+  Approved:     'border-l-[#22C55E]',
+  Deleted:      'border-l-[#EF4444]',
 };
 
 // ─── Date range helpers ───────────────────────────────────────
@@ -66,6 +107,29 @@ function formatTimestamp(ts: string) {
   const d = new Date(ts);
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) +
     ' · ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+// ─── Skeleton row ─────────────────────────────────────────────
+function SkeletonRow({ delay = 0 }: { delay?: number }) {
+  return (
+    <div className="flex gap-4" style={{ animationDelay: `${delay}ms` }}>
+      <div className="shrink-0 w-8 flex flex-col items-center pt-3 gap-2">
+        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 animate-pulse" />
+      </div>
+      <div className="flex-1 bg-white border border-slate-100 rounded-2xl p-4 space-y-3 animate-pulse">
+        <div className="flex items-center gap-2">
+          <div className="h-3 w-3 rounded-full bg-slate-100" />
+          <div className="h-3 w-14 bg-slate-100 rounded-full" />
+          <div className="h-3 w-28 bg-slate-100 rounded" />
+        </div>
+        <div className="h-3 w-3/4 bg-slate-100 rounded" />
+        <div className="flex items-center gap-2">
+          <div className="h-2.5 w-24 bg-slate-100 rounded" />
+          <div className="h-2.5 w-16 bg-slate-100 rounded" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -133,7 +197,7 @@ export default function AuditTrail() {
   const handleTypeChange  = (t: string) => { setSelectedType(t);  setPage(1); setSelectedIds(new Set()); };
   const handleRangeChange = (r: string) => { setSelectedRange(r); setPage(1); setSelectedIds(new Set()); };
 
-  // Also reset on company switch (selectedCompany comes from context, handled in useEffect dep array)
+  // Also reset on company switch
   useEffect(() => { setPage(1); setSelectedIds(new Set()); }, [selectedCompany]);
 
   // Bulk selection helpers
@@ -169,7 +233,6 @@ export default function AuditTrail() {
     setBulkError(null);
     try {
       const { deleted } = await deleteAuditLogsBulk(Array.from(selectedIds));
-      // Navigate to the last valid page in case this page is now empty
       const newTotal      = Math.max(0, total - deleted);
       const newTotalPages = Math.max(1, Math.ceil(newTotal / pageSize));
       const targetPage    = Math.min(page, newTotalPages);
@@ -214,190 +277,193 @@ export default function AuditTrail() {
   const to    = Math.min(page * pageSize, total);
 
   return (
-    <div className="font-sans pb-[40px]">
-      {/* Page Header */}
+    <div className="font-sans pb-[60px]">
+
+      {/* ── Page Header ── */}
       <motion.div
-        initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between mb-[20px]"
+        initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-between mb-5"
       >
         <div>
-          <h1 className="text-[24px] font-bold text-[#1A2640] m-0 leading-tight mb-1">Audit Trail</h1>
-          <p className="text-[14px] text-[#4A5568] m-0">Complete event log for all invoice processing activities</p>
+          <h1 className="text-[22px] font-black text-[#0F172A] leading-tight tracking-tight">Audit Trail</h1>
+          <p className="text-[12px] text-[#94A3B8] font-medium mt-0.5">Complete event log · all invoice processing activities</p>
         </div>
-        <div className="flex gap-[12px]">
-          <button
-            onClick={() => fetchLogs(page, pageSize, selectedType, selectedRange, selectedCompany)}
-            className="flex items-center gap-[8px] bg-white border border-[#D0D9E8] text-[#4A5568] rounded-[8px] p-[10px_16px] text-[13px] font-bold cursor-pointer hover:bg-[#F8FAFC] transition-colors shadow-sm"
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-        </div>
+        <button
+          onClick={() => fetchLogs(page, pageSize, selectedType, selectedRange, selectedCompany)}
+          title="Refresh"
+          className="flex items-center justify-center h-8 w-8 rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-slate-700 hover:border-slate-300 shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-all"
+        >
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+        </button>
       </motion.div>
 
-      {/* Filter Bar */}
+      {/* ── Filter Bar (sticky) ── */}
       <motion.div
-        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="bg-white border border-[#D0D9E8]/50 rounded-[10px] p-[14px_20px] mb-[24px] flex items-center gap-[16px] flex-wrap shadow-[0_2px_8px_rgba(13,27,42,0.04)] sticky top-[80px] z-10"
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.08 }}
+        className="sticky top-[72px] z-40 mb-5"
       >
-        {/* Event type */}
-        <div className="flex items-center gap-[6px]">
-          <Filter size={15} className="text-[#8899AA]" />
-          <span className="text-[13px] font-bold text-[#4A5568]">Type:</span>
-        </div>
-        <div className="flex gap-[6px] flex-wrap">
-          {allEventTypes.map((type) => (
-            <button
-              key={type}
-              onClick={() => handleTypeChange(type)}
-              className={`rounded-full px-[12px] py-[5px] text-[12px] font-bold cursor-pointer transition-all duration-150 border ${
-                selectedType === type
-                  ? 'bg-[#1E6FD9] text-white border-[#1E6FD9] shadow-[0_2px_6px_rgba(30,111,217,0.3)]'
-                  : 'bg-[#F8FAFC] text-[#1E6FD9] border-[#D0D9E8] hover:bg-[#EBF3FF]'
-              }`}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
+        <div className="bg-white/96 backdrop-blur-md border border-slate-200/80 rounded-2xl shadow-[0_4px_20px_rgba(15,23,42,0.08)] overflow-hidden">
+          {/* Type pills row */}
+          <div className="relative px-3 pt-3 pb-2.5">
+            {/* Left fade mask */}
+            <div className="pointer-events-none absolute left-3 top-3 bottom-2.5 w-6 bg-gradient-to-r from-white to-transparent z-10" />
+            {/* Right fade mask */}
+            <div className="pointer-events-none absolute right-3 top-3 bottom-2.5 w-6 bg-gradient-to-l from-white to-transparent z-10" />
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+              {allEventTypes.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => handleTypeChange(type)}
+                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-bold tracking-wide transition-all duration-150 border whitespace-nowrap ${
+                    selectedType === type
+                      ? 'bg-[#2563EB] text-white border-[#2563EB] shadow-[0_2px_8px_rgba(37,99,235,0.30)]'
+                      : 'bg-transparent text-slate-500 border-transparent hover:border-slate-200 hover:bg-slate-50 hover:text-slate-700'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
 
-        <div className="w-[1px] h-[24px] bg-[#D0D9E8]" />
+          {/* Bottom row — range + count + select-all */}
+          <div className="px-4 pb-2.5 flex items-center gap-3 border-t border-slate-100">
+            <div className="flex items-center gap-0.5 flex-1">
+              {['Today', 'Last 7 Days', 'Last 30 Days', 'All Time'].map((range) => (
+                <button
+                  key={range}
+                  onClick={() => handleRangeChange(range)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all whitespace-nowrap ${
+                    selectedRange === range
+                      ? 'bg-slate-100 text-slate-800 font-black'
+                      : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {range}
+                </button>
+              ))}
+            </div>
 
-        {/* Date range */}
-        <div className="flex items-center gap-[8px]">
-          <Calendar size={15} className="text-[#8899AA]" />
-          <span className="text-[13px] font-bold text-[#4A5568]">Range:</span>
-        </div>
-        <div className="flex gap-[6px]">
-          {['Today', 'Last 7 Days', 'Last 30 Days', 'All Time'].map((range) => (
-            <button
-              key={range}
-              onClick={() => handleRangeChange(range)}
-              className={`rounded-[6px] px-[12px] py-[4px] text-[12px] font-semibold cursor-pointer transition-colors ${
-                selectedRange === range
-                  ? 'bg-[#F0F4FA] text-[#1A2640] border border-[#D0D9E8]'
-                  : 'bg-transparent text-[#8899AA] border border-transparent hover:text-[#4A5568]'
-              }`}
-            >
-              {range}
-            </button>
-          ))}
-        </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Event count badge */}
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-500 tabular-nums">
+                {loading ? '…' : `${total.toLocaleString()} events`}
+              </span>
 
-        <div className="flex-1" />
-
-        {/* Count pill */}
-        <span className="text-[12px] font-semibold text-[#8899AA] bg-[#F8FAFC] px-3 py-1 rounded-full border border-[#D0D9E8]/50">
-          {loading ? '…' : `${total.toLocaleString()} events`}
-        </span>
-      </motion.div>
-
-      {/* Event Timeline */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
-        <SectionHeader
-          number={7}
-          title="Event Timeline"
-          action={
-            <div className="flex items-center gap-3">
+              {/* Select-all */}
               {deletableEvents.length > 0 && (
-                <label className="flex items-center gap-[6px] cursor-pointer select-none">
-                  <input
-                    type="checkbox"
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <Checkbox
                     checked={allPageSelected}
-                    onChange={toggleSelectAll}
-                    className="w-[13px] h-[13px] accent-[#1E6FD9] cursor-pointer"
+                    onCheckedChange={toggleSelectAll}
+                    className="w-3.5 h-3.5"
                   />
-                  <span className="text-[11px] text-[#4A5568] font-semibold">
-                    {allPageSelected ? 'Deselect all' : 'Select all on page'}
+                  <span className="text-[10px] text-slate-400 font-semibold whitespace-nowrap">
+                    {allPageSelected ? 'Deselect all' : 'Select page'}
                   </span>
                 </label>
               )}
-              <span className="text-[12px] text-[#94A3B8]">Click event to expand diff · hover for actions</span>
             </div>
-          }
-        />
+          </div>
+        </div>
+      </motion.div>
 
-        <div className="relative pl-[2px]">
-          <div className="absolute left-[33px] top-[24px] bottom-0 w-[2px] bg-[#E2E8F0] z-0" />
+      {/* ── Timeline ── */}
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}
+        style={{ isolation: 'isolate' }}
+      >
+        <div className="relative pl-1">
+          {/* Spine — dashed for a more refined look */}
+          <div className="absolute left-[15px] top-5 bottom-0 w-px z-0"
+            style={{ backgroundImage: 'repeating-linear-gradient(to bottom, #CBD5E1 0px, #CBD5E1 4px, transparent 4px, transparent 10px)' }}
+          />
 
           {loading && events.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <RefreshCw size={24} className="animate-spin text-[#1E6FD9]" />
-              <span className="text-[13px] text-[#94A3B8] font-medium">Loading audit logs…</span>
+            <div className="flex flex-col gap-3 pt-2">
+              {[...Array(5)].map((_, i) => <SkeletonRow key={i} delay={i * 60} />)}
             </div>
           ) : events.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2">
-              <ShieldOff size={32} className="text-[#CBD5E1]" />
-              <span className="text-[14px] font-semibold text-[#94A3B8]">No audit events found</span>
-              {selectedCompany !== 'ALL' ? (
-                <span className="text-[12px] text-[#CBD5E1] text-center max-w-[360px] leading-relaxed">
-                  No events recorded for <span className="font-semibold text-[#94A3B8]">{selectedCompanyName}</span> yet.
-                  Events will appear here as actions are taken for this company.
-                </span>
-              ) : (
-                <span className="text-[12px] text-[#CBD5E1]">Try changing the filters or date range</span>
-              )}
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-100 flex items-center justify-center shadow-[0_4px_12px_rgba(15,23,42,0.04)]">
+                <ShieldOff size={22} className="text-slate-300" />
+              </div>
+              <span className="text-[14px] font-bold text-slate-400">No audit events found</span>
+              <span className="text-[12px] text-slate-300 text-center max-w-[300px] leading-relaxed">
+                {selectedCompany !== 'ALL'
+                  ? <>No events for <span className="font-semibold text-slate-400">{selectedCompanyName}</span> yet.</>
+                  : 'Try changing the filters or date range'}
+              </span>
             </div>
           ) : (
-            <div className="flex flex-col gap-[16px] relative z-10 pt-[8px]">
+            <div className="flex flex-col gap-3 relative z-10 pt-2">
               <AnimatePresence mode="popLayout">
                 {events.map((event, idx) => {
                   const eventId    = String(event.id);
                   const isExpanded = expandedIds.has(eventId);
                   const hasDiff    = !!(event.before_data && event.after_data);
-                  const styleClass = eventTypeStyles[event.event_type] || 'bg-[#F8FAFC] border-[#D0D9E8] text-[#4A5568]';
                   const canDelete  = !PROTECTED_EVENT_TYPES.has(event.event_type);
-                  const isConfirming = confirmDeleteId === event.id;
+                  const dotBg      = eventTypeIconBg[event.event_type] || 'bg-slate-50 border-slate-200';
+                  const dotColor   = eventTypeDotColor[event.event_type] || 'bg-slate-400';
+                  const textColor  = eventTypeTextColor[event.event_type] || 'text-slate-500';
+                  const accentBorder = eventTypeAccentBorder[event.event_type] || 'border-l-slate-300';
 
                   return (
                     <motion.div
                       key={eventId}
                       layout
-                      initial={{ opacity: 0, x: -16 }}
+                      initial={{ opacity: 0, x: -12 }}
                       animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, scale: 0.96, x: -8 }}
-                      transition={{ delay: Math.min(idx * 0.03, 0.3), duration: 0.25 }}
-                      className="flex gap-[20px] relative group"
+                      exit={{ opacity: 0, scale: 0.97 }}
+                      transition={{ delay: Math.min(idx * 0.025, 0.25), duration: 0.2 }}
+                      className="flex gap-4 relative group"
                     >
-                      {/* Timeline icon + row checkbox */}
-                      <div className="shrink-0 w-[64px] flex flex-col items-center gap-[4px] relative z-10">
+                      {/* Timeline dot + checkbox */}
+                      <div className="shrink-0 w-8 flex flex-col items-center gap-1 relative z-10 pt-3.5">
                         {canDelete && (
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(event.id)}
-                            onChange={() => toggleSelect(event.id)}
-                            onClick={e => e.stopPropagation()}
-                            className="w-[13px] h-[13px] accent-[#1E6FD9] cursor-pointer mt-[4px]"
-                          />
+                          <div className="mb-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Checkbox
+                              checked={selectedIds.has(event.id)}
+                              onCheckedChange={() => toggleSelect(event.id)}
+                              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                              className="w-3 h-3"
+                            />
+                          </div>
                         )}
-                        <div className={`w-[40px] h-[40px] rounded-full flex items-center justify-center border-2 shadow-sm ${styleClass} bg-white transition-transform group-hover:scale-110`}>
-                          {eventTypeIcons[event.event_type] ?? <Clock size={16} />}
+                        {/* Smaller, colored dot */}
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center border shadow-sm ${dotBg} transition-all duration-200 group-hover:shadow-md`}>
+                          {eventTypeIcons[event.event_type] ?? <Clock size={11} />}
                         </div>
                       </div>
 
-                      {/* Event card */}
-                      <div className={`flex-1 bg-white border rounded-[12px] overflow-hidden transition-all duration-200 ${
+                      {/* Event card — always has colored left border */}
+                      <div className={`flex-1 bg-white rounded-2xl border border-l-[3px] overflow-hidden transition-all duration-200 ${accentBorder} ${
                         isExpanded
-                          ? 'border-[#1E6FD9] shadow-[0_8px_24px_rgba(13,27,42,0.08)] scale-[1.005] my-1'
-                          : 'border-[#D0D9E8]/50 shadow-[0_2px_8px_rgba(13,27,42,0.03)] hover:border-[#1E6FD9]/40 hover:shadow-md'
+                          ? 'border-t-slate-200 border-r-slate-200 border-b-slate-200 shadow-[0_8px_28px_rgba(15,23,42,0.09)]'
+                          : 'border-t-slate-200/80 border-r-slate-200/80 border-b-slate-200/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)]'
                       }`}>
                         <div className="flex items-start">
-                          {/* Main clickable area */}
+                          {/* Clickable area */}
                           <button
                             onClick={() => hasDiff && toggleExpand(eventId)}
-                            className={`flex-1 flex items-start justify-between p-[16px_20px] bg-transparent border-none text-left font-sans transition-colors min-w-0 ${
-                              hasDiff ? 'cursor-pointer hover:bg-[#F8FAFC]' : 'cursor-default'
+                            className={`flex-1 flex items-start justify-between px-4 py-3.5 bg-transparent border-none text-left font-sans min-w-0 transition-colors ${
+                              hasDiff ? 'cursor-pointer hover:bg-slate-50/60' : 'cursor-default'
                             }`}
                           >
-                            <div className="flex-1 pr-4 min-w-0">
-                              <div className="flex items-center gap-[10px] mb-[8px] flex-wrap">
-                                <span className={`text-[10px] font-black uppercase px-[10px] py-[3px] rounded-full tracking-wider border shrink-0 ${styleClass}`}>
-                                  {event.event_type}
-                                </span>
-                                <span className="text-[14px] font-bold text-[#1A2640] tracking-tight truncate">{event.invoice_no || '—'}</span>
-                                <span className="text-[#CBD5E1]">•</span>
-                                <span className="text-[13px] font-medium text-[#64748B] truncate">{event.vendor_name || '—'}</span>
+                            <div className="flex-1 pr-3 min-w-0">
+                              {/* Header row — dot + type label + invoice no */}
+                              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+                                  <span className={`text-[10px] font-black uppercase tracking-[0.12em] ${textColor}`}>
+                                    {event.event_type}
+                                  </span>
+                                </div>
+                                <span className="text-slate-200 text-[10px]">·</span>
+                                <span className="text-[13px] font-bold text-slate-900 tracking-tight truncate">{event.invoice_no || '—'}</span>
+                                <span className="text-slate-200 text-[10px]">·</span>
+                                <span className="text-[11px] text-slate-400 truncate">{event.vendor_name || '—'}</span>
                               </div>
                               <div className="text-[13px] text-[#334155] leading-relaxed mb-[10px]">{event.description}</div>
                               <div className="flex items-center gap-[12px] bg-[#F8FAFC] w-fit px-[10px] py-[4px] rounded-md border border-[#F1F5F9]">
@@ -425,64 +491,40 @@ export default function AuditTrail() {
                               </div>
                             </div>
                             {hasDiff && (
-                              <div className={`shrink-0 w-[28px] h-[28px] rounded-full flex items-center justify-center transition-colors ${
-                                isExpanded ? 'bg-[#EBF3FF] text-[#1E6FD9]' : 'bg-[#F1F5F9] text-[#94A3B8] group-hover:bg-[#E2E8F0]'
+                              <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all mt-0.5 ${
+                                isExpanded ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'
                               }`}>
                                 <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                                  <ChevronDown size={16} />
+                                  <ChevronDown size={13} />
                                 </motion.div>
                               </div>
                             )}
                           </button>
 
-                          {/* Delete zone — visible on hover */}
+                          {/* Delete zone */}
                           {canDelete && (
-                            <div className="shrink-0 flex items-center pr-4 pt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                              {isConfirming ? (
-                                <div className="flex items-center gap-2">
-                                  {deleteError && (
-                                    <span className="text-[11px] text-red-500 font-semibold max-w-[160px] truncate">{deleteError}</span>
-                                  )}
-                                  <button
-                                    onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
-                                    className="text-[11px] font-semibold text-[#64748B] hover:text-[#1A2640] px-2 py-1 rounded transition-colors"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    disabled={deleting}
-                                    onClick={() => handleDelete(event.id)}
-                                    className="flex items-center gap-1 text-[11px] font-bold text-white bg-red-500 hover:bg-red-600 disabled:opacity-60 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
-                                  >
-                                    {deleting ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                                    Confirm
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => { setConfirmDeleteId(event.id); setDeleteError(null); }}
-                                  title="Delete audit entry"
-                                  className="w-[28px] h-[28px] rounded-full flex items-center justify-center text-[#CBD5E1] hover:text-red-500 hover:bg-red-50 transition-colors"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
+                            <div className="shrink-0 flex items-center pr-3 pt-3.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                              <button
+                                onClick={() => { setConfirmDeleteId(event.id); setDeleteError(null); }}
+                                title="Delete audit entry"
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           )}
-
-                          {/* Protected badge — shown on hover for non-deletable events */}
                           {!canDelete && (
-                            <div className="shrink-0 flex items-center pr-4 pt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                              <div title={`"${event.event_type}" entries are protected and cannot be deleted`}
-                                className="flex items-center gap-1 text-[10px] font-semibold text-[#94A3B8] bg-[#F1F5F9] border border-[#E2E8F0] px-2 py-1 rounded-full">
-                                <AlertTriangle size={10} className="text-amber-400" />
+                            <div className="shrink-0 flex items-center pr-3 pt-3.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                              <div title={`"${event.event_type}" entries are protected`}
+                                className="flex items-center gap-1 text-[9px] font-semibold text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded-full">
+                                <AlertTriangle size={9} className="text-amber-400" />
                                 Protected
                               </div>
                             </div>
                           )}
                         </div>
 
-                        {/* Diff view */}
+                        {/* Diff panel */}
                         <AnimatePresence>
                           {isExpanded && hasDiff && (
                             <motion.div
@@ -490,41 +532,43 @@ export default function AuditTrail() {
                               animate={{ height: 'auto', opacity: 1 }}
                               exit={{ height: 0, opacity: 0 }}
                               transition={{ duration: 0.2 }}
-                              className="border-t border-[#D0D9E8]/80 bg-[#F8FAFC]"
+                              className="border-t border-slate-100 bg-[linear-gradient(180deg,#F8FAFF,#FAFBFF)]"
                             >
-                              <div className="p-[20px]">
-                                <div className="text-[11px] font-bold text-[#64748B] mb-[12px] uppercase tracking-wider">Field Changes Detected</div>
-                                <div className="flex gap-[20px] flex-col sm:flex-row">
-                                  <div className="flex-1 bg-white border border-[#FECACA] rounded-[8px] overflow-hidden shadow-sm">
-                                    <div className="bg-[#FEF2F2] border-b border-[#FECACA] px-[12px] py-[8px] flex items-center justify-between">
-                                      <span className="text-[11px] font-black text-[#DC2626] uppercase tracking-wider">Before</span>
-                                      <span className="text-[10px] font-mono text-[#EF4444]/60">Previous State</span>
+                              <div className="p-4">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.18em] mb-3">Field Changes</p>
+                                <div className="flex gap-3 flex-col sm:flex-row">
+                                  <div className="flex-1 bg-white border border-red-100 rounded-xl overflow-hidden">
+                                    <div className="bg-red-50 border-b border-red-100 px-3 py-2 flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-red-600 uppercase tracking-wider">Before</span>
+                                      <span className="text-[9px] text-red-300 font-mono">Previous</span>
                                     </div>
-                                    <div className="p-[12px]">
-                                      {Object.entries(event.before_data!).map(([k, v]) => (
-                                        <div key={k} className="flex justify-between items-start gap-4 py-[4px] border-b border-[#F1F5F9] last:border-0">
-                                          <span className="text-[11px] font-semibold text-[#64748B] capitalize shrink-0">{k.replace(/([A-Z_])/g, ' $1').replace(/_/g, ' ').trim()}</span>
-                                          <span className="text-[12px] font-bold text-[#DC2626] font-mono bg-[#FEF2F2] px-1 rounded line-through decoration-[#EF4444]/50 text-right">
-                                            {Array.isArray(v) ? v.join(', ') : String(v)}
-                                          </span>
-                                        </div>
-                                      ))}
+                                    <div className="p-3 space-y-1">
+                                      {Object.entries(event.before_data!).map(([k, v]) => {
+                                        const changed = event.after_data && String(event.after_data[k]) !== String(v);
+                                        return (
+                                          <div key={k} className={`flex justify-between items-start gap-3 py-1 border-b border-slate-50 last:border-0 rounded px-1 ${changed ? 'bg-red-50/60' : ''}`}>
+                                            <span className="text-[10px] font-semibold text-slate-500 capitalize shrink-0">{k.replace(/([A-Z_])/g, ' $1').replace(/_/g, ' ').trim()}</span>
+                                            <span className="text-[11px] font-bold text-red-600 font-mono px-1 rounded line-through text-right">{Array.isArray(v) ? v.join(', ') : String(v)}</span>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   </div>
-                                  <div className="flex-1 bg-white border border-[#A7F3D0] rounded-[8px] overflow-hidden shadow-[0_4px_12px_rgba(16,185,129,0.08)] sm:scale-[1.02] z-10 ring-1 ring-[#10B981]/10">
-                                    <div className="bg-[#ECFDF5] border-b border-[#A7F3D0] px-[12px] py-[8px] flex items-center justify-between">
-                                      <span className="text-[11px] font-black text-[#059669] uppercase tracking-wider">After</span>
-                                      <span className="text-[10px] font-mono text-[#10B981]/60">Updated State</span>
+                                  <div className="flex-1 bg-white border border-emerald-200 rounded-xl overflow-hidden shadow-[0_4px_12px_rgba(16,185,129,0.06)]">
+                                    <div className="bg-emerald-50 border-b border-emerald-100 px-3 py-2 flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-emerald-700 uppercase tracking-wider">After</span>
+                                      <span className="text-[9px] text-emerald-400 font-mono">Updated</span>
                                     </div>
-                                    <div className="p-[12px]">
-                                      {Object.entries(event.after_data!).map(([k, v]) => (
-                                        <div key={k} className="flex justify-between items-start gap-4 py-[4px] border-b border-[#F1F5F9] last:border-0">
-                                          <span className="text-[11px] font-semibold text-[#64748B] capitalize shrink-0">{k.replace(/([A-Z_])/g, ' $1').replace(/_/g, ' ').trim()}</span>
-                                          <span className="text-[12px] font-bold text-[#059669] font-mono bg-[#ECFDF5] px-1 rounded text-right">
-                                            {Array.isArray(v) ? v.join(', ') : String(v)}
-                                          </span>
-                                        </div>
-                                      ))}
+                                    <div className="p-3 space-y-1">
+                                      {Object.entries(event.after_data!).map(([k, v]) => {
+                                        const changed = event.before_data && String(event.before_data[k]) !== String(v);
+                                        return (
+                                          <div key={k} className={`flex justify-between items-start gap-3 py-1 border-b border-slate-50 last:border-0 rounded px-1 ${changed ? 'bg-emerald-50/60' : ''}`}>
+                                            <span className="text-[10px] font-semibold text-slate-500 capitalize shrink-0">{k.replace(/([A-Z_])/g, ' $1').replace(/_/g, ' ').trim()}</span>
+                                            <span className="text-[11px] font-bold text-emerald-700 font-mono px-1 rounded text-right">{Array.isArray(v) ? v.join(', ') : String(v)}</span>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 </div>
@@ -542,62 +586,32 @@ export default function AuditTrail() {
         </div>
       </motion.div>
 
-      {/* Bulk delete floating action bar */}
+      {/* ── Bulk delete bar ── */}
       <AnimatePresence>
         {(selectedIds.size > 0 || bulkSuccess) && (
           <motion.div
             initial={{ y: 80, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 80, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className={`fixed bottom-[28px] left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 text-white rounded-[14px] shadow-[0_8px_32px_rgba(13,27,42,0.35)] px-5 py-3 ${
-              bulkSuccess ? 'bg-[#059669]' : 'bg-[#1A2640]'
+            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 text-white rounded-2xl shadow-[0_12px_40px_rgba(15,23,42,0.30)] px-5 py-3 ${
+              bulkSuccess ? 'bg-[linear-gradient(135deg,#059669,#10B981)]' : 'bg-[linear-gradient(135deg,#0F172A,#1E293B)]'
             }`}
           >
             {bulkSuccess ? (
-              /* ── Success toast ── */
-              <><CheckCircle size={15} /><span className="text-[13px] font-semibold">{bulkSuccess}</span></>
+              <><CheckCircle size={14} /><span className="text-[12px] font-semibold">{bulkSuccess}</span></>
             ) : (
-              /* ── Selection controls ── */
               <>
-                <span className="text-[13px] font-semibold text-white/80">
+                <span className="text-[12px] font-semibold text-white/70">
                   <span className="font-black text-white">{selectedIds.size}</span> {selectedIds.size === 1 ? 'entry' : 'entries'} selected
                 </span>
-                <div className="w-[1px] h-[18px] bg-white/20" />
-                {bulkError && (
-                  <span className="text-[11px] text-red-400 font-semibold max-w-[200px] truncate">{bulkError}</span>
-                )}
-                {bulkConfirming ? (
+                <div className="w-px h-4 bg-white/20" />
+                {bulkError && <span className="text-[10px] text-red-400 font-semibold max-w-[180px] truncate">{bulkError}</span>}
+                {bulkConfirming ? null : (
                   <>
-                    <span className="text-[12px] text-amber-300 font-semibold">Delete {selectedIds.size} {selectedIds.size === 1 ? 'entry' : 'entries'}?</span>
-                    <button
-                      onClick={() => { setBulkConfirming(false); setBulkError(null); }}
-                      className="text-[12px] font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-[8px] transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      disabled={bulkDeleting}
-                      onClick={handleBulkDelete}
-                      className="flex items-center gap-1.5 text-[12px] font-bold bg-red-500 hover:bg-red-600 disabled:opacity-60 px-4 py-1.5 rounded-[8px] transition-colors shadow-sm"
-                    >
-                      {bulkDeleting ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                      Confirm Delete
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => { setSelectedIds(new Set()); setBulkError(null); }}
-                      className="text-[12px] font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-[8px] transition-colors"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      onClick={() => { setBulkConfirming(true); setBulkError(null); }}
-                      className="flex items-center gap-1.5 text-[12px] font-bold bg-red-500 hover:bg-red-600 px-4 py-1.5 rounded-[8px] transition-colors shadow-sm"
-                    >
-                      <Trash2 size={12} />
+                    <button onClick={() => { setSelectedIds(new Set()); setBulkError(null); }} className="text-[11px] font-semibold text-white/50 hover:text-white px-2.5 py-1.5 rounded-lg transition-colors">Clear</button>
+                    <button onClick={() => { setBulkConfirming(true); setBulkError(null); }} className="flex items-center gap-1.5 text-[11px] font-bold bg-red-500 hover:bg-red-600 px-3.5 py-1.5 rounded-lg transition-colors">
+                      <Trash2 size={11} />
                       Delete Selected
                     </button>
                   </>
@@ -608,84 +622,101 @@ export default function AuditTrail() {
         )}
       </AnimatePresence>
 
-      {/* Pagination */}
+      {/* ── Pagination ── */}
       {total > 0 && (
         <motion.div
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
-          className="flex items-center justify-between mt-[28px] pt-[20px] border-t border-[#E2E8F0]"
+          className="flex items-center justify-between mt-8 pt-5 border-t border-slate-100"
         >
-          {/* Left: showing info + page size */}
-          <div className="flex items-center gap-4">
-            <span className="text-[13px] text-[#64748B] font-medium">
-              Showing <span className="font-bold text-[#1A2640]">{from}–{to}</span> of{' '}
-              <span className="font-bold text-[#1A2640]">{total.toLocaleString()}</span> events
+          <div className="flex items-center gap-3">
+            <span className="text-[12px] text-slate-500 font-medium">
+              <span className="font-bold text-slate-800">{from}–{to}</span> of <span className="font-bold text-slate-800">{total.toLocaleString()}</span>
             </span>
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] text-[#94A3B8]">Per page:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                className="text-[12px] font-semibold text-[#1A2640] bg-white border border-[#D0D9E8] rounded-[6px] px-2 py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#1E6FD9]/30"
-              >
-                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-400">Per page:</span>
+              <Select value={String(pageSize)} onValueChange={(val) => { setPageSize(Number(val)); setPage(1); }}>
+                <SelectTrigger className="h-7 w-16 text-[11px] font-semibold bg-white border-slate-200 rounded-lg px-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZES.map(s => <SelectItem key={s} value={String(s)} className="text-[11px]">{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
-          {/* Right: prev / page indicator / next */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1 || loading}
-              className="flex items-center gap-1 px-3 py-1.5 text-[12px] font-semibold text-[#4A5568] bg-white border border-[#D0D9E8] rounded-[6px] hover:bg-[#F8FAFC] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              <ChevronLeft size={14} /> Prev
+              <ChevronLeft size={13} /> Prev
             </button>
-
             <div className="flex items-center gap-1">
-              {/* Page number buttons — show at most 7 */}
               {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter(p => {
-                  if (totalPages <= 7) return true;
-                  if (p === 1 || p === totalPages) return true;
-                  if (Math.abs(p - page) <= 2) return true;
-                  return false;
-                })
+                .filter(p => { if (totalPages <= 7) return true; if (p === 1 || p === totalPages) return true; if (Math.abs(p - page) <= 2) return true; return false; })
                 .reduce<(number | '…')[]>((acc, p, i, arr) => {
                   if (i > 0 && typeof arr[i - 1] === 'number' && (p as number) - (arr[i - 1] as number) > 1) acc.push('…');
-                  acc.push(p);
-                  return acc;
+                  acc.push(p); return acc;
                 }, [])
-                .map((p, i) =>
-                  p === '…' ? (
-                    <span key={`ellipsis-${i}`} className="px-1 text-[12px] text-[#94A3B8]">…</span>
-                  ) : (
-                    <button
-                      key={p}
-                      onClick={() => setPage(p as number)}
-                      disabled={loading}
-                      className={`w-[30px] h-[30px] text-[12px] font-bold rounded-[6px] transition-colors ${
-                        page === p
-                          ? 'bg-[#1E6FD9] text-white shadow-[0_2px_6px_rgba(30,111,217,0.3)]'
-                          : 'text-[#4A5568] hover:bg-[#F0F4FA] border border-transparent'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  )
-                )}
+                .map((p, i) => p === '…' ? (
+                  <span key={`ellipsis-${i}`} className="px-1 text-[11px] text-slate-300">…</span>
+                ) : (
+                  <button key={p} onClick={() => setPage(p as number)} disabled={loading}
+                    className={`w-7 h-7 text-[11px] font-bold rounded-lg transition-all ${
+                      page === p ? 'bg-[#2563EB] text-white shadow-[0_2px_8px_rgba(37,99,235,0.28)]' : 'text-slate-500 hover:bg-slate-100'
+                    }`}>
+                    {p}
+                  </button>
+                ))}
             </div>
-
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages || loading}
-              className="flex items-center gap-1 px-3 py-1.5 text-[12px] font-semibold text-[#4A5568] bg-white border border-[#D0D9E8] rounded-[6px] hover:bg-[#F8FAFC] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              Next <ChevronRight size={14} />
+              Next <ChevronRight size={13} />
             </button>
           </div>
         </motion.div>
       )}
+
+      <PremiumConfirmDialog
+        open={confirmDeleteId !== null}
+        onOpenChange={(open) => { if (!open) { setConfirmDeleteId(null); setDeleteError(null); } }}
+        title="Delete this audit entry?"
+        description="This audit record will be removed from the visible trail."
+        confirmLabel="Delete Entry"
+        tone="danger"
+        bullets={[
+          'The selected audit entry will be removed from the current audit history.',
+          'Protected audit event types remain blocked automatically and cannot be deleted here.',
+        ]}
+        note={deleteError || 'Use this only for entries that are safe to remove from operational view.'}
+        busy={deleting}
+        onConfirm={async () => {
+          if (confirmDeleteId === null) return;
+          await handleDelete(confirmDeleteId);
+        }}
+      />
+      <PremiumConfirmDialog
+        open={bulkConfirming}
+        onOpenChange={(open) => { if (!open) { setBulkConfirming(false); setBulkError(null); } }}
+        title={`Delete ${selectedIds.size} selected audit ${selectedIds.size === 1 ? 'entry' : 'entries'}?`}
+        description="The selected audit entries will be removed together in one batch action."
+        confirmLabel={`Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'Entry' : 'Entries'}`}
+        tone="danger"
+        bullets={[
+          'Only deletable audit events in the current selection will be removed.',
+          'Protected event types remain blocked automatically and are not affected.',
+        ]}
+        note={bulkError || 'Please confirm only when these records are no longer needed in audit operations.'}
+        busy={bulkDeleting}
+        onConfirm={async () => {
+          await handleBulkDelete();
+        }}
+      />
     </div>
   );
 }

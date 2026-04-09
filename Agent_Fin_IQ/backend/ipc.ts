@@ -1228,6 +1228,10 @@ export function registerIpcHandlers() {
         return await queries.getSyncedCompanies();
     });
 
+    ipcMain.handle('companies:update-gstin', async (_event, { companyId, gstin } = {}) => {
+        return await queries.updateCompanyGstin(companyId, gstin);
+    });
+
     // ─── DASHBOARD ──────────────────────────────────────────────
 
     // ─── CONFIGURATION ──────────────────────────────────────────

@@ -16,10 +16,10 @@ This is the central table of the application. Every document uploaded creates a 
 | **`invoice_no`** | TEXT | The invoice number extracted by the AI | Doc Hub list, Detail View |
 | **`vendor_name`** | TEXT | The vendor name extracted by the AI | Doc Hub list, Detail View |
 | **[date](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/components/at/ProcessingPipeline.tsx#197-206)** | DATE | Invoice Issue Date | Doc Hub (Upload Date / Invoice Date), Detail View |
-| **`due_date`** | DATE | Invoice Payment Due Date | Detail View, AP Monitor |
+| **`due_date`** | DATE | Invoice Payment Due Date | Detail View, Accounts Payable  Monitor |
 | **`amount`** | DECIMAL | The Sub-total extracted | Detail View (Sub-total) |
 | **`gst`** | DECIMAL | The total Tax/GST extracted | Detail View (GST) |
-| **`total`** | DECIMAL | The Grand Total extracted | Detail View (Total), AP Monitor |
+| **`total`** | DECIMAL | The Grand Total extracted | Detail View (Total), Accounts Payable  Monitor |
 | **`status`** | TEXT | Current state: [Processing](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/lib/api.ts#130-138), `Pending Approval`, `Auto-Posted`, `Failed` | Doc Hub "Status" badge, Dashboard KPIs, Detail View actions |
 | **`confidence`** | FLOAT | AI Trust Score / Confidence percentage (0-100) | Doc Hub (Trust Score bar), Detail View |
 | **`processing_time`** | TEXT | How long the backend took (e.g. "12s") | Doc Hub (Processing Time) |
@@ -31,18 +31,18 @@ This is the central table of the application. Every document uploaded creates a 
 ---
 
 ## 2. `vendors`
-Holds the vendor master data. This powers the **AP Monitor** and is cross-referenced when invoices are processed.
+Holds the vendor master data. This powers the **Accounts Payable  Monitor** and is cross-referenced when invoices are processed.
 
 | Database Field | Type | What it is | Where it shows in the UI |
 | :--- | :--- | :--- | :--- |
 | **[id](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/frontend/lib/api.ts#48-57)** | UUID | Unique vendor ID | Used by the backend to join with invoices |
-| **`name`** | TEXT | Vendor display name | AP Monitor (Vendor Name), Detail View |
-| **`gstin`** | TEXT | GST Identification Number | AP Monitor, Detail View |
-| **`oldest_due`** | DATE | The oldest unpaid invoice date | AP Monitor (Oldest due) |
-| **`aging_bucket`** | TEXT | E.g. "0-30", "31-60", "90+" | AP Monitor "Aging" badge |
-| **`status`** | TEXT | Current | At Risk | Overdue | AP Monitor "Vendor Status" |
+| **`name`** | TEXT | Vendor display name | Accounts Payable  Monitor (Vendor Name), Detail View |
+| **`gstin`** | TEXT | GST Identification Number | Accounts Payable  Monitor, Detail View |
+| **`oldest_due`** | DATE | The oldest unpaid invoice date | Accounts Payable  Monitor (Oldest due) |
+| **`aging_bucket`** | TEXT | E.g. "0-30", "31-60", "90+" | Accounts Payable  Monitor "Aging" badge |
+| **`status`** | TEXT | Current | At Risk | Overdue | Accounts Payable  Monitor "Vendor Status" |
 
-*Note: The **`Total Due`** and **`Invoice Count`** shown in the AP Monitor are NOT stored in this table. They are dynamically calculated inside [backend/database/queries.ts](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/backend/database/queries.ts) by summing up all invoices that belong to this vendor.*
+*Note: The **`Total Due`** and **`Invoice Count`** shown in the Accounts Payable  Monitor are NOT stored in this table. They are dynamically calculated inside [backend/database/queries.ts](file:///c:/Users/Admin/Desktop/agent_tally/agent_ai_tally/backend/database/queries.ts) by summing up all invoices that belong to this vendor.*
 
 ---
 

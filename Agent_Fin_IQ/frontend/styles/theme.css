@@ -1,5 +1,10 @@
 @custom-variant dark (&:is(.dark *));
 
+/* Override Tailwind's --font-sans so font-sans class = Plus Jakarta Sans everywhere */
+@theme {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
 :root {
   /* Precision Dark Colors */
   --navy: #0B1623;

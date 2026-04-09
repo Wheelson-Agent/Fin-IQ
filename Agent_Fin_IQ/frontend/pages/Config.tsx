@@ -9,8 +9,15 @@ import {
 } from 'lucide-react';
 import { useEffect } from 'react';
 import { toast } from 'sonner';
+import { PremiumConfirmDialog } from '../components/PremiumConfirmDialog';
 
-/* ─── WhatsApp Icon Component ────────────────────────── */
+const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
+function normalizeGstin(value: any): string {
+    return String(value || '').trim().toUpperCase();
+}
+
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ WhatsApp Icon Component ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 const WhatsAppIcon = ({ size = 20, className = "" }: { size?: number; className?: string }) => (
     <svg
         width={size}
@@ -24,7 +31,7 @@ const WhatsAppIcon = ({ size = 20, className = "" }: { size?: number; className?
     </svg>
 );
 
-/* ─── Premium Toggle Switch ──────────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Premium Toggle Switch ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
     return (
         <motion.button
@@ -47,7 +54,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
     );
 }
 
-/* ─── Premium Radio Pill ─────────────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Premium Radio Pill ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 function RadioPill({
     checked, label, desc, icon, accentColor, onChange, onConfigure, isConfigOpen
 }: { checked: boolean; label: string; desc: string; icon: React.ReactNode; accentColor: string; onChange: () => void; onConfigure?: () => void; isConfigOpen?: boolean }) {
@@ -100,7 +107,7 @@ function RadioPill({
     );
 }
 
-/* ─── MultiSelect Component ────────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MultiSelect Component ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 interface SelectOption { id: string; label: string; }
 function MultiSelect({ options, selectedIds, onToggle, placeholder }: { options: SelectOption[], selectedIds: string[], onToggle: (id: string) => void, placeholder: string }) {
     const [searchTerm, setSearchTerm] = useState('');
@@ -246,7 +253,7 @@ function MultiSelect({ options, selectedIds, onToggle, placeholder }: { options:
     );
 }
 
-/* ─── Source / Report toggle row ─────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Source / Report toggle row ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 function ToggleRow({
     checked, label, desc, icon, onChange, onConfigure, isConfigOpen
 }: { checked: boolean; label: string; desc: string; icon: React.ReactNode; onChange: () => void; onConfigure?: () => void; isConfigOpen?: boolean }) {
@@ -280,7 +287,7 @@ function ToggleRow({
     );
 }
 
-/* ─── Integration Input Field ──────────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Integration Input Field ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 function IntegrationField({
     icon, label, type = "text", value, onChange, placeholder, isSecret, required
 }: { icon: React.ReactNode; label: string; type?: string; value: string; onChange: (e: any) => void; placeholder: string; isSecret?: boolean; required?: boolean }) {
@@ -313,7 +320,7 @@ function IntegrationField({
     );
 }
 
-/* ─── Config Card ────────────────────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Config Card ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 function ConfigCard({
     icon, title, subtitle, accentColor, children, delay = 0
 }: { icon: React.ReactNode; title: string; subtitle: string; accentColor: string; children: React.ReactNode; delay?: number }) {
@@ -343,7 +350,7 @@ function ConfigCard({
     );
 }
 
-/* ─── Main Page ──────────────────────────────────────── */
+/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Main Page ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 export default function Config() {
     const INIT = {
         postingMode: 'manual', /* Changed default to manual */
@@ -365,16 +372,16 @@ export default function Config() {
             filter_supplier_ids: [] as string[]
         },
         sourceConfigs: {
-            email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: '••••••••••••' },
+            email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
             sharepoint: { tenantId: '8a91-4c...', siteUrl: 'https://sigma.sharepoint.com', secret: '' },
-            drive: { folderId: '1B_xyz89k...', serviceAccount: 'agent-w@gcp-project.iam', secret: '••••••••••••' },
+            drive: { folderId: '1B_xyz89k...', serviceAccount: 'agent-w@gcp-project.iam', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
             onedrive: { tenantId: 'bf9a-4c...', folderPath: '/Finance/Invoices', secret: '' },
             whatsapp: { phoneNumber: '', secret: '' },
             local_folder: { folderPath: '' }
         },
         destConfigs: {
             tally: { serverUrl: 'http://localhost:9000', product: 'TallyPrime', version: 'Latest' },
-            zoho: { organizationId: '77891...', domain: '.in', secret: '••••••••••••' },
+            zoho: { organizationId: '77891...', domain: '.in', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
             odoo: { serverUrl: '', secret: '' },
             abap: { serverUrl: '', secret: '' }
         },
@@ -418,7 +425,16 @@ export default function Config() {
     const [companyView, setCompanyView] = useState<'list' | 'add' | 'edit'>('list');
     const [rulesView, setRulesView] = useState<'main' | 'criteria'>('main');
     const [reportsView, setReportsView] = useState<'main' | 'email' | 'whatsapp' | 'teams' | 'sharepoint'>('main');
-    const [showConfirmAction, setShowConfirmAction] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
+    const [showConfirmAction, setShowConfirmAction] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => void | Promise<void>;
+        confirmLabel?: string;
+        tone?: 'danger' | 'accent' | 'success';
+        note?: string;
+        bullets?: string[];
+    } | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ processing: true, amount: false, vendor: false, posting: false, approval: false });
     const [emailInput, setEmailInput] = useState('');
@@ -449,7 +465,7 @@ export default function Config() {
     const [tallyConnectionStatus, setTallyConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [isCreatingCompany, setIsCreatingCompany] = useState(false);
 
-    /* ─── Company Management State ─── */
+    /* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Company Management State ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
     interface CompanyData {
         id: string;
         name: string;
@@ -487,6 +503,9 @@ export default function Config() {
     };
 
     const [companies, setCompanies] = useState<CompanyData[]>([]);
+    const [gstinDrafts, setGstinDrafts] = useState<Record<string, string>>({});
+    const [gstinErrors, setGstinErrors] = useState<Record<string, string | null>>({});
+    const [savingGstinById, setSavingGstinById] = useState<Record<string, boolean>>({});
     const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
     const [lastSyncedAgoStr, setLastSyncedAgoStr] = useState<string>('');
     const [syncError, setSyncError] = useState(false);
@@ -496,7 +515,7 @@ export default function Config() {
     const [loadingConfig, setLoadingConfig] = useState(false);
     const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
-    // Active company — driven by the global CompanyContext (topbar selector)
+    // Active company is driven by the global CompanyContext (topbar selector).
     const { selectedCompany: _ctxCompany, setSelectedCompany: _setCtxCompany } = useCompany();
     const activeCompanyId = _ctxCompany && _ctxCompany !== 'ALL' ? _ctxCompany : null;
     const setActiveCompanyId = (id: string) => _setCtxCompany(id);
@@ -598,6 +617,111 @@ export default function Config() {
         'Uttarakhand', 'West Bengal', 'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Puducherry',
         'Chandigarh', 'Andaman & Nicobar', 'Dadra & Nagar Haveli', 'Daman & Diu', 'Lakshadweep',
     ];
+
+    const getGstinValidationError = (companyId: string, rawValue: string) => {
+        const normalized = normalizeGstin(rawValue);
+
+        if (!normalized) return 'GSTIN is required.';
+        if (!GSTIN_PATTERN.test(normalized)) return 'Enter a valid GSTIN in the correct format.';
+
+        const duplicateCompany = companies.find((company) =>
+            company.id !== companyId && normalizeGstin(company.gstin) === normalized
+        );
+
+        if (duplicateCompany) {
+            return `GSTIN already exists for ${duplicateCompany.name}.`;
+        }
+
+        return null;
+    };
+
+    const handleStartGstinEdit = (companyId: string) => {
+        const company = companies.find((row) => row.id === companyId);
+        if (!company) return;
+
+        setGstinDrafts((prev) => ({ ...prev, [companyId]: normalizeGstin(company.gstin) }));
+        setGstinErrors((prev) => ({ ...prev, [companyId]: null }));
+    };
+
+    const handleCancelGstinEdit = (companyId: string) => {
+        setGstinDrafts((prev) => {
+            const next = { ...prev };
+            delete next[companyId];
+            return next;
+        });
+        setGstinErrors((prev) => {
+            const next = { ...prev };
+            delete next[companyId];
+            return next;
+        });
+    };
+
+    const handleSaveCompanyGstin = async (companyId: string) => {
+        const draftValue = gstinDrafts[companyId] ?? '';
+        const normalized = normalizeGstin(draftValue);
+        const validationMessage = getGstinValidationError(companyId, normalized);
+
+        if (validationMessage) {
+            setGstinErrors((prev) => ({ ...prev, [companyId]: validationMessage }));
+            toast.error(validationMessage);
+            return;
+        }
+
+        setSavingGstinById((prev) => ({ ...prev, [companyId]: true }));
+        setGstinErrors((prev) => ({ ...prev, [companyId]: null }));
+
+        try {
+            // @ts-ignore
+            const updatedCompany = await window.api.invoke('companies:update-gstin', {
+                companyId,
+                gstin: normalized,
+            });
+
+            setCompanies((prev) => prev.map((company) => (
+                company.id === companyId
+                    ? { ...company, ...(updatedCompany || {}), gstin: normalizeGstin(updatedCompany?.gstin || normalized) }
+                    : company
+            )));
+
+            handleCancelGstinEdit(companyId);
+            toast.success('GSTIN saved successfully.');
+        } catch (error: any) {
+            const message = error?.message || 'Failed to save GSTIN.';
+            setGstinErrors((prev) => ({ ...prev, [companyId]: message }));
+            toast.error(message);
+        } finally {
+            setSavingGstinById((prev) => ({ ...prev, [companyId]: false }));
+        }
+    };
+
+    const handleConfirmCompanyGstinSave = (companyId: string) => {
+        const company = companies.find((row) => row.id === companyId);
+        if (!company) return;
+
+        const draftValue = gstinDrafts[companyId] ?? '';
+        const normalized = normalizeGstin(draftValue);
+        const validationMessage = getGstinValidationError(companyId, normalized);
+
+        if (validationMessage) {
+            setGstinErrors((prev) => ({ ...prev, [companyId]: validationMessage }));
+            toast.error(validationMessage);
+            return;
+        }
+
+        setShowConfirmAction({
+            isOpen: true,
+            title: 'Save GSTIN for this company?',
+            message: `The GSTIN for "${company.name}" will be stored and used for company-level validation and downstream processing.`, 
+            confirmLabel: 'Save GSTIN',
+            tone: 'success',
+            bullets: [
+                'Only this company record will be updated.',
+                'The GSTIN must remain unique across all companies in the database.',
+            ],
+            note: 'Please confirm the GSTIN carefully before proceeding.',
+            onConfirm: () => handleSaveCompanyGstin(companyId),
+        });
+    };
 
     const handleAddCompany = () => {
         const id = `comp_${Date.now()}`;
@@ -838,8 +962,7 @@ export default function Config() {
         setCommittedConfig(newConfig);
 
         if (window.api && window.api.invoke) {
-            // REMOVED DESTRUCTIVE WIPING: We now save the user's criteria (Invoice Limit, etc.) 
-            // exactly as they typed them, even if postingMode is 'manual'.
+            // Keep the user's criteria exactly as entered, even in manual mode.
             const effectiveCriteria = criteria;
 
             // Full Configuration Sync (Sources, ERP, Reports, etc.)
@@ -921,7 +1044,7 @@ export default function Config() {
 
     return (
         <div className="font-sans min-h-screen pb-[48px]">
-            {/* ─── Hero Header ─── */}
+            {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Hero Header ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
             <motion.div
                 initial={{ opacity: 0, y: -16 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -945,12 +1068,24 @@ export default function Config() {
                     </div>
                 </div>
 
-                {/* Save button — only visible when there are unsaved changes */}
+                {/* Save button ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â only visible when there are unsaved changes */}
                 <AnimatePresence>
                     {(hasChanges || saved) && (
                         <motion.button
                             key="save-btn"
-                            onClick={handleSave}
+                            onClick={() => setShowConfirmAction({
+                                isOpen: true,
+                                title: 'Save configuration changes?',
+                                message: 'Your current configuration changes will be applied and persisted for this workspace.',
+                                confirmLabel: 'Save Changes',
+                                tone: 'success',
+                                bullets: [
+                                    'Updated posting rules, routing criteria, destinations, and report settings will be stored.',
+                                    'The latest saved configuration becomes the active operating baseline for the product.',
+                                ],
+                                note: 'Please review the current settings once more before proceeding.',
+                                onConfirm: handleSave,
+                            })}
                             disabled={saved || loadingConfig || !activeCompanyId}
                             whileHover={{ scale: activeCompanyId ? 1.04 : 1 }}
                             whileTap={{ scale: activeCompanyId ? 0.97 : 1 }}
@@ -1015,47 +1150,21 @@ export default function Config() {
                 )}
             </AnimatePresence>
 
-            {/* Confirmation Modal */}
-            <AnimatePresence>
-                {showConfirmAction && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="bg-white rounded-[20px] shadow-2xl p-[32px] w-[400px] border border-[#E2E8F0]"
-                        >
-                            <div className="flex items-center gap-[16px] mb-[16px]">
-                                <div className="w-[48px] h-[48px] bg-[#FEF3C7] rounded-full flex items-center justify-center text-[#D97706]">
-                                    <AlertTriangle size={24} />
-                                </div>
-                                <h3 className="text-[18px] font-bold text-[#1A2640] m-0">{showConfirmAction.title}</h3>
-                            </div>
-                            <p className="text-[14px] text-[#64748B] mb-[24px] leading-relaxed">
-                                {showConfirmAction.message}
-                            </p>
-                            <div className="flex gap-[12px]">
-                                <button
-                                    onClick={() => setShowConfirmAction(null)}
-                                    className="flex-1 px-[16px] py-[12px] border border-[#E2E8F0] text-[#64748B] font-bold rounded-[12px] hover:bg-[#F8FAFC] transition-colors cursor-pointer"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        showConfirmAction.onConfirm();
-                                        setShowConfirmAction(null);
-                                    }}
-                                    className="flex-1 px-[16px] py-[12px] bg-[#0F766E] hover:bg-[#115E59] text-white font-bold rounded-[12px] transition-colors cursor-pointer"
-                                    style={{ boxShadow: '0 4px 14px rgba(15, 118, 110, 0.3)' }}
-                                >
-                                    Confirm & Save
-                                </button>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
+            <PremiumConfirmDialog
+                open={!!showConfirmAction}
+                onOpenChange={(open) => { if (!open) setShowConfirmAction(null); }}
+                title={showConfirmAction?.title || 'Confirm action'}
+                description={showConfirmAction?.message || ''}
+                confirmLabel={showConfirmAction?.confirmLabel || 'Proceed'}
+                tone={showConfirmAction?.tone || 'accent'}
+                note={showConfirmAction?.note}
+                bullets={showConfirmAction?.bullets}
+                onConfirm={async () => {
+                    if (!showConfirmAction) return;
+                    await showConfirmAction.onConfirm();
+                    setShowConfirmAction(null);
+                }}
+            />
 
             {/* Sync Results Modal */}
             <AnimatePresence>
@@ -1125,7 +1234,7 @@ export default function Config() {
                 </motion.div>
             )}
 
-            {/* ─── Persistent Top Navigation ─── */}
+            {/* Persistent Top Navigation */}
             <div className="flex border-b border-[#E2E8F0] mb-[24px] overflow-x-auto no-scrollbar relative z-10 bg-white sticky top-0 px-[36px] py-[2px]">
                 {['Company', 'Rules', 'Source', 'ERP', 'Reports', 'Storage'].map((tab) => {
                     const isActive = activeTab === tab;
@@ -1150,7 +1259,7 @@ export default function Config() {
                 })}
             </div>
 
-            {/* ─── Config Contents ─── */}
+            {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Config Contents ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
             <div className="px-[36px]">
                 <AnimatePresence mode="wait">
                     <motion.div
@@ -1163,9 +1272,9 @@ export default function Config() {
                     >
                         {activeTab === 'Company' && (
                             <div className="flex flex-col gap-[20px]">
-                                {/* ═══════════════════════════════════════════════════════ */}
-                                {/* ─── COMPANY LIST VIEW  ── */}
-                                {/* ═══════════════════════════════════════════════════════ */}
+                                {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
+                                {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ COMPANY LIST VIEW  ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+                                {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
                                 {companyView === 'list' && (
                                     <div className="col-span-2">
                                         <ConfigCard icon={<Building2 size={22} />} title="Company configurations" subtitle="Manage companies, statutory details and ERP connectivity" accentColor="#0F766E" delay={0}>
@@ -1199,6 +1308,11 @@ export default function Config() {
                                                 </div>
                                                 {companies.map(c => {
                                                     const isRowActive = activeCompanyId === c.id;
+                                                    const hasGstin = !!normalizeGstin(c.gstin);
+                                                    const isEditingMissingGstin = !hasGstin && Object.prototype.hasOwnProperty.call(gstinDrafts, c.id);
+                                                    const gstinDraftValue = gstinDrafts[c.id] ?? '';
+                                                    const gstinError = gstinErrors[c.id];
+                                                    const isSavingGstin = !!savingGstinById[c.id];
                                                     let hash = 0;
                                                     const avatarName = c.name || (c as any).trade_name || '?';
                                                     for (let i = 0; i < avatarName.length; i++) hash = avatarName.charCodeAt(i) + ((hash << 5) - hash);
@@ -1213,8 +1327,10 @@ export default function Config() {
                                                             className={`flex items-center gap-[14px] p-[14px_18px] rounded-[12px] border transition-all cursor-pointer ${isRowActive ? 'bg-[#F0FDF9] border-[#99F6E4] shadow-sm' : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-[#CBD5E1]'}`}
                                                             onClick={() => handleSetActive(c.id)}
                                                         >
-                                                            <div className="w-[40px] h-[40px] rounded-[10px] flex items-center justify-center shrink-0 text-[14px] font-black text-white shadow-md"
-                                                                style={{ backgroundColor: `hsl(${bgHue}, 70%, 45%)` }}>
+                                                            <div
+                                                                className="w-[40px] h-[40px] rounded-[10px] flex items-center justify-center shrink-0 text-[14px] font-black text-white shadow-md"
+                                                                style={{ backgroundColor: `hsl(${bgHue}, 70%, 45%)` }}
+                                                            >
                                                                 {avatarName.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
                                                             </div>
                                                             <div className="flex-1 min-w-0">
@@ -1224,17 +1340,71 @@ export default function Config() {
                                                                         <span className="bg-[#0F766E] text-white text-[8px] font-black px-[6px] py-[2px] rounded-full uppercase tracking-wider">Active</span>
                                                                     )}
                                                                 </div>
-                                                                <div className="text-[11px] text-[#94A3B8] flex items-center gap-[12px] mt-[2px]">
-                                                                    {'GSTIN: ' + (c.gstin || '—')}
-                                                                    <span>·</span>
-                                                                    <span>{typeLabel}</span>
-                                                                    {c.city && c.state && (
-                                                                        <>
-                                                                            <span>·</span>
-                                                                            <span>{c.city}, {c.state}</span>
-                                                                        </>
-                                                                    )}
-                                                                </div>
+                                                                {isEditingMissingGstin ? (
+                                                                    <div className="mt-[8px] rounded-[12px] border border-[#D9E4F2] bg-white/90 px-[12px] py-[10px] shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
+                                                                        <div className="flex flex-col gap-[8px]">
+                                                                            <div className="flex flex-wrap items-center gap-[8px]">
+                                                                                <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#5B6B84]">GSTIN</span>
+                                                                                <input onClick={(e: any) => e.stopPropagation()}
+                                                                                    onChange={(e: any) => {
+                                                                                        const nextValue = normalizeGstin(e.target.value);
+                                                                                        setGstinDrafts((prev) => ({ ...prev, [c.id]: nextValue }));
+                                                                                        setGstinErrors((prev) => ({
+                                                                                            ...prev,
+                                                                                            [c.id]: getGstinValidationError(c.id, nextValue),
+                                                                                        }));
+                                                                                    }}
+                                                                                    maxLength={15}
+                                                                                    placeholder="Enter 15-character GSTIN"
+                                                                                    className={`h-[36px] min-w-[220px] flex-1 rounded-[10px] border bg-[#F8FAFC] px-[12px] text-[12px] font-semibold tracking-[0.08em] uppercase text-[#1A2640] outline-none transition-colors ${gstinError ? 'border-[#FCA5A5] focus:border-[#EF4444]' : 'border-[#D7E3F4] focus:border-[#1E6FD9]'}`}
+                                                                                />
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={(e) => { e.stopPropagation(); handleConfirmCompanyGstinSave(c.id); }}
+                                                                                    disabled={isSavingGstin}
+                                                                                    className="inline-flex h-[36px] items-center gap-[6px] rounded-[10px] bg-[#0F766E] px-[12px] text-[11px] font-black uppercase tracking-[0.12em] text-white transition-all hover:bg-[#115E59] disabled:cursor-not-allowed disabled:opacity-60"
+                                                                                >
+                                                                                    <Save size={12} />
+                                                                                    {isSavingGstin ? 'Saving...' : 'Save'}
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={(e) => { e.stopPropagation(); handleCancelGstinEdit(c.id); }}
+                                                                                    disabled={isSavingGstin}
+                                                                                    className="inline-flex h-[36px] items-center gap-[6px] rounded-[10px] border border-[#D7E3F4] bg-white px-[12px] text-[11px] font-black uppercase tracking-[0.12em] text-[#5B6B84] transition-all hover:border-[#B9CCE6] hover:text-[#1A2640] disabled:cursor-not-allowed disabled:opacity-60"
+                                                                                >
+                                                                                    <X size={12} />
+                                                                                    Cancel
+                                                                                </button>
+                                                                            </div>
+                                                                            <div className={`text-[10px] ${gstinError ? 'text-[#DC2626]' : 'text-[#64748B]'}`}>
+                                                                                {gstinError || 'Only missing GSTIN can be added here. The value must be unique across all companies.'}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-[11px] text-[#94A3B8] flex items-center gap-[12px] mt-[2px] flex-wrap">
+                                                                        {'GSTIN: ' + (c.gstin || '-')}
+                                                                        {!hasGstin && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={(e) => { e.stopPropagation(); handleStartGstinEdit(c.id); }}
+                                                                                className="inline-flex items-center gap-[5px] rounded-full border border-[#CFE0F5] bg-[#F8FBFF] px-[8px] py-[4px] text-[10px] font-black uppercase tracking-[0.12em] text-[#1E6FD9] transition-all hover:border-[#B6CDED] hover:bg-[#EEF5FF]"
+                                                                            >
+                                                                                <Edit2 size={10} />
+                                                                                Add GSTIN
+                                                                            </button>
+                                                                        )}
+                                                                        <span>&middot;</span>
+                                                                        <span>{typeLabel}</span>
+                                                                        {c.city && c.state && (
+                                                                            <>
+                                                                                <span>&middot;</span>
+                                                                                <span>{c.city}, {c.state}</span>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                             <div className="flex items-center gap-[8px]" onClick={e => e.stopPropagation()}>
                                                                 <button
@@ -1246,7 +1416,7 @@ export default function Config() {
                                                                 </button>
                                                             </div>
                                                         </motion.div>
-                                                    )
+                                                    );
                                                 })}
                                             </div>
 
@@ -1268,9 +1438,9 @@ export default function Config() {
                                     </div>
                                 )}
 
-                                {/* ═══════════════════════════════════════════════════════ */}
-                                {/* ─── COMPANY ADD / EDIT VIEW  ── */}
-                                {/* ═══════════════════════════════════════════════════════ */}
+                                {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
+                                {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ COMPANY ADD / EDIT VIEW  ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+                                {/* ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â */}
                                 {(companyView === 'add' || companyView === 'edit') && (
                                     <div className="col-span-2">
                                         {/* Breadcrumbs */}
@@ -1476,10 +1646,10 @@ export default function Config() {
                                                                     onChange={(e) => setNewCompany(p => ({ ...p, currency: e.target.value }))}
                                                                     className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[#1A2640] cursor-pointer"
                                                                 >
-                                                                    <option value="INR">₹ INR — Indian Rupee</option>
-                                                                    <option value="USD">$ USD — US Dollar</option>
-                                                                    <option value="EUR">€ EUR — Euro</option>
-                                                                    <option value="GBP">£ GBP — British Pound</option>
+                                                                    <option value="INR">INR - Indian Rupee</option>
+                                                                    <option value="USD">USD - US Dollar</option>
+                                                                    <option value="EUR">EUR - Euro</option>
+                                                                    <option value="GBP">GBP - British Pound</option>
                                                                 </select>
                                                             </div>
                                                         </div>
@@ -1599,10 +1769,10 @@ export default function Config() {
                                                                             financialYearStarts: newCompany.fyStart,
                                                                             booksBeginningFrom: newCompany.booksFrom ? newCompany.booksFrom.replace(/-/g, '') : '',
                                                                             baseCurrency: {
-                                                                                'INR': '₹',
+                                                                                'INR': '\u20B9',
                                                                                 'USD': '$',
-                                                                                'EUR': '€',
-                                                                                'GBP': '£'
+                                                                                'EUR': '\u20AC',
+                                                                                'GBP': '\u00A3'
                                                                             }[newCompany.currency as 'INR' | 'USD' | 'EUR' | 'GBP'] || newCompany.currency,
                                                                         }
                                                                     },
@@ -1638,6 +1808,13 @@ export default function Config() {
                                                                     isOpen: true,
                                                                     title: 'Save Changes?',
                                                                     message: `Are you sure you want to save changes for "${newCompany.name}"?`,
+                                                                    confirmLabel: 'Save Company Changes',
+                                                                    tone: 'success',
+                                                                    bullets: [
+                                                                        'The updated company profile and statutory details will replace the current saved values.',
+                                                                        'These changes affect how this company is used across the product.',
+                                                                    ],
+                                                                    note: 'Please confirm the company details carefully before saving.',
                                                                     onConfirm: () => {
                                                                         if (editingCompany) {
                                                                             setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...newCompany as CompanyData, id: editingCompany.id } : c));
@@ -1779,7 +1956,7 @@ export default function Config() {
                                                              <div className="pl-[44px] pr-[12px] animate-in fade-in slide-in-from-top-2 duration-300">
                                                                  <div className="flex items-center gap-[8px] mt-[4px]">
                                                                      <div className="relative flex-1">
-                                                                         <span className="absolute left-[14px] top-1/2 -translate-y-[45%] text-[#64748B] font-bold text-[14px]">{"< ₹"}</span>
+                                                                        <span className="absolute left-[14px] top-1/2 -translate-y-[45%] text-[#64748B] font-bold text-[14px]">{"\u20B9"}</span>
                                                                          <input
                                                                              type="number"
                                                                              value={criteria.valueLimit}
@@ -2035,7 +2212,7 @@ export default function Config() {
                                             {sources.email && (
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Mail size={16} />} label="Monitored Inbox" value={sourceConfigs.email.address} onChange={(e: any) => setSourceConfigs(s => ({ ...s, email: { ...s.email, address: e.target.value } }))} placeholder="finance@company.com" />
-                                                    <IntegrationField icon={<Key size={16} />} label="App Password" value={sourceConfigs.email.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, email: { ...s.email, secret: e.target.value } }))} placeholder="••••••••" isSecret />
+                                                    <IntegrationField icon={<Key size={16} />} label="App Password" value={sourceConfigs.email.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, email: { ...s.email, secret: e.target.value } }))} placeholder="********" isSecret />
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
@@ -2046,7 +2223,7 @@ export default function Config() {
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Folder size={16} />} label="Folder ID" value={sourceConfigs.drive.folderId} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, folderId: e.target.value } }))} placeholder="1B_xyz..." />
                                                     <IntegrationField icon={<UserCheck size={16} />} label="Service Account Email" value={sourceConfigs.drive.serviceAccount} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, serviceAccount: e.target.value } }))} placeholder="agent@project.iam.gserviceaccount.com" />
-                                                    <IntegrationField icon={<Key size={16} />} label="Private Key" value={sourceConfigs.drive.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, secret: e.target.value } }))} placeholder="••••••••" isSecret />
+                                                    <IntegrationField icon={<Key size={16} />} label="Private Key" value={sourceConfigs.drive.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, secret: e.target.value } }))} placeholder="********" isSecret />
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
@@ -2057,7 +2234,7 @@ export default function Config() {
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Hash size={16} />} label="Tenant ID" value={sourceConfigs.sharepoint.tenantId} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, tenantId: e.target.value } }))} placeholder="8a91..." />
                                                     <IntegrationField icon={<Link size={16} />} label="Site URL" value={sourceConfigs.sharepoint.siteUrl} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, siteUrl: e.target.value } }))} placeholder="https://..." />
-                                                    <IntegrationField icon={<Key size={16} />} label="Client Secret" value={sourceConfigs.sharepoint.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, secret: e.target.value } }))} placeholder="••••••••" isSecret />
+                                                    <IntegrationField icon={<Key size={16} />} label="Client Secret" value={sourceConfigs.sharepoint.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, secret: e.target.value } }))} placeholder="********" isSecret />
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
@@ -2068,7 +2245,7 @@ export default function Config() {
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Hash size={16} />} label="Tenant ID" value={sourceConfigs.onedrive.tenantId} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, tenantId: e.target.value } }))} placeholder="bf9a..." />
                                                     <IntegrationField icon={<Folder size={16} />} label="Folder Path" value={sourceConfigs.onedrive.folderPath} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, folderPath: e.target.value } }))} placeholder="/Finance/Invoices" />
-                                                    <IntegrationField icon={<Key size={16} />} label="Client Secret" value={sourceConfigs.onedrive.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, secret: e.target.value } }))} placeholder="••••••••" isSecret />
+                                                    <IntegrationField icon={<Key size={16} />} label="Client Secret" value={sourceConfigs.onedrive.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, secret: e.target.value } }))} placeholder="********" isSecret />
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
@@ -2078,7 +2255,7 @@ export default function Config() {
                                             {sources.whatsapp && (
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Phone size={16} />} label="WhatsApp Business Number" value={sourceConfigs.whatsapp.phoneNumber} onChange={(e: any) => setSourceConfigs(s => ({ ...s, whatsapp: { ...s.whatsapp, phoneNumber: e.target.value } }))} placeholder="+91 ..." />
-                                                    <IntegrationField icon={<Key size={16} />} label="API Key / Token" value={sourceConfigs.whatsapp.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, whatsapp: { ...s.whatsapp, secret: e.target.value } }))} placeholder="••••••••" isSecret />
+                                                    <IntegrationField icon={<Key size={16} />} label="API Key / Token" value={sourceConfigs.whatsapp.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, whatsapp: { ...s.whatsapp, secret: e.target.value } }))} placeholder="********" isSecret />
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
@@ -2589,7 +2766,7 @@ export default function Config() {
                                         ) : (
                                             <div className="grid grid-cols-2 gap-[12px]">
                                                 <IntegrationField icon={<Cloud size={16} />} label="Cloud Bucket / Folder" value="" onChange={() => { }} placeholder="e.g. finance-archives-2024" />
-                                                <IntegrationField icon={<Key size={16} />} label="Access Secret" isSecret value="" onChange={() => { }} placeholder="••••••••" />
+                                                <IntegrationField icon={<Key size={16} />} label="Access Secret" isSecret value="" onChange={() => { }} placeholder="********" />
                                             </div>
                                         )}
                                     </div>
@@ -2600,7 +2777,7 @@ export default function Config() {
                 </AnimatePresence>
             </div>
 
-            {/* ─── Sticky Bottom Save Bar ─────────────────────────────── */}
+            {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Sticky Bottom Save Bar ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
             <AnimatePresence>
                 {(hasChanges || saved) && (
                     <motion.div
@@ -2637,7 +2814,19 @@ export default function Config() {
                                 </button>
                             )}
                             <motion.button
-                                onClick={handleSave}
+                                onClick={() => setShowConfirmAction({
+                                    isOpen: true,
+                                    title: 'Save configuration changes?',
+                                    message: 'Your current configuration changes will be applied and persisted for this workspace.',
+                                    confirmLabel: 'Save Changes',
+                                    tone: 'success',
+                                    bullets: [
+                                        'Updated posting rules, routing criteria, destinations, and report settings will be stored.',
+                                        'The latest saved configuration becomes the active operating baseline for the product.',
+                                    ],
+                                    note: 'Please review the current settings once more before proceeding.',
+                                    onConfirm: handleSave,
+                                })}
                                 whileHover={{ scale: 1.03 }}
                                 whileTap={{ scale: 0.97 }}
                                 animate={{ scale: saved ? [1, 1.06, 1] : 1 }}
@@ -2668,3 +2857,5 @@ export default function Config() {
         </div>
     );
 }
+
+
