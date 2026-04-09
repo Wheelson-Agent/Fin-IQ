@@ -1765,7 +1765,10 @@ export default function DetailView() {
                         <p className="text-[14px] font-bold text-[#b91c1c] leading-tight flex items-center gap-2">
                           Tally Vendor Not Found.
                           {!isFromReceived && (
-                            <button onClick={() => setShowVendorSlideout(true)} className="text-[#ef4444] underline decoration-2 underline-offset-4 hover:text-[#dc2626] transition-colors">
+                            <button onClick={() => {
+                                setShowVendorSlideout(true);
+                                toast.error('Vendor mapping required to proceed.');
+                            }} className="text-[#ef4444] underline decoration-2 underline-offset-4 hover:text-[#dc2626] transition-colors">
                               Create vendor record in ERP
                             </button>
                           )}
@@ -2233,6 +2236,18 @@ export default function DetailView() {
                       toast.error('State is required');
                       return;
                     }
+
+                    // LOCAL DUPLICATE CHECK BEFORE SYNCING WITH TALLY
+                    const duplicateLocally = supplierRecords.find(v => 
+                      v.gstin && v.gstin.trim().toUpperCase() === gstin.trim().toUpperCase()
+                    );
+                    if (duplicateLocally) {
+                      const msg = `Vendor with GSTIN ${gstin} already exists (${duplicateLocally.name}).`;
+                      setVendorSyncError(msg);
+                      toast.error(msg);
+                      return;
+                    }
+
                     const payload = {
                       process: { vendor_creation: true },
                       invoice: {
@@ -2280,7 +2295,9 @@ export default function DetailView() {
                       if (result.success) {
                         setVendorSyncSuccess(result.message || 'Vendor created successfully in Tally');
                       } else {
-                        setVendorSyncError(result.message || 'Vendor sync with ERP failed');
+                        const errorMsg = result.message || 'Vendor sync with ERP failed';
+                        setVendorSyncError(errorMsg);
+                        toast.error(errorMsg);
                       }
                     } catch (err) {
                       const msg = err instanceof Error ? err.message : 'Vendor sync failed';

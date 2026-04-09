@@ -596,7 +596,15 @@ export function registerIpcHandlers() {
      * Save/Create a vendor.
      */
     ipcMain.handle('vendors:save', async (_event, { vendor }) => {
-        return await queries.saveVendor(vendor);
+        try {
+            return await queries.saveVendor(vendor);
+        } catch (err: any) {
+            if (err.message && err.message.includes('ALREADY_EXISTS')) {
+                console.warn('[IPC] Vendor save blocked:', err.message);
+                return { success: false, error: err.message.replace('ALREADY_EXISTS: ', '') };
+            }
+            throw err; // Re-throw other unexpected errors
+        }
     });
 
     /**
@@ -606,13 +614,37 @@ export function registerIpcHandlers() {
     ipcMain.handle('vendors:sync-tally', async (_event, { payload }) => {
         try {
             console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
+            
+            // 1. Get invoice details to identify the company
+            const meta = payload?.invoice?.payload?.meta || {};
+            const invoiceId = typeof meta.invoice_id === 'string' ? meta.invoice_id : '';
+            let companyId: string | null = null;
+            
+            if (invoiceId) {
+                const invoice = await queries.getInvoiceById(invoiceId);
+                companyId = invoice?.company_id || null;
+            }
+
+            // 2. PRE-FLIGHT CHECK: Duplicate GSTIN
+            const gstin = payload?.invoice?.payload?.tax?.gstin;
+            if (gstin && companyId) {
+                const cleanGstin = gstin.trim().toUpperCase();
+                console.log(`[IPC] vendors:sync-tally pre-flight check for GSTIN: ${cleanGstin} in company: ${companyId}`);
+                const existing = await queries.getVendorByGstin(cleanGstin, companyId);
+                if (existing) {
+                    console.warn('[IPC] vendors:sync-tally blocked: local duplicate GSTIN found:', cleanGstin);
+                    return { 
+                        success: false, 
+                        message: `ALREADY_EXISTS: A vendor with GSTIN ${gstin} already exists (${existing.name}).` 
+                    };
+                }
+            }
+
             const result = await n8n.sendVendorCreationToN8n(payload || {});
             console.log('[IPC] vendors:sync-tally result:', result.success, result.message?.slice(0, 80));
 
             if (result.success) {
                 try {
-                    const meta = payload?.invoice?.payload?.meta || {};
-                    const invoiceId = typeof meta.invoice_id === 'string' ? meta.invoice_id : '';
                     const vendorName =
                         payload?.invoice?.payload?.vendorNameAsPerTally ||
                         payload?.invoice?.payload?.vendorName ||
