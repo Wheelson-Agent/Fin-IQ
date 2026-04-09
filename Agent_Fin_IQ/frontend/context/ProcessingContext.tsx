@@ -6,6 +6,7 @@ export interface StartProcessingInput {
     filePaths: string[];
     fileDataArrays: number[][];
     batchName: string;
+    companyId?: string | null;
 }
 
 export interface PipelineData extends StartProcessingInput {

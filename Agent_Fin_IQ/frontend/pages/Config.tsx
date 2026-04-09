@@ -512,9 +512,12 @@ export default function Config() {
     const [isSyncing, setIsSyncing] = useState(false);
     const [pendingSyncData, setPendingSyncData] = useState<{ added: any[], removed: any[], all: any[] } | null>(null);
 
-    // Active company ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â driven by the global CompanyContext (topbar selector)
+    const [loadingConfig, setLoadingConfig] = useState(false);
+    const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+
+    // Active company is driven by the global CompanyContext (topbar selector).
     const { selectedCompany: _ctxCompany, setSelectedCompany: _setCtxCompany } = useCompany();
-    const activeCompanyId: string | null = _ctxCompany !== 'ALL' ? _ctxCompany : null;
+    const activeCompanyId = _ctxCompany && _ctxCompany !== 'ALL' ? _ctxCompany : null;
     const setActiveCompanyId = (id: string) => _setCtxCompany(id);
 
     const companiesRef = React.useRef(companies);
@@ -737,156 +740,116 @@ export default function Config() {
 
     useEffect(() => {
         const loadPaths = async () => {
-            // @ts-ignore
             if (window.api && window.api.invoke) {
-                // Load Storage Config from Database
-                try {
-                    // @ts-ignore
-                    const storageConfig = await window.api.invoke('config:get-storage-path');
-                    if (storageConfig) {
-                        setStorage({
-                            ...INIT.storage,
-                            provider: storageConfig.provider || INIT.storage.provider,
-                            localPath: storageConfig.localPath || INIT.storage.localPath
-                        });
-                        setCommittedConfig(prev => ({
-                            ...prev,
-                            storage: {
-                                ...prev.storage,
-                                provider: storageConfig.provider || INIT.storage.provider,
-                                localPath: storageConfig.localPath || INIT.storage.localPath
-                            }
-                        }));
-                    }
-                } catch (e) { console.error('[Config] Failed to load storage config:', e); }
+                setLoadingConfig(true);
+                
+                // IMPORTANT: RESET TO INIT BEFORE LOADING NEW COMPANY DATA
+                // This ensures that if a company has no saved config, it won't show 
+                // the data from the previously active company.
+                setPostingMode(INIT.postingMode);
+                setSources(INIT.sources);
+                setDestination(INIT.destination);
+                setReports(INIT.reports);
+                setCriteria(INIT.criteria);
+                setSourceConfigs(INIT.sourceConfigs);
+                setDestConfigs(INIT.destConfigs);
+                setReportConfigs(INIT.reportConfigs);
+                setStorage(INIT.storage);
+                setCriteriaExtended(INIT.criteriaExtended);
+                setCommittedConfig(INIT);
 
-                // Load Posting Rules from Database
-                try {
-                    // @ts-ignore
-                    const rules = await window.api.invoke('config:get-rules');
-                    if (rules) {
-                        const loadedMode     = rules.postingMode || INIT.postingMode;
-                        const loadedCriteria = { ...INIT.criteria, ...(rules.criteria || {}) };
-                        const loadedDest     = rules.destination || INIT.destination;
-                        setPostingMode(loadedMode);
-                        setCriteria(loadedCriteria);
-                        setDestination(loadedDest);
-                        // Sync DB values into localStorage so the stale localStorage useEffect
-                        // (which runs in parallel) doesn't overwrite the authoritative DB values.
-                        try {
-                            const cached = localStorage.getItem('agent_w_config');
-                            if (cached) {
-                                const parsed = JSON.parse(cached);
-                                parsed.postingMode = loadedMode;
-                                parsed.criteria    = loadedCriteria;
-                                parsed.destination = loadedDest;
-                                localStorage.setItem('agent_w_config', JSON.stringify(parsed));
-                            }
-                        } catch { /* ignore */ }
-                        setCommittedConfig(prev => ({
-                            ...prev,
-                            postingMode: loadedMode,
-                            criteria: loadedCriteria,
-                            destination: loadedDest
-                        }));
-                    }
-                } catch (e) { console.error('[Config] Failed to load posting rules:', e); }
-
-                // Load Extended Criteria for active company
                 if (activeCompanyId) {
                     try {
-                        const extended = await window.api.invoke('config:get-extended-criteria', { companyId: activeCompanyId });
-                        setCriteriaExtended(extended || INIT.criteriaExtended);
-                    } catch (e) { console.error('[Config] Failed to load extended criteria:', e); }
+                        const fullConfig = await window.api.invoke('config:get-full', { companyId: activeCompanyId });
+                        if (fullConfig) {
+                            if (fullConfig.sources) setSources(fullConfig.sources);
+                            if (fullConfig.destination) setDestination(fullConfig.destination);
+                            if (fullConfig.reports) setReports(fullConfig.reports);
+                            if (fullConfig.sourceConfigs) setSourceConfigs(fullConfig.sourceConfigs);
+                            if (fullConfig.destConfigs) setDestConfigs(fullConfig.destConfigs);
+                            if (fullConfig.reportConfigs) setReportConfigs(fullConfig.reportConfigs);
+
+                            setCommittedConfig(prev => ({
+                                ...prev,
+                                sources: fullConfig.sources || prev.sources,
+                                destination: fullConfig.destination || prev.destination,
+                                reports: fullConfig.reports || prev.reports,
+                                sourceConfigs: fullConfig.sourceConfigs || prev.sourceConfigs,
+                                destConfigs: fullConfig.destConfigs || prev.destConfigs,
+                                reportConfigs: fullConfig.reportConfigs || prev.reportConfigs
+                            }));
+                        }
+                    } catch (e) {
+                        console.error('[Config] Failed to load full config:', e);
+                    }
 
                     try {
-                        const suppliers = await window.api.invoke('vendors:get-all', { companyId: activeCompanyId });
-                        setAllSuppliers(suppliers || []);
-                        // Strip any orphaned vendor IDs (deleted vendors) from the supplier filter
-                        const validSupplierIds = new Set((suppliers || []).map((v: any) => String(v.id)));
-                        setCriteria((prev: any) => {
-                            const cleanIds = (prev.filter_supplier_ids || []).filter((id: string) => validSupplierIds.has(id));
-                            if (cleanIds.length === (prev.filter_supplier_ids || []).length) return prev;
-                            return { ...prev, filter_supplier_ids: cleanIds };
-                        });
-                    } catch (e) { console.error('[Config] Failed to load suppliers:', e); }
+                        const rules = await window.api.invoke('config:get-rules', { companyId: activeCompanyId });
+                        console.log(`[CONFIG:LOAD] companyId=${activeCompanyId} rules found:`, rules ? 'YES' : 'NULL');
+                        if (rules) {
+                            console.log('[CONFIG:LOAD] postingMode=', rules.postingMode, 'enableValueLimit=', rules.criteria?.enableValueLimit, 'valueLimit=', rules.criteria?.valueLimit);
+                            const loadedMode = rules.postingMode || INIT.postingMode;
+                            const loadedCriteria = { ...INIT.criteria, ...(rules.criteria || {}) };
+                            const loadedDest = rules.destination || INIT.destination;
+
+                            setPostingMode(loadedMode);
+                            setCriteria(loadedCriteria);
+                            setDestination(loadedDest);
+
+                            setCommittedConfig(prev => ({
+                                ...prev,
+                                postingMode: loadedMode,
+                                criteria: loadedCriteria,
+                                destination: loadedDest
+                            }));
+                        }
+                    } catch (e) {
+                        console.error('[Config] Failed to load rules:', e);
+                    }
+
+                    try {
+                        const ext = await window.api.invoke('config:get-extended-criteria', { companyId: activeCompanyId });
+                        if (ext) setCriteriaExtended(ext);
+                    } catch (e) {
+                        console.error('[Config] Failed to load criteria-extended:', e);
+                    }
+
+                    try {
+                        const stor = await window.api.invoke('config:get-storage-path', { companyId: activeCompanyId });
+                        if (stor) setStorage(stor);
+                    } catch (e) {
+                        console.error('[Config] Failed to load storage:', e);
+                    }
+
+                    try {
+                        const sups = await window.api.invoke('vendors:get-all', { companyId: activeCompanyId });
+                        setAllSuppliers(sups || []);
+                    } catch (e) {
+                        console.error('[Config] Failed to load suppliers:', e);
+                    }
 
                     try {
                         const items = await window.api.invoke('items:get-all', { companyId: activeCompanyId });
                         setAllItems(items || []);
-                    } catch (e) { console.error('[Config] Failed to load items:', e); }
+                    } catch (e) {
+                        console.error('[Config] Failed to load items:', e);
+                    }
                 } else {
                     setAllSuppliers([]);
                     setAllItems([]);
                 }
-
+                
+                setLoadingConfig(false);
+                setHasLoadedOnce(true);
             }
         };
         loadPaths();
     }, [activeCompanyId]);
 
     useEffect(() => {
-        const savedConfigStr = localStorage.getItem('agent_w_config');
-        if (savedConfigStr) {
-            try {
-                const parsed = JSON.parse(savedConfigStr);
-                const legacyDateRangeCriteria = {
-                    filter_invoice_date_enabled: parsed.criteria?.filter_invoice_date_enabled ?? parsed.criteriaExtended?.filter_invoice_date_enabled ?? INIT.criteria.filter_invoice_date_enabled,
-                    filter_invoice_date_from: parsed.criteria?.filter_invoice_date_from ?? parsed.criteriaExtended?.filter_invoice_date_from ?? INIT.criteria.filter_invoice_date_from,
-                    filter_invoice_date_to: parsed.criteria?.filter_invoice_date_to ?? parsed.criteriaExtended?.filter_invoice_date_to ?? INIT.criteria.filter_invoice_date_to,
-                };
-                const legacySupplierCriteria = {
-                    filter_supplier_enabled: parsed.criteria?.filter_supplier_enabled ?? parsed.criteriaExtended?.filter_supplier_enabled ?? INIT.criteria.filter_supplier_enabled,
-                    filter_supplier_ids: parsed.criteria?.filter_supplier_ids ?? parsed.criteriaExtended?.filter_supplier_ids ?? INIT.criteria.filter_supplier_ids,
-                };
-                const legacyItemCriteria = {
-                    filter_item_enabled: parsed.criteria?.filter_item_enabled ?? parsed.criteriaExtended?.filter_item_enabled ?? INIT.criteria.filter_item_enabled,
-                    filter_item_ids: parsed.criteria?.filter_item_ids ?? parsed.criteriaExtended?.filter_item_ids ?? INIT.criteria.filter_item_ids,
-                };
-                setPostingMode(parsed.postingMode || INIT.postingMode);
-                setSources(parsed.sources || INIT.sources);
-                setDestination(parsed.destination || INIT.destination);
-                setReports(parsed.reports || INIT.reports);
-                setCriteria({ ...INIT.criteria, ...(parsed.criteria || {}), ...legacyDateRangeCriteria, ...legacySupplierCriteria, ...legacyItemCriteria });
-                setSourceConfigs(parsed.sourceConfigs || INIT.sourceConfigs);
-                setDestConfigs(parsed.destConfigs || INIT.destConfigs);
-                setCriteriaExtended(parsed.criteriaExtended || INIT.criteriaExtended);
-
-                // Legacy migration for old reports UI
-                let safeReportConfigs = parsed.reportConfigs || INIT.reportConfigs;
-
-                // Migrate gmail to email if present
-                if (safeReportConfigs.gmail) {
-                    safeReportConfigs.email = safeReportConfigs.gmail;
-                    delete safeReportConfigs.gmail;
-                }
-                if (parsed.reports && parsed.reports.gmail !== undefined) {
-                    parsed.reports.email = parsed.reports.gmail;
-                    delete parsed.reports.gmail;
-                }
-
-                if (safeReportConfigs.email && typeof safeReportConfigs.email.recipients === 'string') {
-                    safeReportConfigs.email.recipients = [safeReportConfigs.email.recipients];
-                }
-                if (safeReportConfigs.email && (!safeReportConfigs.email.summary || typeof safeReportConfigs.email.summary.processing === 'undefined')) {
-                    safeReportConfigs.email.summary = INIT.reportConfigs.email.summary;
-                }
-                if (safeReportConfigs.teams && (!safeReportConfigs.teams.summary || typeof safeReportConfigs.teams.summary.processing === 'undefined')) {
-                    safeReportConfigs.teams.summary = INIT.reportConfigs.teams.summary;
-                }
-                if (safeReportConfigs.sharepoint && (!safeReportConfigs.sharepoint.summary || typeof safeReportConfigs.sharepoint.summary.processing === 'undefined')) {
-                    safeReportConfigs.sharepoint.summary = INIT.reportConfigs.sharepoint.summary;
-                }
-                if (safeReportConfigs.whatsapp && (!safeReportConfigs.whatsapp.summary || typeof safeReportConfigs.whatsapp.summary.processing === 'undefined')) {
-                    safeReportConfigs.whatsapp.summary = INIT.reportConfigs.whatsapp.summary;
-                }
-
-                setReportConfigs(safeReportConfigs);
-                setStorage(parsed.storage || INIT.storage);
-                setCommittedConfig(parsed);
-                // NOTE: companies are now synced live from the DB, not from localStorage
-            } catch (e) { }
-        }
+        // This effect ONLY loads global company metadata. 
+        // Company-specific settings are loaded reactively via activeCompanyId in the useEffect above.
+        fetchCompaniesInfo();
     }, []);
 
     const pickStorageFolder = async () => {
@@ -991,52 +954,65 @@ export default function Config() {
             return;
         }
 
-        const newConfig = { postingMode, sources, destination, reports, criteria, sourceConfigs, destConfigs, reportConfigs, storage, companies, criteriaExtended };
+        const newConfig = {
+            postingMode, sources, destination, reports, criteria,
+            sourceConfigs, destConfigs, reportConfigs, storage,
+            companies, criteriaExtended
+        };
         setCommittedConfig(newConfig);
-        localStorage.setItem('agent_w_config', JSON.stringify(newConfig));
 
-        // @ts-ignore
         if (window.api && window.api.invoke) {
-            // In manual mode criteria have no effect ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clear them in DB so the value
-            // limit rule never fires for existing invoices when mode is manual.
-            const effectiveCriteria = newConfig.postingMode === 'manual'
-                ? {
-                    knownVendor: false,
-                    poMatch: false,
-                    twoWayMatch: false,
-                    enableValueLimit: false,
-                    valueLimit: null,
-                    filter_invoice_date_enabled: false,
-                    filter_invoice_date_from: '',
-                    filter_invoice_date_to: '',
-                    filter_item_enabled: false,
-                    filter_item_ids: [],
-                    filter_supplier_enabled: false,
-                    filter_supplier_ids: []
-                }
-                : newConfig.criteria;
+            // Keep the user's criteria exactly as entered, even in manual mode.
+            const effectiveCriteria = criteria;
 
-            // Storage ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â non-blocking (failure must not prevent rules from saving)
-            try {
-                // @ts-ignore
-                await window.api.invoke('config:set-storage-path', {
-                    provider: storage.provider,
-                    localPath: storage.localPath
-                });
-            } catch (storageErr) {
-                console.error('[Config] config:set-storage-path failed (non-blocking):', storageErr);
+            // Full Configuration Sync (Sources, ERP, Reports, etc.)
+            if (activeCompanyId) {
+                try {
+                    await window.api.invoke('config:save-full', {
+                        config: {
+                            sources: newConfig.sources,
+                            destination: newConfig.destination,
+                            reports: newConfig.reports,
+                            sourceConfigs: newConfig.sourceConfigs,
+                            destConfigs: newConfig.destConfigs,
+                            reportConfigs: newConfig.reportConfigs
+                        },
+                        companyId: activeCompanyId
+                    });
+                } catch (fullErr) {
+                    console.error('[Config] config:save-full failed:', fullErr);
+                }
             }
 
-            // Posting Rules ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â always runs regardless of storage result
+            // Only save company-specific settings if a company is selected
+            if (!activeCompanyId) {
+                toast.error('Please select a specific company before saving.');
+                return;
+            }
+
+            // Storage
+            try {
+                await window.api.invoke('config:set-storage-path', {
+                    config: {
+                        provider: storage.provider,
+                        localPath: storage.localPath
+                    },
+                    companyId: activeCompanyId
+                });
+            } catch (storageErr) {
+                console.error('[Config] config:set-storage-path failed:', storageErr);
+            }
+
+            // Posting Rules
             let rulesSaved = false;
             try {
-                // @ts-ignore
                 await window.api.invoke('config:save-rules', {
                     rules: {
-                        postingMode: newConfig.postingMode,
+                        postingMode,
                         criteria: effectiveCriteria,
-                        destination: newConfig.destination
-                    }
+                        destination
+                    },
+                    companyId: activeCompanyId
                 });
                 rulesSaved = true;
             } catch (rulesErr) {
@@ -1045,19 +1021,16 @@ export default function Config() {
             }
 
             // Extended Criteria
-            if (activeCompanyId) {
-                try {
-                    // @ts-ignore
-                    await window.api.invoke('config:save-extended-criteria', {
-                        criteria: criteriaExtended,
-                        companyId: activeCompanyId
-                    });
-                } catch (extErr) {
-                    console.error('[Config] config:save-extended-criteria failed (non-blocking):', extErr);
-                }
+            try {
+                await window.api.invoke('config:save-extended-criteria', {
+                    criteria: criteriaExtended,
+                    companyId: activeCompanyId
+                });
+            } catch (extErr) {
+                console.error('[Config] config:save-extended-criteria failed:', extErr);
             }
 
-            if (!rulesSaved) return; // don't show "Saved ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“" if the critical save failed
+            if (!rulesSaved) return;
         }
 
         setSaved(true);
@@ -1113,13 +1086,14 @@ export default function Config() {
                                 note: 'Please review the current settings once more before proceeding.',
                                 onConfirm: handleSave,
                             })}
-                            whileHover={{ scale: 1.04 }}
-                            whileTap={{ scale: 0.97 }}
+                            disabled={saved || loadingConfig || !activeCompanyId}
+                            whileHover={{ scale: activeCompanyId ? 1.04 : 1 }}
+                            whileTap={{ scale: activeCompanyId ? 0.97 : 1 }}
                             initial={{ opacity: 0, x: 16 }}
                             animate={{ opacity: 1, x: 0, scale: saved ? [1, 1.08, 1] : 1 }}
                             exit={{ opacity: 0, x: 16 }}
                             transition={{ duration: 0.3 }}
-                            className="relative z-10 flex items-center gap-[8px] text-white font-bold text-[13px] px-[24px] py-[11px] rounded-[12px] border-none cursor-pointer"
+                            className="relative z-10 flex items-center gap-[8px] text-white font-bold text-[13px] px-[24px] py-[11px] rounded-[12px] border-none cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed group shadow-xl"
                             style={{
                                 background: saved ? 'linear-gradient(135deg,#059669,#10B981)' : 'linear-gradient(135deg,#1E6FD9,#7C3AED)',
                                 boxShadow: saved ? '0 6px 24px rgba(5,150,105,0.4)' : '0 6px 24px rgba(30,111,217,0.4)',
@@ -1142,6 +1116,21 @@ export default function Config() {
                     )}
                 </AnimatePresence>
             </motion.div>
+
+            <AnimatePresence>
+                {/* Full-page loading overlay for company switch */}
+                {loadingConfig && (
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-[#0B1623]/60 backdrop-blur-md flex flex-col items-center justify-center pointer-events-none"
+                    >
+                        <RefreshCw className="w-10 h-10 text-white/40 animate-spin mb-4" />
+                        <div className="text-white/60 text-xs font-black uppercase tracking-[4px]">Syncing Context...</div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Validation Error Toast */}
             <AnimatePresence>
@@ -1228,7 +1217,24 @@ export default function Config() {
                 )}
             </AnimatePresence>
 
-            {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Persistent Top Navigation ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+            {/* No Company Selected Warning */}
+            {!activeCompanyId && hasLoadedOnce && (
+                <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="mx-[36px] mb-[24px] p-[20px] rounded-[22px] bg-amber-500/10 border border-amber-500/20 backdrop-blur-md flex items-center gap-[16px]"
+                >
+                    <div className="w-[44px] h-[44px] rounded-[14px] bg-amber-500/20 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="text-amber-500" size={22} />
+                    </div>
+                    <div>
+                        <div className="text-amber-500 font-bold text-[14px] mb-[2px]">Global View Active (Read-Only)</div>
+                        <p className="text-amber-500/70 text-[12px] m-0">You are viewing <b>All Companies</b>. Configuration changes are disabled to prevent accidental global overrides. Please select a specific company (e.g. via the top bar) to modify settings.</p>
+                    </div>
+                </motion.div>
+            )}
+
+            {/* Persistent Top Navigation */}
             <div className="flex border-b border-[#E2E8F0] mb-[24px] overflow-x-auto no-scrollbar relative z-10 bg-white sticky top-0 px-[36px] py-[2px]">
                 {['Company', 'Rules', 'Source', 'ERP', 'Reports', 'Storage'].map((tab) => {
                     const isActive = activeTab === tab;

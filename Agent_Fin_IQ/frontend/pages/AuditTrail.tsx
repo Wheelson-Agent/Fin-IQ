@@ -176,7 +176,7 @@ export default function AuditTrail() {
       const result = await getAuditLogs({
         page: p, pageSize: ps,
         eventType: type !== 'All' ? type : undefined,
-        companyId: companyId !== 'ALL' ? companyId : undefined,
+        companyId: (companyId && companyId !== 'ALL') ? companyId : undefined,
         ...dateRange,
       });
       setEvents(result.rows);
@@ -465,17 +465,29 @@ export default function AuditTrail() {
                                 <span className="text-slate-200 text-[10px]">·</span>
                                 <span className="text-[11px] text-slate-400 truncate">{event.vendor_name || '—'}</span>
                               </div>
-                              {/* Description */}
-                              <p className="text-[12px] text-slate-600 leading-relaxed mb-2">{event.description}</p>
-                              {/* Meta inline — no chip wrapper */}
-                              <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
-                                <Clock size={9} className="shrink-0 text-slate-300" />
-                                <span className="font-mono">{formatTimestamp(event.timestamp)}</span>
-                                <span className="text-slate-200">·</span>
-                                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#3B82F6] to-[#6366F1] flex items-center justify-center text-white text-[9px] font-black shrink-0">
-                                  {(event.user_name || 'S').charAt(0)}
+                              <div className="text-[13px] text-[#334155] leading-relaxed mb-[10px]">{event.description}</div>
+                              <div className="flex items-center gap-[12px] bg-[#F8FAFC] w-fit px-[10px] py-[4px] rounded-md border border-[#F1F5F9]">
+                                <div className="flex items-center gap-[6px]">
+                                  <Clock size={12} className="text-[#94A3B8]" />
+                                  <span className="text-[11px] font-semibold text-[#64748B] font-mono tracking-tight">{formatTimestamp(event.timestamp)}</span>
                                 </div>
-                                <span className="font-semibold text-slate-500">{event.user_name}</span>
+                                {(event as any).company_name && (
+                                  <>
+                                    <span className="text-[#CBD5E1]">•</span>
+                                    <div className="flex items-center gap-[6px]">
+                                      <span className="text-[10px] font-bold text-[#8899AA] uppercase tracking-tight bg-white px-1.5 py-0.5 rounded border border-[#D0D9E8]">
+                                        {(event as any).company_name}
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
+                                <span className="text-[#CBD5E1]">•</span>
+                                <div className="flex items-center gap-[6px]">
+                                  <div className="w-[16px] h-[16px] rounded-full bg-[#1E6FD9] text-white flex items-center justify-center text-[9px] font-bold">
+                                    {(event.user_name || 'S').charAt(0)}
+                                  </div>
+                                  <span className="text-[11px] font-bold text-[#1E6FD9]">{event.user_name}</span>
+                                </div>
                               </div>
                             </div>
                             {hasDiff && (

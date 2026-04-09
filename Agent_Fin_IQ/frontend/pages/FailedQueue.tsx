@@ -7,6 +7,7 @@ import { RevalidationIcon } from '../components/at/RevalidationIcon';
 
 import { getInvoices } from '../lib/api';
 import type { Invoice } from '../lib/types';
+import { useCompany } from '../context/CompanyContext';
 
 const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
@@ -14,6 +15,7 @@ type SortField = 'vendor' | 'date' | 'amount' | 'failureCategory' | null;
 type SortDir = 'asc' | 'desc';
 
 export default function FailedQueue() {
+    const { selectedCompany } = useCompany();
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
     const [searchQuery, setSearchQuery] = useState('');
@@ -22,8 +24,8 @@ export default function FailedQueue() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        getInvoices().then(data => setInvoices(data || [])).catch(err => console.error('[FailedQueue] Failed:', err));
-    }, []);
+        getInvoices(selectedCompany).then(data => setInvoices(data || [])).catch(err => console.error('[FailedQueue] Failed:', err));
+    }, [selectedCompany]);
 
     // Filter only failed documents
     const failedInvoices = invoices.filter(inv => inv.status === 'Failed');

@@ -45,6 +45,7 @@ export interface ProcessingPipelineProps {
     onDismiss?: () => void;
     uploaderName?: string;
     onConfirmedCountChange?: (count: number) => void;
+    companyId?: string | null;
 }
 
 /**
@@ -303,7 +304,8 @@ export function ProcessingPipeline({
     logs: externalLogs,
     onLogsChange,
     confirmedCount: externalConfirmedCount,
-    onConfirmedCountChange
+    onConfirmedCountChange,
+    companyId
 }: ProcessingPipelineProps) {
     const STAGES_INIT: PipelineStage[] = [
         { id: 'uploading', label: 'Uploaded', sublabel: isBatch ? `Transferring ${fileNames.length} files...` : 'File secured', icon: <Upload size={28} />, status: 'active' },
@@ -506,11 +508,19 @@ export function ProcessingPipeline({
                 const uploadedData = await runWithConcurrency(filePaths, concurrencyPlan.upload, async (fp, i) => {
                     const name = fileNames[i] || `file_${i}`;
                     setActiveFileName(name);
-                    const fileData = fileDataArrays?.[i];
                     
                     try {
-                        // @ts-ignore - added uploaderName last
-                        const res = await uploadInvoice(fp, name, batchName, fileData, uploaderName);
+                        const fileData = (fileDataArrays && fileDataArrays[i]) ? new Uint8Array(fileDataArrays[i]) : undefined;
+                
+                        // Pass companyId from props to ensure visibility in filtered view
+                        const res = await uploadInvoice(
+                            fp, 
+                            name, 
+                            batchName, 
+                            fileData, 
+                            uploaderName, 
+                            companyId ?? undefined
+                        );
                         if (res && res.id) {
                             setConfirmedCount(prev => prev + 1);
                         }
