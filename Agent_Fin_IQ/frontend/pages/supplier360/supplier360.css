@@ -2,7 +2,7 @@
    SUPPLIER 360 — SCOPED CSS
    Self-contained styles. No global pollution.
    Uses .s360 namespace to prevent collisions.
-   Font: Sora — matches the rest of the app (loaded globally).
+   Font: Plus Jakarta Sans — matches the rest of the app (loaded globally).
    ============================================================ */
 
 /* ─── Root vars (scoped to .s360-root) ─────────────────────── */

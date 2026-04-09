@@ -25,7 +25,7 @@ graph TD
 
     subgraph "Frontend (React + Electron)"
         Dashboard["Dashboard Metrics"]
-        APW["AP Workspace (Tabs)"]
+        APW["Accounts Payable  Workspace (Tabs)"]
         DV["Detail View (Correction)"]
         AT["Audit Trail"]
     end
@@ -87,7 +87,7 @@ sequenceDiagram
 
 ## 4. Page-wise / Module-wise Detailed Status
 
-### Page/Module Name: AP Workspace (Document Hub)
+### Page/Module Name: Accounts Payable  Workspace (Document Hub)
 #### Purpose
 Central hub for managing the invoice lifecycle, categorized by processing status (Handoff, Review, Ready to Post, Posted).
 
@@ -199,7 +199,7 @@ Synchronizes invoice data with local Tally Prime instances and fetches Purchase 
 ## 6. Cross-Module Dependency Drawing
 ```mermaid
 graph LR
-    Main["main.tsx (Router)"] --> APW["AP Workspace"]
+    Main["main.tsx (Router)"] --> APW["Accounts Payable  Workspace"]
     Main --> DV["Detail View"]
     APW --> IPC["ipc.ts (Backend)"]
     DV --> API["api.ts (FE Library)"]
@@ -246,7 +246,7 @@ The system uses a highly structured approach to data. Using `JSONB` for raw payl
 ## 10. Final Status Matrix
 | Page / Module | Frontend Status | Backend Status | Data Handling Status | Overall Status | Key Gap | Priority |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **AP Workspace** | Done | Done | Strong | **Done** | Tab desync/refresh | High |
+| **Accounts Payable  Workspace** | Done | Done | Strong | **Done** | Tab desync/refresh | High |
 | **Detail View** | Done | Done | Moderate | **Done** | Keyboard shortcuts | High |
 | **OCR Pipeline** | In Progress | Done | Moderate | **Partial** | 403 Permission Help | High |
 | **Tally Sync** | Done | Done | Strong | **Done** | Log Visibility | Medium |
@@ -272,8 +272,8 @@ The IPC bridge and PostgreSQL schema are stable. The `ingestN8nData` function pr
 ### C. Top 10 Immediate Action Items
 1.  Verify GCP Role: Assign "Document AI Viewer" to avoid 403 errors.
 2.  Add "Re-run OCR" button to the UI for failed records.
-3.  Implement "Auto-refresh" on tab changes in AP Workspace.
-4.  Standardize Loading Skeletons for AP Workspace tabs.
+3.  Implement "Auto-refresh" on tab changes in Accounts Payable  Workspace.
+4.  Standardize Loading Skeletons for Accounts Payable  Workspace tabs.
 5.  Bundle `tally-bridge` startup with Electron main process.
 6.  Add Field-level regex validation for GSTIN in Detail View.
 7.  Implement bulk status updates (e.g., delete all Failed).

@@ -6,7 +6,7 @@ const features = [
     {
         icon: <BarChart3 size={20} />,
         title: 'Automated Monthly Reports',
-        desc: 'Auto-generate GST, AP aging, and payment summary reports every month with one click.',
+        desc: 'Auto-generate GST, Accounts Payable  aging, and payment summary reports every month with one click.',
     },
     {
         icon: <TrendingUp size={20} />,
@@ -36,7 +36,7 @@ const features = [
 ];
 
 const previewRows = [
-    { col1: 'Monthly AP Summary', col2: 'February 2025', col3: '₹28,47,392', col4: 'Ready' },
+    { col1: 'Monthly Accounts Payable  Summary', col2: 'February 2025', col3: '₹28,47,392', col4: 'Ready' },
     { col1: 'GST Input Credit', col2: 'Q3 FY2025', col3: '₹4,92,110', col4: 'Ready' },
     { col1: 'Vendor Aging Report', col2: 'As of today', col3: '8 vendors', col4: 'Ready' },
     { col1: 'Cash Flow Forecast', col2: 'Next 30 days', col3: '₹12,00,000', col4: 'Predicted' },
@@ -47,7 +47,7 @@ export default function Reports() {
     return (
         <LockedFeaturePage
             featureName="Reports & Analytics"
-            tagline="Unlock powerful financial reporting, spending insights, and automated delivery — tailored for your agent_w-powered AP workflow."
+            tagline="Unlock powerful financial reporting, spending insights, and automated delivery — tailored for your agent_w-powered Accounts Payable  workflow."
             features={features}
             previewRows={previewRows}
             accentColor="#1E6FD9"

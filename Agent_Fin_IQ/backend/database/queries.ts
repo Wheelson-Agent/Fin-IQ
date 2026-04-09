@@ -489,6 +489,8 @@ function normalizeGstin(value: any): string {
     return String(value || '').trim().toUpperCase();
 }
 
+const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
 function normalizeItemText(value: any): string {
     return String(value || '')
         .toLowerCase()
@@ -739,7 +741,7 @@ function dedupeRawPayloadAliases(payload: any, sourceKeys: string[] = []) {
 
 
 // ─────────────────────────────────────────────────────────────
-// AP INVOICES
+// Accounts Payable  INVOICES
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -1368,6 +1370,64 @@ export async function getSyncedCompanies() {
         console.error('[QUERIES] getSyncedCompanies failed:', err.message);
         throw err;
     }
+}
+
+export async function updateCompanyGstin(companyId: string, gstin: string) {
+    const normalizedCompanyId = String(companyId || '').trim();
+    const normalizedGstin = normalizeGstin(gstin);
+
+    if (!normalizedCompanyId) {
+        throw new Error('Company ID is required');
+    }
+
+    if (!normalizedGstin) {
+        throw new Error('GSTIN is required');
+    }
+
+    if (!GSTIN_PATTERN.test(normalizedGstin)) {
+        throw new Error('Enter a valid GSTIN in the correct format');
+    }
+
+    const currentRes = await query(
+        `SELECT id, name, gstin
+           FROM companies
+          WHERE id = $1
+          LIMIT 1`,
+        [normalizedCompanyId]
+    );
+
+    const currentCompany = currentRes.rows[0];
+
+    if (!currentCompany) {
+        throw new Error('Company not found');
+    }
+
+    if (normalizeGstin(currentCompany.gstin)) {
+        throw new Error('GSTIN is already set for this company');
+    }
+
+    const duplicateRes = await query(
+        `SELECT id, name
+           FROM companies
+          WHERE id <> $1
+            AND UPPER(TRIM(COALESCE(gstin, ''))) = $2
+          LIMIT 1`,
+        [normalizedCompanyId, normalizedGstin]
+    );
+
+    if (duplicateRes.rows[0]) {
+        throw new Error(`GSTIN already exists for ${duplicateRes.rows[0].name}`);
+    }
+
+    const updateRes = await query(
+        `UPDATE companies
+            SET gstin = $2
+          WHERE id = $1
+        RETURNING *`,
+        [normalizedCompanyId, normalizedGstin]
+    );
+
+    return updateRes.rows[0] || null;
 }
 
 
@@ -2810,7 +2870,7 @@ export async function getDashboardMetrics(companyId?: string) {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Aggregate Tally sync stats for the AP dashboard TallySyncWidget.
+ * Aggregate Tally sync stats for the Accounts Payable dashboard TallySyncWidget.
  *
  * posted   — invoices with erp_sync_id set (confirmed Tally receipt)
  * pending  — invoices in 'Ready to Post' waiting for Tally push
@@ -2967,7 +3027,7 @@ export async function getTallySyncStats(companyId?: string) {
         }
     }
 
-    // handoff: failed validation — matches AP tab Handoff tab logic
+    // handoff: failed validation — matches Accounts Payable  tab Handoff tab logic
     // recent 5 Tally sync events joined with invoice for vendor + amount
     const recentParams = hasCompany ? [companyId] : [];
     const recentWhere  = hasCompany ? 'AND tsl.company_id = $1' : '';

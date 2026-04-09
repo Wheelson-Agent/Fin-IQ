@@ -14,7 +14,7 @@ interface SidebarProps {
 
 const navItemsMain = [
   { id: 'dashboard', label: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { id: 'ap-workspace', label: 'AP Workspace', path: '/ap-workspace', icon: CreditCard },
+  { id: 'ap-workspace', label: 'Accounts Payable  Workspace', path: '/ap-workspace', icon: CreditCard },
   { id: 'audit', label: 'Audit Trail', path: '/audit', icon: ClipboardList },
   { id: 'agent', label: 'Ask agent_w', path: '/agent', icon: Sparkles, isAI: true, badge: 'AI', badgeColor: 'bg-[#6366F1]' },
 ];

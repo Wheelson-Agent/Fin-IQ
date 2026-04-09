@@ -32,7 +32,7 @@ const lineColor = (s: PipelineStage) => {
 function getStatusText(stages: PipelineStage[] | null, confirmedUploads: number, total: number): string {
   if (!stages) return 'Starting…';
   if (stages[3]?.status === 'done')  return `${total} file${total !== 1 ? 's' : ''} processed`;
-  if (stages.some(s => s.status === 'error')) return 'Processing stopped — check AP Workspace';
+  if (stages.some(s => s.status === 'error')) return 'Processing stopped — check Accounts Payable  Workspace';
   if (stages[2]?.status === 'active') return 'Running AI analysis…';
   if (stages[1]?.status === 'active') return `Extracting data · ${confirmedUploads}/${total} file${total !== 1 ? 's' : ''}`;
   if (stages[0]?.status === 'active') return `Uploading · ${confirmedUploads}/${total} file${total !== 1 ? 's' : ''}`;
@@ -66,7 +66,7 @@ function PipelineOverlay() {
   // Toast once on completion while away
   useEffect(() => {
     if (allDone && !isOnAPWorkspace && isProcessing) {
-      toast.success('Processing complete — files are ready in AP Workspace.', {
+      toast.success('Processing complete — files are ready in Accounts Payable  Workspace.', {
         duration: 5000,
         id: `proc-done-${pipelineData.batchName}`,
       });
@@ -161,7 +161,7 @@ function PipelineOverlay() {
                   onClick={() => { clearProcessing(); navigate('/ap-workspace'); }}
                   className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 hover:text-blue-700 transition-colors"
                 >
-                  View in AP Workspace <ArrowRight size={11} />
+                  View in Accounts Payable  Workspace <ArrowRight size={11} />
                 </button>
               </div>
             )}
@@ -198,7 +198,7 @@ function AppShell() {
 
   const getPageTitle = (path: string) => {
     if (path === '/') return 'Dashboard';
-    if (path.startsWith('/ap-workspace')) return 'AP Workspace';
+    if (path.startsWith('/ap-workspace')) return 'Accounts Payable  Workspace';
     if (path.startsWith('/detail')) return 'Supplier Reference';
     if (path.startsWith('/audit')) return 'Audit Trail';
     if (path.startsWith('/vendors')) return 'Vendor Master';
@@ -247,7 +247,7 @@ function AppShell() {
       <FloatingAgent />
       <Toaster position="top-center" richColors />
 
-      {/* Floating processing panel — visible on any route except AP Workspace */}
+      {/* Floating processing panel — visible on any route except Accounts Payable  Workspace */}
       <PipelineOverlay />
     </div>
   );

@@ -97,8 +97,8 @@ Entities from whom the company purchases goods/services.
 - **Relates to Companies**: Each vendor belongs to a specific company.
 - **Relates to Invoices/POs**: Vendors are the source of `ap_invoices` and `purchase_orders`.
 
-### 3. AP Invoices (`ap_invoices`)
-The central transaction table in the AP Workspace.
+### 3. Accounts Payable  Invoices (`ap_invoices`)
+The central transaction table in the Accounts Payable  Workspace.
 - **Relates to Vendors**: Identifies who issued the invoice.
 - **Relates to POs**: Optional link to a `purchase_order_id` for 2-way/3-way matching.
 - **Relates to Ledgers**: Optional direct link to a `ledger_id` for expense booking.

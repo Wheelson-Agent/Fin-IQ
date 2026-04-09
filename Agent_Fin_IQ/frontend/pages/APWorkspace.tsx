@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popove
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../components/ui/sheet';
@@ -30,6 +31,7 @@ import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, 
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
+import { PremiumConfirmDialog } from '../components/PremiumConfirmDialog';
 
 // --- Types ---
 type RecordStatus = 'received' | 'ready' | 'input' | 'handoff' | 'posted' | 'processing';
@@ -115,6 +117,18 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
+const getStatusSupportText = (record: APRecord) => {
+  if (record.reason?.trim()) return record.reason.trim();
+  switch (record.status) {
+    case 'ready':   return 'Ready for approval and posting';
+    case 'input':   return 'Additional information required';
+    case 'handoff': return 'Escalated for manual intervention';
+    case 'posted':  return 'Posted to ERP successfully';
+    case 'received':
+    default:        return 'Freshly captured and queued';
+  }
+};
+
 const formatDateRangeLabel = (value: string) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
@@ -190,8 +204,6 @@ function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, s
   supplierFilterConfig: { enabled: boolean; blockedGstins: string[] } | null;
   itemFilterConfig: { enabled: boolean; blockedItemNames: string[] } | null;
 }) {
-  if (record.status === 'posted') return <span className="text-slate-300 text-[11px] select-none">-</span>;
-
   const flags: { icon: React.ReactNode; label: string; title: string; className: string; iconWrapClassName: string; iconClassName: string; textClassName: string }[] = [];
 
   if (record.isHighAmount && valueLimitConfig?.enabled) {
@@ -248,16 +260,22 @@ function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, s
     });
   }
 
-  if (flags.length === 0) return <span className="text-slate-300 text-[11px] select-none">-</span>;
+  if (flags.length === 0) {
+    return (
+      <div className="inline-flex items-center rounded-full border border-slate-200 bg-[linear-gradient(135deg,#FFFFFF,#F8FAFC)] px-2.5 py-1 shadow-[0_6px_16px_rgba(15,23,42,0.05)]">
+        <span className="text-[10px] font-semibold text-slate-400">No routing</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {flags.map((flag, i) => (
-        <div key={i} className={`flex items-center gap-1.5 w-fit border rounded-full px-2 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.05)] ${flag.className}`} title={flag.title}>
-          <span className={`flex h-4 w-4 items-center justify-center rounded-full ${flag.iconWrapClassName}`}>
+        <div key={i} className={`group flex items-center gap-2 w-fit border rounded-full px-2.5 py-1.5 shadow-[0_8px_20px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] ${flag.className}`} title={flag.title}>
+          <span className={`flex h-5 w-5 items-center justify-center rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${flag.iconWrapClassName}`}>
             <span className={flag.iconClassName}>{flag.icon}</span>
           </span>
-          <span className={`text-[9px] font-semibold tracking-[0.02em] leading-none whitespace-nowrap ${flag.textClassName}`}>{flag.label}</span>
+          <span className={`text-[10px] font-semibold tracking-[0.04em] leading-none whitespace-nowrap ${flag.textClassName}`}>{flag.label}</span>
         </div>
       ))}
     </div>
@@ -269,7 +287,7 @@ const TABLE_TABS: TableTab[] = ['received', 'ready', 'input', 'handoff', 'posted
 const TAB_LABELS: Record<TableTab, string> = {
   received: 'Received',
   ready: 'For Review',
-  input: 'Awaiting Input',
+  input: 'Awaiting User Input',
   handoff: 'Handoff',
   posted: 'Posted',
 };
@@ -277,7 +295,7 @@ const TAB_LABELS: Record<TableTab, string> = {
 const STATUS_FILTER_OPTIONS: { value: RecordStatus; label: string }[] = [
   { value: 'received', label: 'Received' },
   { value: 'ready', label: 'For Review' },
-  { value: 'input', label: 'Awaiting Input' },
+  { value: 'input', label: 'Awaiting User Input' },
   { value: 'handoff', label: 'Handoff' },
   { value: 'posted', label: 'Posted' },
   { value: 'processing', label: 'Processing' },
@@ -326,6 +344,15 @@ export default function APWorkspace() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmDialog, setConfirmDialog] = useState<null | {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    note?: string;
+    bullets?: string[];
+    tone?: 'danger' | 'accent' | 'success';
+    onConfirm: () => void | Promise<void>;
+  }>(null);
   const [tabFilters, setTabFilters] = useState<Record<string, string>>({
     received: '',
     ready: '',
@@ -840,21 +867,34 @@ export default function APWorkspace() {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this invoice permanently? This will remove all associated line items and tax data.')) return;
-
-    try {
-      const res = await deleteInvoice(id);
-      if (res.success) {
-        setRecords(records.filter(r => r.id !== id));
-        setSelectedIds(prev => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
+    setConfirmDialog({
+      title: 'Delete this invoice?',
+      description: 'This invoice will be removed from the workspace along with its associated line items, tax breakdown, and review context.',
+      confirmLabel: 'Delete Invoice',
+      tone: 'danger',
+      bullets: [
+        'The invoice will no longer appear in Accounts Payable  Workspace.',
+        'Linked line-item and tax review data for this record will be removed.',
+      ],
+      note: 'Use this only when the document should be permanently removed from the current workflow.',
+      onConfirm: async () => {
+        try {
+          const res = await deleteInvoice(id);
+          if (res.success) {
+            setRecords(prev => prev.filter(r => r.id !== id));
+            setSelectedIds(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+          }
+        } catch (err) {
+          console.error("Failed to delete invoice", err);
+        } finally {
+          setConfirmDialog(null);
+        }
       }
-    } catch (err) {
-      console.error("Failed to delete invoice", err);
-    }
+    });
   };
 
   const handleBulkRevalidate = async () => {
@@ -881,22 +921,34 @@ export default function APWorkspace() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
 
-    if (window.confirm(`Are you sure you want to delete ${ids.length} selected invoices?`)) {
-      setLoading(true);
-      try {
-        for (const id of ids) {
-          await deleteInvoice(id);
+    setConfirmDialog({
+      title: `Delete ${ids.length} selected invoice${ids.length > 1 ? 's' : ''}?`,
+      description: 'The selected invoices will be permanently removed from the workspace in one action.',
+      confirmLabel: `Delete ${ids.length} Invoice${ids.length > 1 ? 's' : ''}`,
+      tone: 'danger',
+      bullets: [
+        'This removes each selected invoice from the current Accounts Payable  workflow.',
+        'Associated review context and extracted invoice details will also be removed.',
+      ],
+      note: 'Please confirm only if these records should not remain in the system.',
+      onConfirm: async () => {
+        setLoading(true);
+        try {
+          for (const id of ids) {
+            await deleteInvoice(id);
+          }
+          toast.success(`${ids.length} invoices deleted`);
+          setSelectedIds(new Set());
+          fetchData(true);
+        } catch (err) {
+          console.error('Bulk delete failed:', err);
+          toast.error('Failed to delete some invoices');
+        } finally {
+          setLoading(false);
+          setConfirmDialog(null);
         }
-        toast.success(`${ids.length} invoices deleted`);
-        setSelectedIds(new Set());
-        fetchData(true);
-      } catch (err) {
-        console.error('Bulk delete failed:', err);
-        toast.error('Failed to delete some invoices');
-      } finally {
-        setLoading(false);
       }
-    }
+    });
   };
 
   const handleApproveSelected = async () => {
@@ -1201,27 +1253,31 @@ export default function APWorkspace() {
     if (total === 0) return null;
 
     return (
-      <div className="flex items-center justify-between px-6 py-3 border-t border-slate-100 bg-slate-50/20">
+      <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(246,249,255,0.98))]">
         <div className="text-xs text-slate-500 font-medium">
-          Showing <span className="text-slate-900">{start}-{end}</span> of <span className="text-slate-900">{total}</span> documents
+          Showing <span className="text-slate-900 font-semibold">{start}-{end}</span> of <span className="text-slate-900 font-semibold">{total}</span> documents
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            className="h-8 px-2 bg-white"
+            className="h-10 px-4 rounded-xl border-slate-200 bg-white text-slate-600 font-medium hover:bg-slate-50 disabled:opacity-40"
             disabled={page === 1}
             onClick={() => setCurrentPage({ ...currentPage, [tab]: page - 1 })}
           >
             Previous
           </Button>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 rounded-2xl bg-slate-100/70 px-1.5 py-1">
             {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
               <Button
                 key={p}
-                variant={page === p ? "default" : "outline"}
+                variant={page === p ? "default" : "ghost"}
                 size="sm"
-                className={`h-8 w-8 p-0 ${page === p ? "bg-primary text-white" : "bg-white text-slate-600"}`}
+                className={`h-8 w-8 p-0 rounded-xl text-[12px] font-semibold transition-all ${
+                  page === p
+                    ? 'bg-[linear-gradient(135deg,#3B82F6,#6366F1)] text-white shadow-sm border-0'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-white bg-transparent'
+                }`}
                 onClick={() => setCurrentPage({ ...currentPage, [tab]: p })}
               >
                 {p}
@@ -1231,7 +1287,7 @@ export default function APWorkspace() {
           <Button
             variant="outline"
             size="sm"
-            className="h-8 px-2 bg-white"
+            className="h-10 px-4 rounded-xl border-slate-200 bg-white text-slate-600 font-medium hover:bg-slate-50 disabled:opacity-40"
             disabled={page === totalPages}
             onClick={() => setCurrentPage({ ...currentPage, [tab]: page + 1 })}
           >
@@ -1434,21 +1490,230 @@ export default function APWorkspace() {
   const renderFilterTrigger = (tab: TableTab) => {
     const activeCount = getActiveFilterChips(tab).length;
     return (
-      <Button
+      <button
         type="button"
-        variant="outline"
-        size="sm"
-        className="relative h-9 gap-2 border-slate-200 bg-white hover:bg-slate-50"
         onClick={() => setFilterPanelTab(tab)}
+        className={`relative inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold transition-all duration-150 ${
+          activeCount > 0
+            ? 'border-blue-300 bg-[linear-gradient(135deg,#EFF6FF,#E8F0FE)] text-blue-700 shadow-[0_2px_8px_rgba(37,99,235,0.12)]'
+            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 shadow-[0_2px_8px_rgba(15,23,42,0.04)]'
+        }`}
       >
-        <Filter className="h-4 w-4 text-slate-500" />
-        <span className="font-semibold text-slate-700">Filters</span>
+        <Filter className={`h-3 w-3 ${activeCount > 0 ? 'text-blue-600' : 'text-slate-400'}`} />
+        <span>Filters</span>
         {activeCount > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-black text-white shadow-sm">
+          <span className="ml-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-black text-white">
             {activeCount}
           </span>
         )}
-      </Button>
+      </button>
+    );
+  };
+
+  const renderTabToolbar = (
+    tab: TableTab,
+    placeholder: string,
+    bulkActions?: React.ReactNode,
+  ) => {
+    const visibleCount = getVisibleTabRecords(tab).length;
+    const totalCount = statusMatchedRecordsByTab[tab].length;
+    const isFiltered = visibleCount !== totalCount || !!tabFilters[tab];
+    return (
+      <div className="sticky top-0 z-30 px-5 py-2.5 border-b border-slate-100 bg-white/98 flex items-center gap-3 backdrop-blur-sm shadow-[0_1px_0_rgba(226,232,240,0.6),0_4px_16px_rgba(15,23,42,0.03)]">
+        {/* Search */}
+        <div className="relative flex-1 max-w-[280px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-300 pointer-events-none" />
+          <Input
+            placeholder={placeholder}
+            className="pl-9 pr-7 h-8 bg-slate-50 border-slate-200/80 text-[12px] rounded-xl focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100/80 transition-all placeholder:text-slate-400"
+            value={tabFilters[tab] || ''}
+            onChange={(e) => updateTabSearch(tab, e.target.value)}
+          />
+          {tabFilters[tab] && (
+            <button onClick={() => updateTabSearch(tab, '')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        {isFiltered && (
+          <span className="text-[10px] text-slate-400 whitespace-nowrap font-semibold shrink-0 tabular-nums">
+            {visibleCount} <span className="text-slate-300">/</span> {totalCount}
+          </span>
+        )}
+
+        {/* Right side controls — grouped in one pill-container */}
+        <div className="flex items-center gap-2 ml-auto">
+          {selectedIds.size > 0 && bulkActions && (
+            <div className="flex items-center gap-1 rounded-xl border border-blue-400/20 bg-[linear-gradient(135deg,#2563EB,#3B82F6)] px-3 py-1.5 shadow-[0_4px_12px_rgba(37,99,235,0.22)]">
+              <span className="text-[10px] font-bold text-white pr-2 border-r border-white/25 mr-1">
+                {selectedIds.size} selected
+              </span>
+              {bulkActions}
+            </div>
+          )}
+
+          {/* Filters + Rows grouped in one unified control bar */}
+          <div className="flex items-center rounded-xl border border-slate-200/80 bg-slate-50 shadow-[0_1px_4px_rgba(15,23,42,0.05)] overflow-hidden divide-x divide-slate-200/80">
+            {/* Filter trigger */}
+            <button
+              type="button"
+              onClick={() => setFilterPanelTab(tab)}
+              className={`inline-flex h-8 items-center gap-1.5 px-3 text-[11px] font-semibold transition-all duration-150 ${
+                getActiveFilterChips(tab).length > 0
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-transparent text-slate-500 hover:text-slate-700 hover:bg-white'
+              }`}
+            >
+              <Filter className={`h-3 w-3 ${getActiveFilterChips(tab).length > 0 ? 'text-blue-500' : 'text-slate-400'}`} />
+              <span>Filters</span>
+              {getActiveFilterChips(tab).length > 0 && (
+                <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-black text-white">
+                  {getActiveFilterChips(tab).length}
+                </span>
+              )}
+            </button>
+            {/* Rows selector */}
+            <div className="flex items-center gap-0.5 px-2 h-8 bg-transparent">
+              <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">Rows</span>
+              <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
+                <SelectTrigger className="h-7 w-[44px] bg-transparent border-none shadow-none text-[11px] font-semibold text-slate-600 px-1 focus:ring-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[10, 20, 30, 40, 50].map(v => (
+                    <SelectItem key={v} value={v.toString()}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderApprovalSnapshot = (record: APRecord) => {
+    const checks = [
+      { label: 'Company', passed: record.validations.company, show: true },
+      { label: 'GST', passed: record.validations.gst, show: true },
+      { label: 'Particulars', passed: record.validations.particulars, show: true },
+      { label: 'Supplier', passed: record.validations.supplier, show: true },
+      { label: 'Duplication', passed: record.validations.duplication, show: true },
+      { label: 'Ledger', passed: record.validations.ledger, show: record.docTypeLabel?.toLowerCase().includes('goods') },
+    ].filter(check => check.show);
+
+    const passedCount = checks.filter(check => check.passed).length;
+    const totalCount = checks.length;
+    const failedCount = totalCount - passedCount;
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="mx-auto inline-flex w-[168px] items-center justify-between rounded-[18px] border border-slate-200/80 bg-[linear-gradient(135deg,#FFFFFF,#F8FBFF)] px-3 py-2 text-left shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] hover:border-slate-300"
+          >
+            <div className="flex flex-col">
+              <span className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-500">Approval</span>
+              <span className="mt-1 text-[13px] font-extrabold tracking-[-0.01em] text-slate-900">
+                {passedCount}/{totalCount}
+                <span className="ml-1 text-[10px] font-semibold text-slate-400">checks</span>
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {checks.map(check => (
+                <span
+                  key={check.label}
+                  className={`h-2.5 w-2.5 rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.12)] ${
+                    check.passed ? 'bg-[#6BAF93]' : 'bg-rose-400'
+                  }`}
+                />
+              ))}
+            </div>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={10}
+          className="w-[196px] rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))] px-3 py-2.5 text-white shadow-[0_22px_50px_rgba(15,23,42,0.35)]"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[9px] font-black uppercase tracking-[0.16em] text-white/50">Approval Snapshot</span>
+            <span className={`text-[10px] font-bold shrink-0 ${failedCount === 0 ? 'text-[#7DCAAA]' : 'text-amber-300'}`}>
+              {failedCount === 0 ? 'All clear' : `${failedCount} issue${failedCount > 1 ? 's' : ''}`}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            {checks.map(check => (
+              <div
+                key={check.label}
+                className={`flex items-center justify-between gap-1 rounded-[10px] border px-2 py-1.5 ${
+                  check.passed
+                    ? 'border-[#6BAF93]/20 bg-[#6BAF93]/10'
+                    : 'border-rose-400/20 bg-rose-400/10'
+                }`}
+              >
+                <span className="min-w-0 truncate text-[9px] font-bold uppercase tracking-[0.06em] text-white/80">{check.label}</span>
+                {check.passed
+                  ? <Check className="h-3 w-3 shrink-0 text-[#7DCAAA] stroke-[3]" />
+                  : <X className="h-3 w-3 shrink-0 text-rose-300 stroke-[3]" />}
+              </div>
+            ))}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  const renderFailureReason = (reason: string | undefined) => {
+    const resolvedReason = String(reason || 'Failure').trim();
+    const words = resolvedReason.split(/\s+/).filter(Boolean);
+    const accent = words.slice(0, 2).join(' ').toUpperCase();
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="mx-auto inline-flex w-[170px] items-start justify-between gap-2 rounded-[18px] border border-[#E6D7DA] bg-[linear-gradient(135deg,#FFFFFF,#FBF7F8)] px-3 py-2 text-left shadow-[0_8px_18px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-[1px] hover:border-[#D8C3C8]"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F5ECEE] text-[#A14F59] shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0 truncate text-[10px] font-black uppercase tracking-[0.08em] text-[#9C4E57]">
+                  {accent || 'FAILURE'}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-[11px] font-semibold text-[#8A4951]">
+                {resolvedReason}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full border border-[#E9DADD] bg-[#F8F1F2] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-[#9A5860]">
+              Review
+            </span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={10}
+          className="max-w-[260px] rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))] px-4 py-3 text-white shadow-[0_22px_50px_rgba(15,23,42,0.35)]"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-rose-400/15 text-rose-300">
+              <AlertTriangle className="h-3.5 w-3.5" />
+            </span>
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-white/60">Failure Reason</span>
+          </div>
+          <div className="mt-3 text-[11px] font-semibold leading-[1.4] text-white">
+            {resolvedReason}
+          </div>
+        </TooltipContent>
+      </Tooltip>
     );
   };
 
@@ -1457,7 +1722,7 @@ export default function APWorkspace() {
     if (chips.length === 0) return null;
 
     return (
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50/20 px-6 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-[linear-gradient(180deg,rgba(249,250,251,0.75),rgba(255,255,255,0.95))] px-6 py-3">
         {chips.map(chip => (
           <Badge
             key={chip.key}
@@ -1711,29 +1976,22 @@ export default function APWorkspace() {
           </div>
         </ScrollArea>
 
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/70 px-4 py-3">
-          <div className="text-xs font-semibold text-slate-500">
-            {activeCount} active filter{activeCount === 1 ? '' : 's'}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className="text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              disabled={activeCount === 0}
-              onClick={() => clearStructuredFilters(tab)}
-            >
-              Clear all
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="border-slate-200 bg-white"
-              onClick={() => setFilterPanelTab(null)}
-            >
-              Close
-            </Button>
-          </div>
+        <div className="flex items-center justify-between border-t border-slate-100 bg-[linear-gradient(180deg,#FFFFFF,#F8FAFF)] px-5 py-3">
+          <button
+            type="button"
+            disabled={activeCount === 0}
+            onClick={() => clearStructuredFilters(tab)}
+            className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Clear all
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterPanelTab(null)}
+            className="inline-flex h-8 items-center rounded-lg bg-[linear-gradient(135deg,#2563EB,#3B82F6)] px-4 text-[11px] font-bold text-white shadow-[0_4px_12px_rgba(37,99,235,0.25)] hover:shadow-[0_6px_16px_rgba(37,99,235,0.30)] transition-all"
+          >
+            Done
+          </button>
         </div>
       </div>
     );
@@ -1741,8 +1999,7 @@ export default function APWorkspace() {
 
 
 
-  const tabClass = "relative z-10 px-6 py-4 text-[14px] font-bold transition-all rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 data-[state=inactive]:text-slate-500 hover:text-slate-800 transition-colors";
-
+  const tabClass = "relative z-10 min-h-[48px] px-5 py-3 text-[13px] font-semibold leading-none tracking-normal transition-all duration-200 rounded-t-[14px] border border-transparent data-[state=active]:bg-white data-[state=active]:border-slate-200/70 data-[state=active]:border-b-white data-[state=active]:shadow-[0_-4px_16px_rgba(15,23,42,0.06),4px_0_8px_rgba(15,23,42,0.02)] data-[state=active]:text-[#1E40AF] data-[state=active]:font-bold data-[state=inactive]:bg-transparent data-[state=inactive]:border-transparent data-[state=inactive]:text-slate-500 data-[state=inactive]:hover:text-slate-700 data-[state=inactive]:hover:bg-white/40";
   return (
     <div
       className="flex flex-col h-full gap-6 max-w-[1400px] mx-auto w-full relative"
@@ -1808,21 +2065,12 @@ export default function APWorkspace() {
       </Dialog>
 
       {/* Header Area */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">AP Workspace</h1>
-          <p className="text-sm text-slate-500 mt-1">Accounts Payable Lifecycle Monitor & Workbench</p>
+          <h1 className="text-[22px] font-black text-[#0F172A] tracking-tight leading-tight">Accounts Payable  Workspace</h1>
+          <p className="text-[12px] text-slate-400 font-medium mt-0.5">Accounts Payable Lifecycle Monitor & Workbench</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
-              placeholder="Search invoice or supplier..."
-              className="pl-9 bg-white"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
           <input
             type="file"
             accept=".pdf,.jpeg,.jpg,.png,image/jpeg,image/png,application/pdf"
@@ -1855,7 +2103,7 @@ export default function APWorkspace() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
       ) : (
-        <Card className="flex-1 min-h-[500px] flex flex-col overflow-hidden border-slate-200 shadow-sm">
+        <Card className="flex-1 min-h-[500px] flex flex-col overflow-hidden border-slate-200/60 shadow-[0_8px_32px_rgba(15,23,42,0.10),0_1px_0_rgba(255,255,255,0.8)] rounded-2xl">
           <Tabs
             value={activeTab}
             onValueChange={(val) => {
@@ -1868,35 +2116,35 @@ export default function APWorkspace() {
             }}
             className="flex-1 flex flex-col w-full h-full"
           >
-            <div className="px-6 pt-[18px] bg-slate-50/50">
-              <TabsList className="bg-transparent border-b border-slate-200 w-full justify-start rounded-none h-auto p-0 space-x-2">
+            <div className="px-6 pt-5 bg-[linear-gradient(180deg,#F4F7FF,#EDF2FF)] border-b border-slate-200/60">
+              <TabsList className="bg-transparent w-full justify-start rounded-none h-auto p-0 gap-0.5 border-none">
                 <TabsTrigger value="received" className={tabClass}>
                   Received
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1">
+                  <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none tabular-nums ${activeTab === 'received' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200/80 text-slate-500'}`}>
                     {counts.received}
                   </span>
                 </TabsTrigger>
                 <TabsTrigger value="ready" className={tabClass}>
                   For Review
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-emerald-100 group-data-[state=active]:text-emerald-700">
+                  <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none tabular-nums ${activeTab === 'ready' ? 'bg-[#E4F0EC] text-[#2D6A52]' : 'bg-slate-200/80 text-slate-500'}`}>
                     {counts.ready}
                   </span>
                 </TabsTrigger>
                 <TabsTrigger value="input" className={tabClass}>
                   Awaiting Input
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-amber-100 group-data-[state=active]:text-amber-700">
+                  <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none tabular-nums ${activeTab === 'input' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200/80 text-slate-500'}`}>
                     {counts.input}
                   </span>
                 </TabsTrigger>
                 <TabsTrigger value="handoff" className={tabClass}>
                   Handoff
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-rose-100 group-data-[state=active]:text-rose-700">
+                  <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none tabular-nums ${activeTab === 'handoff' ? 'bg-rose-100 text-rose-700' : 'bg-slate-200/80 text-slate-500'}`}>
                     {counts.handoff}
                   </span>
                 </TabsTrigger>
                 <TabsTrigger value="posted" className={tabClass}>
                   Posted
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black leading-none min-w-[20px] shadow-sm transform -translate-y-1 group-data-[state=active]:bg-slate-300 group-data-[state=active]:text-slate-800">
+                  <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none tabular-nums ${activeTab === 'posted' ? 'bg-slate-200 text-slate-700' : 'bg-slate-200/80 text-slate-500'}`}>
                     {counts.posted}
                   </span>
                 </TabsTrigger>
@@ -1948,169 +2196,135 @@ export default function APWorkspace() {
 
               {/* --- RECEIVED TAB --- */}
               <TabsContent value="received" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search by No. or Supplier..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.received}
-                      onChange={(e) => updateTabSearch('received', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('received')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 whitespace-nowrap font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('received', 'Search by No. or Supplier…',
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
                 {renderFilterChips('received')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-[41px] z-20 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
-                          checked={getPaginatedData('received').length > 0 && getPaginatedData('received').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('received'))}
+                          checked={getVisibleTabRecords('received').length > 0 && getVisibleTabRecords('received').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('received'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%]">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%]">Doc Type</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[22%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Items</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[10%] text-right">Status</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[26%] bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[13%] bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Doc Type</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[20%] bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Supplier</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[7%] text-center bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Items</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[14%] text-right pr-6 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[10%] pl-6 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Condition</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[12%] pl-6 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">Status</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 w-[5%] pr-5 text-right bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('received').length === 0 ? (
-                      <TableRow><TableCell colSpan={9} className="text-center py-12 text-slate-500">No received documents found in this range.</TableCell></TableRow>
-                    ) : getPaginatedData('received').map(record => (
+                      <TableRow><TableCell colSpan={9} className="text-center py-16 text-slate-400 text-[13px]">No received documents found in this range.</TableCell></TableRow>
+                    ) : getPaginatedData('received').map((record, idx) => (
                       <TableRow
                         key={record.id}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] ${
+                          record.status === 'handoff' ? 'border-l-[#C96B74] hover:bg-[#FDF7F8]' :
+                          record.status === 'ready'   ? 'border-l-[#8FBFAA] hover:bg-[#F5FAF7]' :
+                          record.status === 'input'   ? 'border-l-[#C79A55] hover:bg-[#FFFBF5]' :
+                          record.status === 'posted'  ? 'border-l-slate-300 hover:bg-slate-50/60' :
+                                                        'border-l-blue-300 hover:bg-blue-50/25'
+                        } ${idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`}
                         onClick={() => handleRowClick(record)}
                       >
-                        <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(record.id)}
-                            onCheckedChange={(checked) => toggleSelect(record.id, !!checked)}
-                          />
+                        <TableCell className="pl-5 pr-2" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-3">
+                        <TableCell className="py-2.5 pr-3">
                           <div className="flex flex-col gap-0.5">
-                            <div className={`font-bold text-[14px] leading-tight truncate max-w-[200px] ${record.invoiceNo === 'Unknown Doc' ? 'text-slate-400 font-medium italic' : 'text-slate-900 font-black tracking-tight'}`} title={record.invoiceNo}>
+                            <span className={`text-[15px] leading-snug font-bold truncate max-w-[220px] ${record.invoiceNo === 'Unknown Doc' || record.invoiceNo === 'Unknown Invoice' ? 'text-slate-400 italic font-normal' : 'text-[#0F172A]'}`} title={record.invoiceNo}>
                               {record.invoiceNo}
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-medium truncate max-w-[180px]" title={record.fileName}>
-                              {record.fileName || '-'}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-medium tracking-tight">
-                              {record.uploadedAt !== 'Unknown' ? formatDetailedDate(record.uploadedAt) : '-'}
-                            </div>
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-medium truncate max-w-[200px]" title={record.fileName}>{record.fileName || '—'}</span>
+                            <span className="text-[10px] text-slate-400">{record.uploadedAt !== 'Unknown' ? formatDetailedDate(record.uploadedAt) : '—'}</span>
                           </div>
                         </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] font-bold shadow-none uppercase tracking-tight py-0 ${record.docTypeLabel === 'Unknown' ? 'bg-slate-100 text-slate-500 border-slate-200' : 'text-slate-600 bg-slate-50 border-slate-200'}`}
-                          >
+                        <TableCell className="pr-3">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.07em] border ${
+                            record.docTypeLabel?.toLowerCase().includes('service')
+                              ? 'bg-slate-50 text-slate-500 border-slate-200'
+                              : record.docTypeLabel === 'Unknown'
+                              ? 'bg-slate-50 text-slate-400 border-slate-200'
+                              : 'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}>
                             {record.docTypeLabel}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium text-slate-800 text-[13px]">{record.supplier}</TableCell>
-                        <TableCell className="text-right">
-                          <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
-                            {record.items} items
                           </span>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col gap-0">
-                            <div className="font-bold text-slate-900 text-[14px]">{formatCurrency(record.amount)}</div>
-                            <div className="text-[10px] text-slate-500 font-medium flex flex-col items-end gap-1 mt-0.5">
-                              <div className="flex items-center gap-1 opacity-75">
-                                <span>
-                                  {(() => {
-                                    const { igst, cgst, sgst, igstRate, cgstRate, sgstRate } = record.taxBreakdown || {};
-                                    if (igst && Number(igst) > 0 && (!cgst || Number(cgst) === 0)) {
-                                      return `IGST ${igstRate || ''} · ${formatCurrency(Number(igst))}`;
-                                    } else if (cgst && Number(cgst) > 0 && sgst && Number(sgst) > 0) {
-                                      const jointRate = (cgstRate && sgstRate) ? `${cgstRate}+${sgstRate}` : '';
-                                      return `CGST+SGST ${jointRate} · ${formatCurrency(Number(cgst) + Number(sgst))}`;
-                                    }
-                                    return `Tax · ${formatCurrency(record.taxAmount)}`;
-                                  })()}
+                        <TableCell className="pr-3">
+                          <span className="text-[13px] font-semibold text-slate-700 leading-tight">{record.supplier}</span>
+                        </TableCell>
+                        <TableCell className="text-center pr-3">
+                          <span className="text-[11px] font-bold text-slate-600 bg-slate-100 rounded-full px-3 py-0.5 whitespace-nowrap shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">{record.items}</span>
+                        </TableCell>
+                        <TableCell className="text-right pr-6">
+                          <div className="flex flex-col items-end">
+                            <span className="text-[15px] font-extrabold text-[#0F172A] leading-snug tracking-[-0.01em]">{formatCurrency(record.amount)}</span>
+                            <span className="text-[10px] text-slate-400 mt-0.5">
+                              {(() => {
+                                const { igst, cgst, sgst, igstRate, cgstRate, sgstRate } = record.taxBreakdown || {};
+                                if (igst && Number(igst) > 0 && (!cgst || Number(cgst) === 0)) return `IGST ${igstRate || ''} · ${formatCurrency(Number(igst))}`;
+                                if (cgst && Number(cgst) > 0 && sgst && Number(sgst) > 0) return `CGST+SGST · ${formatCurrency(Number(cgst) + Number(sgst))}`;
+                                return `Tax · ${formatCurrency(record.taxAmount)}`;
+                              })()}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="pl-6">
+                          {record.status !== 'handoff' && <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />}
+                        </TableCell>
+                        <TableCell className="pl-6 pr-6 py-2.5 whitespace-normal align-middle">
+                          <div className="flex flex-col items-start gap-1.5">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] whitespace-nowrap shadow-[0_2px_8px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.7)] ${
+                              record.status === 'ready'   ? 'border-[#BDDACF] bg-[linear-gradient(135deg,#F0F8F4,#E8F4EF)] text-[#2D6A52]' :
+                              record.status === 'input'   ? 'border-[#E7D1A5] bg-[linear-gradient(135deg,#FFF6E7,#FEF0D5)] text-[#8A5A14]' :
+                              record.status === 'handoff' ? 'border-[#E3C2C6] bg-[linear-gradient(135deg,#FBEEF0,#F8E4E7)] text-[#8B3B45]' :
+                              record.status === 'posted'  ? 'border-slate-200 bg-[linear-gradient(135deg,#F1F5F9,#E9EFF5)] text-slate-600' :
+                                                            'border-[#CFD8E6] bg-[linear-gradient(135deg,#EEF3F9,#E6EDF6)] text-[#38506F]'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                record.status === 'ready'   ? 'bg-[#6BAF93]' :
+                                record.status === 'input'   ? 'bg-amber-500' :
+                                record.status === 'handoff' ? 'bg-rose-500' :
+                                record.status === 'posted'  ? 'bg-slate-400' :
+                                                              'bg-blue-400'
+                              }`} />
+                              {record.status === 'ready' ? 'For Review' : record.status === 'input' ? 'Input Needed' : record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className={`max-w-[170px] cursor-help truncate text-[10.5px] leading-none font-semibold ${
+                                  record.status === 'handoff' ? 'text-[#9A4D55]' :
+                                  record.status === 'input'   ? 'text-[#9B6B27]' :
+                                  record.status === 'ready'   ? 'text-[#3D7A60]' :
+                                  record.status === 'posted'  ? 'text-slate-500' :
+                                                                'text-[#4E6486]'
+                                }`}>
+                                  {getStatusSupportText(record)}
                                 </span>
-                              </div>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col items-end gap-1">
-                            <Badge
-                              variant="outline"
-                              className={`
-                                text-[10px] font-black uppercase tracking-wider py-0 shadow-none border whitespace-nowrap
-                                ${record.status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                  record.status === 'input' ? 'bg-[#FEF3C7] text-[#92400E] border-[#FCD34D]' :
-                                    record.status === 'handoff' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                                      record.status === 'posted' ? 'bg-slate-100 text-slate-600 border-slate-200' :
-                                        'bg-blue-50 text-blue-700 border-blue-200'}
-                              `}
-                            >
-                              {record.status === 'ready' ? 'FOR REVIEW' :
-                                record.status === 'input' ? 'AWAITING INPUT' :
-                                  record.status.charAt(0).toUpperCase() + record.status.slice(1)}
-                            </Badge>
-                            {(record.status === 'handoff' || record.status === 'input') && record.reason && (
-                              <div
-                                className="text-[10px] font-bold text-[#92400E] max-w-[140px] truncate leading-tight mt-0.5 opacity-80"
-                                title={record.reason}
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                align="start"
+                                sideOffset={8}
+                                className="max-w-[260px] rounded-2xl border border-white/70 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(30,41,59,0.96))] px-3 py-2 text-[11px] leading-[1.35] text-white shadow-[0_18px_40px_rgba(15,23,42,0.35)]"
                               >
-                                {record.reason}
-                              </div>
-                            )}
+                                {getStatusSupportText(record)}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
-                            onClick={(e) => handleDelete(e, record.id)}
-                            title="Delete Invoice"
-                          >
-                            <Trash2 className="w-4 h-4" />
+                        <TableCell className="pr-5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all" onClick={(e) => handleDelete(e, record.id)} title="Delete Invoice">
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -2122,134 +2336,69 @@ export default function APWorkspace() {
 
               {/* --- READY TO POST TAB --- */}
               <TabsContent value="ready" className="m-0 h-full border-none p-0 outline-none">
-                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2 text-sm text-amber-800">
-                  <AlertCircle className="w-4 h-4" />
-                  <span className="font-medium">Auto-post disabled.</span> These documents require manual approval before posting to ERP.
+                <div className="bg-amber-50/80 border-b border-amber-100 px-5 py-2 flex items-center gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="text-[12px] font-semibold text-amber-800">Manual approval required</span>
+                  <span className="text-[12px] text-amber-700 opacity-80">— These documents need review before they are posted to ERP.</span>
                 </div>
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search ready invoices..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.ready}
-                      onChange={(e) => updateTabSearch('ready', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {selectedIds.size > 0 && (
-                      <div className="flex items-center gap-2 border-r border-slate-200 pr-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                          title="Approve Selected"
-                          onClick={handleApproveSelected}
-                        >
-                          <CheckCircle2 className="w-5 h-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                          title="Delete Selected"
-                          onClick={handleDeleteSelected}
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </Button>
-                      </div>
-                    )}
-                    {renderFilterTrigger('ready')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
+                {renderTabToolbar('ready', 'Search ready invoices…',
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Approve Selected" onClick={handleApproveSelected}>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-100 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </>
+                )}
                 {renderFilterChips('ready')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-[41px] z-20 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
-                          checked={getPaginatedData('ready').length > 0 && getPaginatedData('ready').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('ready'))}
+                          checked={getVisibleTabRecords('ready').length > 0 && getVisibleTabRecords('ready').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('ready'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Approval Snapshot</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[16%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[24%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%]">Supplier</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[15%] text-right pr-6">Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%] text-center">Approval Snapshot</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[12%] pl-6">Condition</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[16%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('ready').length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents ready to post.</TableCell></TableRow>
-                    ) : getPaginatedData('ready').map(record => (
+                    ) : getPaginatedData('ready').map((record, idx) => (
                       <TableRow
                         key={record.id}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-[#8FBFAA] hover:bg-[#F5FAF7] ${idx % 2 === 1 ? 'bg-[#F8FBF9]' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`}
                         onClick={() => handleRowClick(record)}
                       >
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(record.id)}
-                            onCheckedChange={(checked) => toggleSelect(record.id, !!checked)}
-                          />
+                          <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-3 px-6">
+                        <TableCell className="py-2.5 px-6">
                           <div className="flex flex-col gap-0.5">
                             <div className="font-bold text-slate-900 text-[15px] leading-tight">{record.invoiceNo}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-1">
                               <span>Tax: <span className="text-slate-700">{formatCurrency(record.taxAmount)}</span></span>
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
-                              <span className="text-slate-300">|</span>
-                              <span>{record.docTypeLabel?.replace('Invoice (', '')?.replace(')', '') || 'Unknown'}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
-                        <TableCell className="text-center">
-                          <div className="flex flex-wrap justify-center gap-1.5 max-w-[240px] mx-auto py-2">
-                            {[
-                              { label: 'Company', passed: record.validations.company, show: true },
-                              { label: 'GST', passed: record.validations.gst, show: true },
-                              { label: 'Particulars', passed: record.validations.particulars, show: true },
-                              { label: 'Supplier', passed: record.validations.supplier, show: true },
-                              { label: 'Duplication', passed: record.validations.duplication, show: true },
-                              { label: 'Ledger', passed: record.validations.ledger, show: record.docTypeLabel?.toLowerCase().includes('goods') },
-                            ].filter(v => v.show).map(v => (
-                              <div 
-                                key={v.label} 
-                                className="flex items-center gap-1.5 px-2 py-0.5 bg-white border border-slate-200/60 rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all hover:border-slate-300"
-                                title={`${v.label}: ${v.passed ? 'Passed' : 'Failed'}`}
-                              >
-                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-tight leading-none">{v.label}</span>
-                                {v.passed 
-                                  ? <Check className="w-3 h-3 text-emerald-500 stroke-[3]" /> 
-                                  : <X className="w-3 h-3 text-rose-500 stroke-[3]" />}
-                              </div>
-                            ))}
-                          </div>
+                        <TableCell className="text-right pr-6 font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]">{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className="py-2.5 text-center">
+                          {renderApprovalSnapshot(record)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="pl-6">
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
@@ -2257,7 +2406,7 @@ export default function APWorkspace() {
                             type="text"
                             placeholder="Add remarks..."
                             defaultValue={record.remarks || ''}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               const val = e.target.value.trim();
                               if (val !== (record.remarks || '')) {
@@ -2270,9 +2419,7 @@ export default function APWorkspace() {
                               }
                             }}
                             onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                              if (e.key === 'Enter') {
-                                (e.target as HTMLInputElement).blur();
-                              }
+                              if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
                             }}
                           />
                         </TableCell>
@@ -2281,7 +2428,7 @@ export default function APWorkspace() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                              className="h-7 w-7 text-[#6BAF93] hover:text-[#3D7A60] hover:bg-[#EBF5F0] opacity-0 group-hover:opacity-100 transition-all"
                               onClick={() => handleApproveRow(record.id)}
                               title="Approve & Post"
                             >
@@ -2290,11 +2437,11 @@ export default function APWorkspace() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
+                              className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
                               onClick={(e) => handleDelete(e, record.id)}
                               title="Delete Invoice"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -2307,101 +2454,61 @@ export default function APWorkspace() {
 
               {/* --- AWAITING INPUT TAB --- */}
               <TabsContent value="input" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search documents needing input..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.input}
-                      onChange={(e) => updateTabSearch('input', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('input')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('input', 'Search documents needing input…',
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
                 {renderFilterChips('input')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-[41px] z-20 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
-                          checked={getPaginatedData('input').length > 0 && getPaginatedData('input').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('input'))}
+                          checked={getVisibleTabRecords('input').length > 0 && getVisibleTabRecords('input').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('input'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[15%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[20%] text-center">Required Input</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[16%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[24%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%]">Supplier</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[15%] text-right pr-6">Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[20%] text-center">Required Input</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[12%] pl-6">Condition</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[16%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('input').length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents awaiting input.</TableCell></TableRow>
-                    ) : getPaginatedData('input').map(record => (
+                    ) : getPaginatedData('input').map((record, idx) => (
                       <TableRow
                         key={record.id}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-amber-400 hover:bg-amber-50/30 ${idx % 2 === 1 ? 'bg-amber-50/20' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`}
                         onClick={() => handleRowClick(record)}
                       >
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedIds.has(record.id)}
-                            onCheckedChange={(checked) => toggleSelect(record.id, !!checked)}
-                          />
+                          <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-3 px-6">
+                        <TableCell className="py-2.5 px-6">
                           <div className="flex flex-col gap-0.5">
                             <div className="font-bold text-slate-900 text-[15px] leading-tight">{record.invoiceNo}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-1">
                               <span>Tax: <span className="text-slate-700">{formatCurrency(record.taxAmount)}</span></span>
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
-                              <span className="text-slate-300">|</span>
-                              <span>{record.docTypeLabel?.replace('Invoice (', '')?.replace(')', '') || 'Unknown'}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className="text-right pr-6 font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]">{formatCurrency(record.amount)}</TableCell>
                         <TableCell className="text-center">
-                          <div className="text-[12px] font-bold text-rose-600 leading-tight">
+                          <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
                             {record.reason || 'Pending Input'}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="pl-6">
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
@@ -2409,7 +2516,7 @@ export default function APWorkspace() {
                             type="text"
                             placeholder="Add remarks..."
                             defaultValue={record.remarks || ''}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               const val = e.target.value.trim();
                               if (val !== (record.remarks || '')) {
@@ -2422,9 +2529,7 @@ export default function APWorkspace() {
                               }
                             }}
                             onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                              if (e.key === 'Enter') {
-                                (e.target as HTMLInputElement).blur();
-                              }
+                              if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
                             }}
                           />
                         </TableCell>
@@ -2432,11 +2537,11 @@ export default function APWorkspace() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
+                            className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
                             onClick={(e) => handleDelete(e, record.id)}
                             title="Delete Invoice"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -2448,117 +2553,64 @@ export default function APWorkspace() {
 
               {/* --- HANDOFF TAB --- */}
               <TabsContent value="handoff" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search handoffs..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.handoff}
-                      onChange={(e) => updateTabSearch('handoff', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('handoff')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          title={`Revalidate Selected (${selectedIds.size})`}
-                          onClick={handleBulkRevalidate}
-                        >
-                          <RefreshCw className="w-5 h-5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                          title={`Delete Selected (${selectedIds.size})`}
-                          onClick={handleDeleteSelected}
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('handoff', 'Search handoffs…',
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Revalidate Selected" onClick={handleBulkRevalidate}>
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-600 hover:text-rose-700 hover:bg-rose-100 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </>
+                )}
                 {renderFilterChips('handoff')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-[41px] z-20 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
-                          checked={getPaginatedData('handoff').length > 0 && getPaginatedData('handoff').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('handoff'))}
+                          checked={getVisibleTabRecords('handoff').length > 0 && getVisibleTabRecords('handoff').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('handoff'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[24%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[18%]">Supplier</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%] text-right">Value (₹)</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[16%] text-center">Failure Reason</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[23%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[7%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[24%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[18%]">Supplier</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[12%] text-right pr-6">Value (₹)</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[28%] text-center">Failure Reason</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[23%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[7%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('handoff').length === 0 ? (
-                      <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">No documents requiring human handoff.</TableCell></TableRow>
-                    ) : getPaginatedData('handoff').map(record => (
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleRowClick(record)}>
+                      <TableRow><TableCell colSpan={7} className="text-center py-12 text-slate-500">No documents requiring human handoff.</TableCell></TableRow>
+                    ) : getPaginatedData('handoff').map((record, idx) => (
+                      <TableRow key={record.id} className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-[#C96B74] hover:bg-[#FDF7F8] ${idx % 2 === 1 ? 'bg-rose-50/20' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`} onClick={() => handleRowClick(record)}>
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
                           <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-3 px-6">
+                        <TableCell className="py-2.5 px-6">
                           <div className="flex flex-col gap-0.5">
                             <div className="font-bold text-slate-900 text-[15px] leading-tight">{record.invoiceNo}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-1">
                               <span>Tax: <span className="text-slate-700">{formatCurrency(record.taxAmount)}</span></span>
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
-                              <span className="text-slate-300">|</span>
-                              <span>{record.docTypeLabel?.replace('Invoice (', '')?.replace(')', '') || 'Unknown'}</span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
-                        <TableCell className="text-right font-bold text-slate-900 text-[15px]">{formatCurrency(record.amount)}</TableCell>
-                        <TableCell className="text-center">
-                          <div
-                            className="flex items-center justify-center gap-1.5 text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 w-fit mx-auto"
-                            title={record.reason || 'Failure'}
-                          >
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span className="text-[11px] font-medium leading-tight truncate max-w-[120px]">{record.reason || 'Failure'}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
+                        <TableCell className="text-right pr-6 font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]">{formatCurrency(record.amount)}</TableCell>
+                        <TableCell className="py-2.5 text-center">
+                          {renderFailureReason(record.reason)}
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
                             type="text"
                             placeholder="Add remarks..."
                             defaultValue={record.remarks}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               if (e.target.value !== record.remarks) {
                                 try {
@@ -2570,20 +2622,13 @@ export default function APWorkspace() {
                               }
                             }}
                             onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
-                              if (e.key === 'Enter') {
-                                (e.target as HTMLInputElement).blur();
-                              }
+                              if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
                             }}
                           />
                         </TableCell>
                         <TableCell className="text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
-                            onClick={(e) => handleDelete(e, record.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all" onClick={(e) => handleDelete(e, record.id)}>
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -2595,72 +2640,37 @@ export default function APWorkspace() {
 
               {/* --- POSTED TAB --- */}
               <TabsContent value="posted" className="m-0 h-full border-none p-0 outline-none">
-                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between gap-4">
-                  <div className="relative w-full max-w-sm">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search history..."
-                      className="pl-9 h-9 bg-white"
-                      value={tabFilters.posted}
-                      onChange={(e) => updateTabSearch('posted', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {renderFilterTrigger('posted')}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 font-medium">Page Size:</span>
-                      <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val))}>
-                        <SelectTrigger className="h-9 w-20 bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="20">20</SelectItem>
-                          <SelectItem value="30">30</SelectItem>
-                          <SelectItem value="40">40</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedIds.size > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                        title={`Delete Selected (${selectedIds.size})`}
-                        onClick={handleDeleteSelected}
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                {renderTabToolbar('posted', 'Search history…',
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/20 rounded" title="Delete Selected" onClick={handleDeleteSelected}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
                 {renderFilterChips('posted')}
                 <Table>
-                  <TableHeader className="bg-slate-50/80 sticky top-0 z-10 shadow-sm">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[40px] h-10 px-6">
+                  <TableHeader className="sticky top-[41px] z-20 shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+                    <TableRow className="hover:bg-transparent border-none bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
+                      <TableHead className="w-[44px] h-12 pl-5 pr-2 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)]">
                         <Checkbox
-                          checked={getPaginatedData('posted').length > 0 && getPaginatedData('posted').every(r => selectedIds.has(r.id))}
-                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getPaginatedData('posted'))}
+                          checked={getVisibleTabRecords('posted').length > 0 && getVisibleTabRecords('posted').every(r => selectedIds.has(r.id))}
+                          onCheckedChange={(checked) => toggleSelectAll(!!checked, getVisibleTabRecords('posted'))}
                         />
                       </TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[45%] px-6">Supplier Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[40%]">ERP Reference</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[12%]">Routing</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[10%]">Remarks</TableHead>
-                      <TableHead className="font-semibold text-slate-700 h-10 w-[5%] text-right pr-6">Action</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[45%] px-6">Supplier Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[40%]">ERP Reference</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[12%] pl-6">Condition</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[10%]">Remarks</TableHead>
+                      <TableHead className="font-extrabold text-[10.5px] text-[#6175A8] uppercase tracking-[0.18em] h-12 bg-[linear-gradient(180deg,#F2F6FF,#EDF3FF)] w-[5%] text-right pr-6">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {getVisibleTabRecords('posted').length === 0 ? (
                       <TableRow><TableCell colSpan={6} className="text-center py-12 text-slate-500">No documents posted yet.</TableCell></TableRow>
-                    ) : getPaginatedData('posted').map(record => (
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleRowClick(record)}>
+                    ) : getPaginatedData('posted').map((record, idx) => (
+                      <TableRow key={record.id} className={`group cursor-pointer transition-all duration-200 border-b border-slate-100/90 last:border-b-0 border-l-[3px] border-l-slate-300 hover:bg-slate-50/60 ${idx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'} hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]`} onClick={() => handleRowClick(record)}>
                         <TableCell className="px-6" onClick={(e) => e.stopPropagation()}>
                           <Checkbox checked={selectedIds.has(record.id)} onCheckedChange={(checked) => toggleSelect(record.id, !!checked)} />
                         </TableCell>
-                        <TableCell className="py-2.5">
+                        <TableCell className="py-2">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-slate-900">{record.invoiceNo}</span>
@@ -2669,35 +2679,30 @@ export default function APWorkspace() {
                             <div className="text-xs text-slate-600 flex items-center gap-2">
                               <span className="font-medium">{record.supplier}</span>
                               <span className="text-slate-300">|</span>
-                              <span className="font-bold text-slate-900">{formatCurrency(record.amount)}</span>
+                              <span className="font-extrabold text-slate-900 tracking-[-0.01em]">{formatCurrency(record.amount)}</span>
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-start gap-2">
-                              <div className="flex items-start gap-1.5 text-emerald-700">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 mt-1.5" />
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-sm font-bold text-emerald-800 leading-none">Vch No: {record.voucherNumber || 'N/A'}</span>
-                                  <span className="text-[10px] text-emerald-600/80 leading-tight">Ref: {record.erpRef || 'N/A'}</span>
-                                </div>
-                              </div>
-                              <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 uppercase px-1 py-0 shadow-none h-4">Synced</Badge>
+                          <div className="flex flex-col gap-1">
+                            <div className="inline-flex w-fit items-center gap-2 rounded-[10px] bg-[linear-gradient(135deg,#F0F8F4_0%,#E6F3EE_100%)] border border-[#BDDACF]/70 px-3 py-1.5 shadow-[0_4px_12px_rgba(107,175,147,0.10)]">
+                              <span className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-500/80">Voucher</span>
+                              <span className="h-3 w-[1px] bg-[#BDDACF]" />
+                              <span className="text-[13px] font-black tracking-tight text-[#2D6A52] leading-none">{record.voucherNumber || '—'}</span>
                             </div>
-                            <div className="text-[11px] text-slate-500">
-                              Posted: {formatDetailedDate(record.updatedAt)}
-                            </div>
+                            <span className="text-[10px] text-slate-400 pl-0.5">
+                              <span className="font-bold text-slate-500">Posted</span> · {formatDetailedDate(record.updatedAt)}
+                            </span>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="pl-6">
                           <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="text"
                             defaultValue={record.remarks}
-                            className="w-full bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-xs text-slate-600 transition-all hover:bg-slate-100"
+                            className="w-full bg-transparent border-none focus:ring-2 focus:ring-blue-100 focus:bg-white rounded-xl px-2 py-1.5 text-xs text-slate-600 transition-all hover:bg-slate-100/80"
                             onBlur={async (e) => {
                               if (e.target.value !== record.remarks) {
                                 try {
@@ -2709,21 +2714,13 @@ export default function APWorkspace() {
                               }
                             }}
                             onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
-                              if (e.key === 'Enter') {
-                                (e.target as HTMLInputElement).blur();
-                              }
+                              if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
                             }}
                           />
                         </TableCell>
                         <TableCell className="text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-rose-600 transition-colors"
-                            onClick={(e) => handleDelete(e, record.id)}
-                            title="Delete Invoice"
-                          >
-                            <Trash2 className="w-4 h-4" />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all" onClick={(e) => handleDelete(e, record.id)} title="Delete Invoice">
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -2749,12 +2746,21 @@ export default function APWorkspace() {
               </Drawer>
             ) : (
               <Sheet open={Boolean(filterPanelTab)} onOpenChange={(open) => { if (!open) setFilterPanelTab(null); }}>
-                <SheetContent side="right" className="w-full gap-0 border-l border-slate-200 bg-white p-0 sm:max-w-md">
-                  <SheetHeader className="border-b border-slate-200 bg-slate-50/70 text-left">
-                    <SheetTitle className="text-base font-semibold text-slate-900">Filter {TAB_LABELS[filterPanelTab]}</SheetTitle>
-                    <SheetDescription className="text-sm text-slate-500">
-                      Live filters for the {TAB_LABELS[filterPanelTab]} table.
-                    </SheetDescription>
+                <SheetContent side="right" className="w-full gap-0 border-l border-slate-100 bg-white p-0 sm:max-w-[360px] shadow-[-20px_0_60px_rgba(15,23,42,0.10)]">
+                  <SheetHeader className="px-5 py-4 border-b border-slate-100 bg-[linear-gradient(180deg,#FFFFFF,#F8FAFF)] text-left">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <SheetTitle className="text-[15px] font-black text-slate-900 tracking-tight">Filter</SheetTitle>
+                        <SheetDescription className="text-[11px] font-medium text-slate-400 mt-0.5 tracking-wide">
+                          {TAB_LABELS[filterPanelTab!]} · live results
+                        </SheetDescription>
+                      </div>
+                      {getActiveFilterChips(filterPanelTab!).length > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-black text-blue-700">
+                          {getActiveFilterChips(filterPanelTab!).length} active
+                        </span>
+                      )}
+                    </div>
                   </SheetHeader>
                   {renderFilterPanelSections(filterPanelTab)}
                 </SheetContent>
@@ -2859,6 +2865,21 @@ export default function APWorkspace() {
           </motion.div>
         )}
       </AnimatePresence>
+      <PremiumConfirmDialog
+        open={!!confirmDialog}
+        onOpenChange={(open) => { if (!open) setConfirmDialog(null); }}
+        title={confirmDialog?.title || 'Confirm action'}
+        description={confirmDialog?.description || ''}
+        confirmLabel={confirmDialog?.confirmLabel || 'Proceed'}
+        note={confirmDialog?.note}
+        bullets={confirmDialog?.bullets}
+        tone={confirmDialog?.tone || 'accent'}
+        busy={loading}
+        onConfirm={async () => {
+          if (!confirmDialog) return;
+          await confirmDialog.onConfirm();
+        }}
+      />
     </div>
   );
 }

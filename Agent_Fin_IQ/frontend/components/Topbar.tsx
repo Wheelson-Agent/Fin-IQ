@@ -438,7 +438,7 @@ export function Topbar({
                 <div className={`flex items-center gap-[6px] text-[12px] ${isMono ? 'text-[#71717a]' : 'text-[#4A5568]'}`}>
                     <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>agent_w</span>
                     <ConnectionStatusIndicator isMono={isMono} />
-                    {pageTitle !== 'AP Workspace' && (
+                    {pageTitle !== 'Accounts Payable  Workspace' && (
                         <>
                             <span className={isMono ? 'text-[#e4e4e7]' : 'text-[#D0D9E8]'}>›</span>
                             <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>{pageTitle}</span>

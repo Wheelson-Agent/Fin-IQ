@@ -14,6 +14,7 @@ import {
 } from "../components/ui/resizable";
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { PremiumConfirmDialog } from '../components/PremiumConfirmDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -489,7 +490,7 @@ export default function DetailView() {
     input: 'Awaiting Input',
     posted: 'Posted'
   };
-  const backLabel = tabNames[fromTab] || 'AP Workspace';
+  const backLabel = tabNames[fromTab] || 'Accounts Payable  Workspace';
   const documentPath = documentView?.path || invoice?.file_path || '';
   const isPdf = documentPath.toLowerCase().endsWith('.pdf');
   const totalPages = documentView?.totalPages || 1;
@@ -537,6 +538,15 @@ export default function DetailView() {
     title: string;
     description: string;
     confirmLabel: string;
+  }>(null);
+  const [confirmDialog, setConfirmDialog] = useState<null | {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    note?: string;
+    bullets?: string[];
+    tone?: 'danger' | 'accent' | 'success';
+    onConfirm: () => void | Promise<void>;
   }>(null);
 
   const closeConversionDialog = React.useCallback((confirmed: boolean) => {
@@ -1187,7 +1197,7 @@ export default function DetailView() {
             onClick={() => navigate('/ap-workspace')}
             className="bg-[#1E6FD9] text-white rounded-[10px] px-6 py-3 text-[13px] font-black cursor-pointer hover:bg-[#1557B0] transition-all shadow-lg border-none"
           >
-            Return to AP Workspace
+            Return to Accounts Payable  Workspace
           </button>
         </div>
       </div>
@@ -1197,8 +1207,11 @@ export default function DetailView() {
   const bStatus = (invoice.status || '').toLowerCase();
   const isPosted = (bStatus === 'posted' || bStatus === 'auto-posted') && !!invoice.erp_sync_id;
   const readOnly = isPosted;
+  const isForReviewSelectionOnly = fromTab === 'ready';
+  const allowDocumentFieldEditing = !readOnly && !isForReviewSelectionOnly;
+  const allowLineItemStructureEditing = !readOnly && !isForReviewSelectionOnly;
   const allowCategorizedLineItemPicker = fromTab === 'input' || fromTab === 'handoff' || fromTab === 'ready';
-  const allowLineItemCreateCta = !readOnly && allowCategorizedLineItemPicker;
+  const allowLineItemCreateCta = !readOnly && (fromTab === 'input' || fromTab === 'handoff');
 
   // Determine if this record belongs to the "Handoff" tab criteria
   const isHandoff = (() => {
@@ -1260,7 +1273,7 @@ export default function DetailView() {
   };
 
   const handleAddLineItem = () => {
-    if (readOnly) return;
+    if (!allowLineItemStructureEditing) return;
     setLineItems([
       ...lineItems,
       {
@@ -1283,7 +1296,7 @@ export default function DetailView() {
   };
 
   const handleRemoveLineItem = (id: number) => {
-    if (readOnly) return;
+    if (!allowLineItemStructureEditing) return;
     setLineItems(lineItems.filter(li => li.id !== id));
   };
 
@@ -1299,6 +1312,151 @@ export default function DetailView() {
     } catch (err) {
       console.error('Post failed:', err);
       toast.error('Failed to initiate posting');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteBill = async () => {
+    if (!id) return;
+    try {
+      setSaving(true);
+      const result = await deleteInvoice(id);
+      if (result.success) {
+        toast.success('Invoice deleted successfully');
+        navigate(`/ap-workspace?tab=${fromTab}`);
+      } else {
+        toast.error(result.error || 'Failed to delete invoice');
+      }
+    } catch (err) {
+      console.error('Delete failed:', err);
+      toast.error('An error occurred during deletion');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRegisterSupplier = async () => {
+    if (!id || !invoice) return;
+    const name = (newVendor.name || '').trim();
+    const underGroup = (newVendor.underGroup || '').trim();
+    const state = (newVendor.state || '').trim();
+    const gstin = (newVendor.gstin || '').trim();
+    if (!name) throw new Error('Vendor name is required');
+    if (!underGroup) throw new Error('Under Group is required');
+    if (!gstin) throw new Error('GSTIN is required');
+    if (!state) throw new Error('State is required');
+
+    const payload = {
+      process: { vendor_creation: true },
+      invoice: {
+        payload: {
+          vendorNameAsPerTally: name,
+          vendorName: name,
+          "Name as per Tally": newVendor.buyerErpName || '',
+          group: underGroup || 'Sundry Creditors',
+          maintainBillByBill: true,
+          mailingName: name,
+          address: {
+            line1: billingAddress || '',
+            line2: '',
+            line3: '',
+            state: state || '',
+            country: 'India',
+            pincode: (newVendor.pincode || '').trim() || '',
+          },
+          contact: {
+            mobile: (newVendor.phone || '').trim() || '',
+            phone: (newVendor.phone || '').trim() || '',
+            email: (newVendor.email || '').trim() || '',
+          },
+          tax: {
+            pan: (newVendor.pan || '').trim() || '',
+            gstRegistrationType: 'Regular',
+            gstin: gstin || '',
+          },
+          meta: {
+            invoice_id: invoice.id || '',
+            invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
+            file_name: (invoice.file_name || '').trim() || '',
+            invoice_vendor_name: (invoice.vendor_name || '').trim() || '',
+            invoice_vendor_gst: (invoice.vendor_gst || '').trim() || '',
+          },
+        },
+      },
+    };
+    console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
+    setIsSyncingVendor(true);
+    setVendorSyncError(null);
+    try {
+      const result = await syncVendorWithTally(payload);
+      console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
+      if (result.success) {
+        setVendorSyncSuccess(result.message || 'Supplier registered successfully');
+      } else {
+        setVendorSyncError(result.message || 'Registration failed. Please try again.');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      console.error('[DetailView] syncVendorWithTally error:', err);
+      setVendorSyncError(msg);
+    } finally {
+      setIsSyncingVendor(false);
+    }
+  };
+
+  const handleCreateMaster = async () => {
+    console.log('[MasterCreation] Button clicked. CreationMode:', creationMode);
+    if (readOnly || isForReviewSelectionOnly) { console.warn('[MasterCreation] Blocked: View is not allowed to create masters'); return; }
+    if (activeLedgerIndex === null) { console.warn('[MasterCreation] Blocked: No active ledger index'); return; }
+    const label = docFields?.doc_type_label || '';
+    const isGoods = label.toLowerCase().includes('goods');
+    setSaving(true);
+    setMasterSyncError(null);
+    setMasterSyncSuccess(null);
+    try {
+      if (creationMode === 'STOCK_ITEM') {
+        const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
+        console.log('[MasterCreation] Creating Stock Item:', { name, uom, hsn, tax_rate, buyerName });
+        if (!name.trim()) throw new Error('Item name is required');
+        toast.info('Item creation started');
+        const result = await createItemMaster({
+          name: name.trim(), uom: uom.trim(), hsn: hsn.trim(), tax_rate,
+          company_id: (invoice as any)?.company_id ?? null,
+          meta: { buyer_name: buyerName, invoice_id: id, invoice_no: (invoice?.invoice_no || '').trim(), file_name: (invoice?.file_name || '').trim() }
+        });
+        console.log('[MasterCreation] API Result:', result);
+        if (!result.success || !result.item) throw new Error(result.message || 'Failed to create item');
+        const createdName = result.item.item_name || name;
+        setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
+        applyGoodsStockItemSelection(activeLedgerIndex, createdName);
+        setMasterSyncSuccess(result.message || 'Stock item created successfully');
+      } else {
+        const { name, underGroup, buyerName, gstApplicable } = newLedger;
+        if (!name.trim()) throw new Error('Ledger name is required');
+        toast.info('Ledger creation started');
+        const result = await createLedgerMaster({
+          name, parent_group: underGroup, account_type: 'expense',
+          company_id: (invoice as any)?.company_id ?? null,
+          meta: { gst_applicable: gstApplicable, buyer_name: buyerName, invoice_id: id }
+        });
+        if (!result.success || !result.ledger) throw new Error(result.message || 'Failed to create ledger');
+        const createdId = String(result.ledger.id);
+        const createdName = String(result.ledger.name || name);
+        setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
+        setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
+        setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
+        if (isGoods && allowCategorizedLineItemPicker) {
+          const converted = await handleGoodsLedgerSelection(activeLedgerIndex, createdName, createdId);
+          if (!converted) setMasterSyncSuccess(result.message || 'Ledger created successfully');
+        } else {
+          applyLedgerSelection(activeLedgerIndex, createdName, createdId);
+          setMasterSyncSuccess(result.message || 'Ledger created successfully');
+        }
+      }
+    } catch (err: any) {
+      setMasterSyncError(err.message || 'Creation failed');
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -1449,19 +1607,19 @@ export default function DetailView() {
 
 
   return (
-    <div className="flex flex-col h-full bg-[#f8fafc] font-sans antialiased">
+    <div className="flex flex-col h-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(191,219,254,0.34),transparent_24%),radial-gradient(circle_at_top_right,rgba(167,243,208,0.18),transparent_20%),linear-gradient(180deg,#F5F9FF_0%,#F8FAFC_24%,#F8FAFC_100%)] font-sans antialiased">
       {/* Global Header */}
-      <div className="flex items-center justify-between px-8 py-4 bg-white border-b border-slate-200 shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+      <div className="flex items-center justify-between px-8 py-4 bg-[linear-gradient(180deg,rgba(255,255,255,0.94)_0%,rgba(248,251,255,0.96)_100%)] border-b border-white/70 shrink-0 shadow-[0_12px_30px_rgba(148,163,184,0.12)] backdrop-blur-xl">
         <div className="flex items-center gap-5">
           <button
             onClick={() => navigate(`/ap-workspace?tab=${fromTab}`)}
-            className="flex items-center justify-center w-10 h-10 text-slate-600 hover:text-slate-900 transition-colors bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 shadow-sm"
+            className="flex items-center justify-center w-11 h-11 text-slate-600 hover:text-slate-900 transition-all bg-[linear-gradient(180deg,#FFFFFF_0%,#F2F7FF_100%)] hover:bg-slate-100 rounded-2xl border border-[#D9E4F3] shadow-[0_10px_24px_rgba(148,163,184,0.16)] hover:-translate-y-0.5"
             title={backLabel}
           >
             <ArrowLeft size={18} strokeWidth={3} />
           </button>
 
-          <div className="h-10 w-[1px] bg-slate-200 mx-1" />
+          <div className="h-11 w-[1px] bg-[linear-gradient(180deg,rgba(203,213,225,0.1),rgba(203,213,225,0.95),rgba(203,213,225,0.1))] mx-1" />
 
           {navIds.length > 1 && (
             <div className="flex items-center gap-1">
@@ -1486,18 +1644,18 @@ export default function DetailView() {
           )}
 
           <div className="flex flex-col">
-            <h1 className="text-[17px] font-black text-slate-900 leading-tight flex items-center gap-3">
+            <h1 className="text-[18px] font-black text-slate-900 leading-tight tracking-tight flex items-center gap-3">
               {invoice.file_name}
               {invoice.tally_id && (
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-wider rounded border border-blue-100">
+                <span className="px-2.5 py-1 bg-[linear-gradient(180deg,#EFF6FF_0%,#E5F0FF_100%)] text-blue-600 text-[10px] font-black uppercase tracking-[0.14em] rounded-full border border-blue-100 shadow-sm">
                   {invoice.tally_id}
                 </span>
               )}
             </h1>
-            <p className="text-[11px] font-bold text-slate-400 mt-0.5 tracking-tight">
+            <p className="text-[11px] font-bold text-slate-500 mt-0.5 tracking-tight">
               {invoice.vendor_name || 'Razorpay Software'} · {invoice.invoice_no || 'RZP-NOV-2024-7821'}
             </p>
-            <p className="mt-1 font-mono text-[10px] font-semibold tracking-tight text-slate-500 break-all">
+            <p className="mt-1 font-mono text-[10px] font-semibold tracking-tight text-slate-400 break-all">
               UUID: {invoice.id}
             </p>
           </div>
@@ -1508,9 +1666,28 @@ export default function DetailView() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200"
+              className="h-11 w-11 text-emerald-600 bg-[linear-gradient(180deg,#F3FFF8_0%,#E8FBF1_100%)] hover:bg-emerald-100 rounded-2xl border border-emerald-200 shadow-[0_10px_24px_rgba(16,185,129,0.12)]"
               title={isHandoff ? "Approve & Post" : "Post to Tally"}
-              onClick={handleApproveAndPost}
+              onClick={() => {
+                setConfirmDialog({
+                  title: 'Proceed with posting to Tally?',
+                  description: 'This will move the invoice forward for ERP posting from the current review flow.',
+                  confirmLabel: 'Proceed to Post',
+                  tone: 'accent',
+                  bullets: [
+                    'The invoice will be submitted for Tally posting.',
+                    'Please confirm the current ledger or stock-item selection before proceeding.',
+                  ],
+                  note: 'You can monitor the posting result from Accounts Payable  Workspace after this starts.',
+                  onConfirm: async () => {
+                    try {
+                      await handleApproveAndPost();
+                    } finally {
+                      setConfirmDialog(null);
+                    }
+                  }
+                });
+              }}
             >
               <CheckCircle2 size={22} strokeWidth={3} />
             </Button>
@@ -1530,7 +1707,7 @@ export default function DetailView() {
             <Button
               variant="ghost"
               size="icon"
-              className={`h-10 w-10 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 transition-all ${isRevalidating ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
+              className={`h-11 w-11 text-blue-600 bg-[linear-gradient(180deg,#F5FAFF_0%,#EAF3FF_100%)] hover:bg-blue-100 rounded-2xl border border-blue-200 shadow-[0_10px_24px_rgba(59,130,246,0.12)] transition-all ${isRevalidating ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-0.5 hover:scale-[1.02] active:scale-95'}`}
               title="Re-run AI Validation"
               onClick={handleRevalidate}
               disabled={isRevalidating}
@@ -1546,24 +1723,25 @@ export default function DetailView() {
                 size="icon"
                 className="h-9 w-9 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
                 title="Delete Bill"
-                onClick={async () => {
-                  const confirmed = window.confirm('Are you sure you want to delete this bill?');
-                  if (!id || !confirmed) return;
-                  try {
-                    setSaving(true);
-                    const result = await deleteInvoice(id);
-                    if (result.success) {
-                      toast.success('Invoice deleted successfully');
-                      navigate(`/ap-workspace?tab=${fromTab}`);
-                    } else {
-                      toast.error(result.error || 'Failed to delete invoice');
+                onClick={() => {
+                  setConfirmDialog({
+                    title: 'Delete this bill?',
+                    description: 'This action permanently removes the invoice and its current review context from the workspace.',
+                    confirmLabel: 'Delete Bill',
+                    tone: 'danger',
+                    bullets: [
+                      'The invoice will no longer be available in Accounts Payable  Workspace.',
+                      'Associated extracted values and line-item review context will be discarded.',
+                    ],
+                    note: 'Continue only when this document should be removed from the current process.',
+                    onConfirm: async () => {
+                      try {
+                        await handleDeleteBill();
+                      } finally {
+                        setConfirmDialog(null);
+                      }
                     }
-                  } catch (err) {
-                    console.error('Delete failed:', err);
-                    toast.error('An error occurred during deletion');
-                  } finally {
-                    setSaving(false);
-                  }
+                  });
                 }}
               >
                 <Trash2 className="w-5 h-5" />
@@ -1573,10 +1751,29 @@ export default function DetailView() {
             {!readOnly && (fromTab === 'input' || fromTab === 'handoff' || fromTab === 'received' || fromTab === 'ready' || fromTab === 'processing') && isDirty && (
               <Button
                 variant="default"
-                className="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
+                className="h-10 px-5 bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_55%,#4F8DFF_100%)] hover:bg-blue-700 text-white font-bold rounded-2xl shadow-[0_14px_30px_rgba(37,99,235,0.25)] flex items-center gap-2 transition-all hover:-translate-y-0.5 hover:scale-[1.01] active:scale-95"
                 title="Save Unsaved Changes"
                 disabled={saving}
-                onClick={handleSave}
+                onClick={() => {
+                  setConfirmDialog({
+                    title: 'Save these changes?',
+                    description: 'The current invoice updates will be persisted to the workspace record.',
+                    confirmLabel: 'Save Changes',
+                    tone: 'success',
+                    bullets: [
+                      'Updated document fields and line-item selections will be saved.',
+                      'This saved state becomes the latest review baseline for the invoice.',
+                    ],
+                    note: 'Please verify the values once before continuing.',
+                    onConfirm: async () => {
+                      try {
+                        await handleSave();
+                      } finally {
+                        setConfirmDialog(null);
+                      }
+                    }
+                  });
+                }}
               >
                 {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save Changes
@@ -1588,42 +1785,42 @@ export default function DetailView() {
       </div>
 
       {/* Main Content Workspace */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden px-6 pb-6 pt-4">
         <ResizablePanelGroup direction="horizontal" className="flex-1 h-full">
           {/* Left Panel — PDF Viewer (50% Default, Resizable) */}
-          <ResizablePanel defaultSize={50} minSize={25} className="bg-[#323639] flex flex-col overflow-hidden relative border-r border-[#E2E8F0] shadow-inner">
+          <ResizablePanel defaultSize={35} minSize={24} className="bg-[linear-gradient(180deg,#2C3239_0%,#252B32_100%)] flex flex-col overflow-hidden relative rounded-[22px] border border-[#D9E4F3] shadow-[0_18px_36px_rgba(15,23,42,0.12)]">
             {/* Doc Toolbar */}
-            <div className="bg-[#202124] px-4 py-2 flex items-center justify-between border-b border-white/5 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="p-1.5 bg-white/5 rounded-md text-white/40">
+            <div className="bg-[linear-gradient(180deg,#20262D_0%,#20242A_100%)] px-4 py-2.5 flex items-center justify-between border-b border-white/5 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-white/5 rounded-lg text-white/50 border border-white/5 shadow-[0_6px_14px_rgba(15,23,42,0.18)]">
                   <FileText size={14} />
                 </div>
-                <span className="text-[11px] font-bold text-white/60 tracking-tight truncate max-w-[120px]">
+                <span className="text-[11px] font-bold text-white/70 tracking-tight truncate max-w-[150px]">
                   {invoice.file_name}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5">
-                  <button onClick={() => setPage(Math.max(1, page - 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5 shadow-[0_6px_14px_rgba(15,23,42,0.16)]">
+                  <button onClick={() => setPage(Math.max(1, page - 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ChevronLeft size={16} />
                   </button>
                   <div className="px-2 text-[11px] font-black text-white/50 border-x border-white/5 mx-0.5">
                     {page} / {totalPages}
                   </div>
-                  <button onClick={() => setPage(Math.min(totalPages, page + 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                  <button onClick={() => setPage(Math.min(totalPages, page + 1))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ChevronRight size={16} />
                   </button>
                 </div>
 
-                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5">
-                  <button onClick={() => setZoom(Math.max(50, zoom - 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5 shadow-[0_6px_14px_rgba(15,23,42,0.16)]">
+                  <button onClick={() => setZoom(Math.max(50, zoom - 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ZoomOut size={16} />
                   </button>
                   <div className="px-2 text-[11px] font-black text-white/50 border-x border-white/5 mx-0.5 min-w-[45px] text-center">
                     {zoom}%
                   </div>
-                  <button onClick={() => setZoom(Math.min(300, zoom + 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded-md transition-all">
+                  <button onClick={() => setZoom(Math.min(300, zoom + 25))} className="text-white/60 hover:text-white hover:bg-white/10 p-1 rounded transition-all">
                     <ZoomIn size={16} />
                   </button>
                 </div>
@@ -1631,7 +1828,7 @@ export default function DetailView() {
             </div>
 
             {/* Document Viewer */}
-            <div className="flex-1 overflow-auto flex items-start justify-center p-0 bg-[#323639]">
+            <div className="flex-1 overflow-auto flex items-start justify-center p-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.03),transparent_18%),linear-gradient(180deg,#2C3239_0%,#2F353C_100%)]">
               {documentPath ? (
                 <div className="w-full h-full flex flex-col">
                   {documentPath.toLowerCase().endsWith('.pdf') ? (
@@ -1641,7 +1838,7 @@ export default function DetailView() {
                       title="Invoice Document"
                     />
                   ) : (
-                    <div className="flex-1 overflow-auto p-8 flex justify-center">
+                    <div className="flex-1 overflow-auto p-3 flex justify-center">
                       <div className="relative group">
                         <img
                           src={`local-file:///${documentPath.replace(/\\/g, '/')}`}
@@ -1653,14 +1850,14 @@ export default function DetailView() {
                             transition: 'width 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
                           }}
                           alt="Invoice"
-                          className="shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-sm ring-1 ring-white/10"
+                          className="rounded-[4px] ring-1 ring-white/8 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
                         />
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center p-6 bg-[#323639]">
+                <div className="flex-1 flex items-center justify-center p-3 bg-[linear-gradient(180deg,#2C3239_0%,#2F353C_100%)]">
                   <div
                     style={{ width: `${(500 * zoom) / 100}px` }}
                     className="bg-white rounded-sm shadow-2xl p-10 min-h-[600px] font-sans origin-top transition-all duration-200"
@@ -1693,17 +1890,17 @@ export default function DetailView() {
             </div>
           </ResizablePanel>
 
-          <ResizableHandle withHandle className="bg-slate-200 w-1.5 hover:bg-slate-300 transition-colors" />
+          <ResizableHandle withHandle className="mx-2 w-2 rounded-full bg-[#D9E4F3] hover:bg-[#C7D7ED] transition-colors" />
 
           {/* Right Panel — Data Entry (50% Default, Resizable) */}
-          <ResizablePanel defaultSize={50} minSize={30} className="bg-white flex flex-col relative w-full overflow-hidden">
+          <ResizablePanel defaultSize={66} minSize={40} className="bg-white/92 flex flex-col relative w-full overflow-hidden rounded-[28px] border border-white/80 shadow-[0_24px_50px_rgba(15,23,42,0.1)] backdrop-blur-xl">
             {/* Form Header */}
-            <div className="h-[72px] flex items-center justify-between px-8 bg-white border-b border-slate-100 shrink-0 sticky top-0 z-20 w-full">
+            <div className="h-[58px] flex items-center justify-between px-6 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,250,255,0.95)_100%)] border-b border-slate-100 shrink-0 sticky top-0 z-20 w-full shadow-[0_10px_24px_rgba(148,163,184,0.08)]">
               <div className="flex items-center gap-4 flex-1 min-w-0">
-                <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest shrink-0">validation</span>
-                <div className="h-6 w-[1px] bg-slate-200 shrink-0" />
+                <span className="text-[9.5px] font-black text-[#8DA3BC] uppercase tracking-[0.28em] shrink-0">validation</span>
+                <div className="h-5 w-[1px] bg-[linear-gradient(180deg,rgba(203,213,225,0.1),rgba(203,213,225,0.9),rgba(203,213,225,0.1))] shrink-0" />
 
-                <div className="flex items-center gap-2 flex-wrap py-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {[
                     { label: 'Company', key: 'buyer_verification', showIf: 'all' },
                     { label: 'GST', key: 'gst_validation_status', showIf: 'all' },
@@ -1726,12 +1923,12 @@ export default function DetailView() {
                     return (
                       <div
                         key={key}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-tight whitespace-nowrap ${isSuccess
-                          ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm'
-                          : 'bg-rose-50 text-rose-600 border-rose-100 shadow-sm'
+                        className={`inline-flex items-center gap-1 px-2 py-[3px] rounded-full border text-[9px] font-black uppercase tracking-[0.12em] whitespace-nowrap ${isSuccess
+                          ? 'bg-[linear-gradient(180deg,#F4FFF9_0%,#EDFBF3_100%)] text-emerald-600 border-emerald-100/80'
+                          : 'bg-[linear-gradient(180deg,#FFF5F7_0%,#FFEEF2_100%)] text-rose-500 border-rose-100/80'
                           }`}
                       >
-                        <div className={`w-1.5 h-1.5 rounded-full ${isSuccess ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-rose-500 shadow-[0_0_5px_#f43f5e]'}`} />
+                        <div className={`w-1 h-1 rounded-full shrink-0 ${isSuccess ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                         <span>{label}</span>
                       </div>
                     );
@@ -1740,13 +1937,13 @@ export default function DetailView() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-white p-0">
+            <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,#FFFFFF_0%,#FBFDFF_100%)] p-0">
               <div className="w-full">
                 {/* Warning Banner Column */}
-                <div className="px-8 pt-6 space-y-4">
+                <div className="px-6 pt-5 space-y-3.5">
                   {isManualReview && (
-                    <div className="bg-orange-50 border border-orange-100 rounded-2xl p-5 flex items-center gap-4 shadow-sm mb-6">
-                      <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center shrink-0 border border-orange-200">
+                    <div className="mb-6 flex items-center gap-4 rounded-[22px] border border-orange-100 bg-[linear-gradient(135deg,#FFF9ED_0%,#FFF5E4_100%)] p-5 shadow-[0_14px_28px_rgba(251,191,36,0.10)]">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-orange-200 bg-[linear-gradient(180deg,#FFF8E7_0%,#FFEEC8_100%)] shrink-0 shadow-[0_8px_18px_rgba(251,191,36,0.12)]">
                         <AlertCircle size={20} className="text-orange-500" />
                       </div>
                       <div className="flex-1">
@@ -1757,76 +1954,90 @@ export default function DetailView() {
                     </div>
                   )}
                   {(!isVendorMapped) && (
-                    <div className="bg-[#fff1f2] border border-[#fecaca] rounded-2xl p-5 flex items-center gap-4 shadow-sm group transition-all hover:border-[#fca5a5]">
-                      <div className="w-10 h-10 bg-[#fee2e2] rounded-xl flex items-center justify-center shrink-0 border border-[#fecaca]">
-                        <AlertCircle size={20} className="text-[#ef4444]" />
+                    <div className="flex items-center justify-between gap-4 rounded-[22px] border border-[#fecaca] bg-[linear-gradient(135deg,#FFF5F6_0%,#FFF1F4_100%)] px-5 py-4 shadow-[0_14px_30px_rgba(244,63,94,0.08)] transition-all hover:border-[#fca5a5]">
+                      <div className="flex items-center gap-3.5">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#fecaca] bg-[linear-gradient(180deg,#FFF6F7_0%,#FFE7EB_100%)] shrink-0 shadow-[0_8px_18px_rgba(244,63,94,0.10)]">
+                          <AlertCircle size={18} className="text-[#ef4444]" />
+                        </div>
+                        <div>
+                          <p className="text-[13px] font-black text-[#b91c1c] leading-tight">Supplier not linked to accounting system</p>
+                          <p className="text-[11px] text-[#ef4444]/70 font-medium mt-0.5">
+                            {isFromReceived ? 'Go to workspace and map this supplier before proceeding.' : 'Register the supplier in your ERP to post this invoice.'}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <p className="text-[14px] font-bold text-[#b91c1c] leading-tight flex items-center gap-2">
-                          Tally Vendor Not Found.
-                          {!isFromReceived && (
-                            <button onClick={() => setShowVendorSlideout(true)} className="text-[#ef4444] underline decoration-2 underline-offset-4 hover:text-[#dc2626] transition-colors">
-                              Create vendor record in ERP
-                            </button>
-                          )}
-                          {isFromReceived ? ' Please map vendor in workspace.' : ' to proceed.'}
-                        </p>
-                      </div>
+                      {!isFromReceived && (
+                        <button
+                          onClick={() => setShowVendorSlideout(true)}
+                          className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-[linear-gradient(135deg,#ef4444,#dc2626)] px-3.5 py-2 text-[11px] font-black text-white shadow-[0_6px_16px_rgba(239,68,68,0.30)] hover:shadow-[0_8px_20px_rgba(239,68,68,0.40)] hover:-translate-y-0.5 transition-all"
+                        >
+                          <UserPlus size={12} />
+                          Register Supplier
+                        </button>
+                      )}
                     </div>
                   )}
 
                   {routingReasons.length > 0 && (
-                    <div className="overflow-hidden rounded-[22px] border border-[#DCE7F5] bg-[linear-gradient(135deg,#FFFFFF_0%,#F8FBFF_45%,#F6FAF8_100%)] shadow-[0_14px_32px_rgba(15,23,42,0.07)]">
-                      <div className="relative px-5 py-4">
-                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_38%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_32%)]" />
+                    <div className="overflow-hidden rounded-[20px] border border-[#DCE7F5] bg-[linear-gradient(135deg,#FFFFFF_0%,#F8FBFF_42%,#F6FAF8_100%)] shadow-[0_12px_28px_rgba(15,23,42,0.06)]">
+                      <div className="relative px-4 py-3.5">
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.08),transparent_28%)]" />
                         <div className="relative flex items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-[#D7E6F8] bg-[linear-gradient(180deg,#FFFFFF_0%,#EAF3FF_100%)] shadow-[0_8px_18px_rgba(59,130,246,0.12)]">
-                            <AlertTriangle size={16} className="text-[#D97706]" />
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border border-[#D7E6F8] bg-[linear-gradient(180deg,#FFFFFF_0%,#EAF3FF_100%)] shadow-[0_6px_14px_rgba(59,130,246,0.1)]">
+                            <AlertTriangle size={15} className="text-[#D97706]" />
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7183A1]">Routing Decision</div>
                               <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(191,219,254,0.85),rgba(226,232,240,0.25))]" />
                             </div>
-                            <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
-                              <div>
-                                <p className="text-[18px] font-black tracking-tight text-[#15233B] leading-none">Auto-post skipped</p>
-                                <p className="mt-1.5 max-w-[620px] text-[12px] font-medium leading-relaxed text-[#60708B]">
-                                  This invoice matched <span className="font-black text-[#1A2640]">{routingReasons.length}</span> active routing {routingReasons.length === 1 ? 'rule' : 'rules'}, so it stays in the manual review flow.
+                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-[15px] font-black tracking-tight text-[#15233B] leading-none">Auto-post skipped</p>
+                                  <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-2.5 py-[5px] text-[9px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_10px_rgba(59,130,246,0.06)]">
+                                    {routingReasons.length} match{routingReasons.length === 1 ? '' : 'es'}
+                                  </div>
+                                </div>
+                                <p className="mt-1 max-w-[580px] text-[11px] font-medium leading-relaxed text-[#60708B]">
+                                  This invoice matched active routing {routingReasons.length === 1 ? 'rule' : 'rules'}, so it stays in the manual review flow.
                                 </p>
                               </div>
-                              <div className="rounded-full border border-[#D8E6F8] bg-white/90 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_12px_rgba(59,130,246,0.08)]">
+                              <div className="rounded-full border border-[#D8E6F8] bg-white/90 px-3 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-[#4D6B9A] shadow-[0_4px_12px_rgba(59,130,246,0.08)]">
                                 Review Required
                               </div>
                             </div>
                           </div>
                         </div>
-                        <div className="relative mt-4 flex flex-col gap-2.5">
-                          {routingReasons.map((reason) => {
+                        <div className="relative mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                          {routingReasons.map((reason, index) => {
                             const tone = routingReasonTone(reason.label);
                             return (
                               <div
-                                key={reason.label}
-                                className={`relative overflow-hidden rounded-[16px] border bg-white/90 px-4 py-3 shadow-[0_8px_16px_rgba(15,23,42,0.04)] backdrop-blur-sm ${tone.border}`}
+                                key={`${reason.label}-${index}`}
+                                className={`relative overflow-hidden rounded-[14px] border bg-white/88 px-3 py-2.5 shadow-[0_6px_14px_rgba(15,23,42,0.04)] backdrop-blur-sm ${tone.border}`}
+                                title={`${reason.label}${reason.matchedValue ? ` • ${reason.matchedValue}` : ''}${reason.detail ? ` • ${reason.detail}` : ''}`}
                               >
                                 <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${tone.accent}`} />
-                                <div className="relative flex items-start gap-3">
-                                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] ${tone.iconBg}`}>
-                                    <div className={`h-2.5 w-2.5 rounded-full ${tone.iconText.replace('text', 'bg')}`} />
+                                <div className="relative flex items-start gap-2.5">
+                                  <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-[9px] ${tone.iconBg}`}>
+                                    <div className={`h-2 w-2 rounded-full ${tone.iconText.replace('text', 'bg')}`} />
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="text-[11px] font-black uppercase tracking-[0.1em] text-[#21324F]">{reason.label}</div>
-                                      <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-2 py-[4px] text-[9px] font-black uppercase tracking-[0.12em] text-[#486A98]">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <div className="truncate text-[10px] font-black uppercase tracking-[0.1em] text-[#21324F]">
+                                        {reason.label}
+                                      </div>
+                                      <div className="rounded-full border border-[#D8E6F8] bg-white/95 px-1.5 py-[3px] text-[8px] font-black uppercase tracking-[0.12em] text-[#486A98]">
                                         Matched
                                       </div>
                                       {reason.matchedValue && (
-                                        <div className="rounded-full bg-[#F6F9FD] px-2.5 py-[4px] text-[10px] font-bold text-[#27405F] ring-1 ring-[#DDE7F5]">
+                                        <div className="max-w-full truncate rounded-full bg-[#F6F9FD] px-2 py-[3px] text-[9px] font-bold text-[#27405F] ring-1 ring-[#DDE7F5]">
                                           {reason.label === 'Supplier Filter' ? `Vendor: ${reason.matchedValue}` : `Item: ${reason.matchedValue}`}
                                         </div>
                                       )}
                                     </div>
-                                    <div className="mt-1.5 text-[12px] font-medium leading-relaxed text-[#5E708B]">
+                                    <div className="mt-1 truncate text-[10px] font-medium leading-5 text-[#5E708B]">
                                       {reason.detail}
                                     </div>
                                   </div>
@@ -1835,9 +2046,9 @@ export default function DetailView() {
                             );
                           })}
                         </div>
-                        <div className="relative mt-3 flex items-center gap-2 text-[11px] font-medium text-[#7A8AA2]">
+                        <div className="relative mt-2.5 flex items-center gap-2 text-[10px] font-medium text-[#7A8AA2]">
                           <div className="h-1.5 w-1.5 rounded-full bg-[#94A3B8]" />
-                          Routing rules are shown in AP Workspace as quick badges and explained here with more context.
+                          Routing rules are shown in Accounts Payable  Workspace as quick badges and explained here with more context.
                         </div>
                       </div>
                     </div>
@@ -1847,15 +2058,18 @@ export default function DetailView() {
 
 
                 {/* Form Body */}
-                <div className="px-8 py-8 space-y-10">
+                <div className="px-6 py-6 space-y-7">
                   {/* Document Fields Section (Dynamic from OCR & DB) */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Document Fields</h3>
-                      <div className="h-[2px] flex-1 bg-slate-50" />
+                  <div className="space-y-4 rounded-[24px] border border-[#E6EEF8] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(248,251,255,0.9)_100%)] px-4 py-4 shadow-[0_16px_34px_rgba(148,163,184,0.08)]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F3F8FF_100%)] shadow-[0_10px_20px_rgba(148,163,184,0.14)]">
+                        <FileText size={16} className="text-[#5275A4]" />
+                      </div>
+                      <h3 className="text-[17px] font-black text-slate-900 tracking-tight">Document Fields</h3>
+                      <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(203,213,225,0.15),rgba(191,219,254,0.8),rgba(203,213,225,0.15))]" />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-x-12 gap-y-8">
+                    <div className="grid grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-4">
                       {[
                         { label: 'IRN', key: 'irn' },
                         { label: 'Ack No', key: 'ack_no' },
@@ -1889,9 +2103,9 @@ export default function DetailView() {
                             onChange={(val: string) => {
                               setDocFields({ ...docFields, [key]: val });
                             }}
-                            Icon={readOnly ? undefined : (label.toLowerCase().includes('date') ? Calendar : Edit2)}
+                            Icon={allowDocumentFieldEditing ? (label.toLowerCase().includes('date') ? Calendar : Edit2) : undefined}
                             isError={isErr}
-                            disabled={readOnly}
+                            disabled={!allowDocumentFieldEditing}
                           />
                         );
                       })}
@@ -1899,11 +2113,14 @@ export default function DetailView() {
                   </div>
 
                   {/* Line Items Section */}
-                  <div className="space-y-6 pb-20">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[16px] font-black text-slate-900 tracking-tight">Line Items</h3>
-                      <div className="h-[2px] flex-1 bg-slate-50" />
-                      {!isGoodsDocument && !readOnly && lineItems.some((_item, idx) => String(rawPayload?.line_items?.[idx]?.mapped_ledger ?? '').trim()) && (
+                  <div className="space-y-5 pb-14 rounded-[24px] border border-[#E6EEF8] bg-[linear-gradient(180deg,rgba(255,255,255,0.95)_0%,rgba(248,251,255,0.9)_100%)] px-5 py-5 shadow-[0_16px_34px_rgba(148,163,184,0.08)]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F3F8FF_100%)] shadow-[0_10px_20px_rgba(148,163,184,0.14)]">
+                        <Database size={16} className="text-[#5275A4]" />
+                      </div>
+                      <h3 className="text-[17px] font-black text-slate-900 tracking-tight">Line Items</h3>
+                      <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(203,213,225,0.15),rgba(191,219,254,0.8),rgba(203,213,225,0.15))]" />
+                      {!isGoodsDocument && lineItems.some((_item, idx) => String(rawPayload?.line_items?.[idx]?.mapped_ledger ?? '').trim()) && (
                         <button
                           type="button"
                           onClick={applyAllMappedLedgers}
@@ -1914,44 +2131,44 @@ export default function DetailView() {
                       )}
                     </div>
 
-                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                    <div className="overflow-hidden rounded-[22px] border border-[#DCE7F5] bg-white shadow-[0_14px_30px_rgba(148,163,184,0.1)]">
                       <div className="overflow-x-auto">
-                        <table className="w-full table-fixed text-left border-collapse min-w-[860px]">
+                        <table className="w-full table-fixed text-left border-collapse min-w-[680px]">
                           <colgroup>
+                            <col style={{ width: '21%' }} />
                             <col style={{ width: '22%' }} />
-                            <col style={{ width: '24%' }} />
-                            <col style={{ width: '100px' }} />
-                            <col style={{ width: '80px' }} />
-                            <col style={{ width: '110px' }} />
+                            <col style={{ width: '88px' }} />
+                            <col style={{ width: '68px' }} />
                             <col style={{ width: '90px' }} />
-                            <col style={{ width: '110px' }} />
-                            {!readOnly && <col style={{ width: '52px' }} />}
+                            <col style={{ width: '76px' }} />
+                            <col style={{ width: '96px' }} />
+                            {allowLineItemStructureEditing && <col style={{ width: '44px' }} />}
                           </colgroup>
                           <thead className="bg-slate-50/80 border-b border-slate-200">
                             <tr>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest">{isGoodsDocument ? 'Stock Item / Ledger' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">HSN/SAC</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Quantity</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Unit Rate</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Discount</th>
-                              <th className="py-4 px-5 text-[11px] font-black text-slate-400 uppercase tracking-widest text-right whitespace-nowrap">Amount</th>
-                              {!readOnly && <th className="py-4 px-4 w-[50px]"></th>}
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Item/ Description <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">{isGoodsDocument ? 'Stock Item / Ledger' : 'Ledger'} <span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider whitespace-nowrap">HSN/SAC</th>
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center whitespace-nowrap">Qty</th>
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center whitespace-nowrap">Unit Rate</th>
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center whitespace-nowrap">Disc.</th>
+                              <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right whitespace-nowrap">Amount</th>
+                              {allowLineItemStructureEditing && <th className="py-2.5 px-3 w-[44px]"></th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {lineItems.map((item, index) => (
                               <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="p-3 align-top min-w-0">
+                                <td className="p-2 align-top min-w-0">
                                   <div
-                                    className="min-h-[38px] py-2 text-[13px] font-bold leading-5 whitespace-normal break-words"
+                                    className="min-h-[32px] py-1 text-[12px] font-bold leading-5 whitespace-normal break-words"
                                     style={{ color: isGoodsDocument ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
                                     title={item.description}
                                   >
                                     {item.description}
                                   </div>
                                 </td>
-                                <td className="p-3 align-top min-w-0">
+                                <td className="p-2 align-top min-w-0">
                                   <CustomTableSelect
                                     value={isGoodsDocument
                                       ? getGoodsLineSelectionValue(item, !allowCategorizedLineItemPicker)
@@ -2024,10 +2241,10 @@ export default function DetailView() {
                                     </div>
                                   )}
                                 </td>
-                                <td className="p-3 align-top min-w-[110px]">
+                                <td className="p-2 align-top min-w-[80px]">
                                   <input
-                                    disabled={readOnly}
-                                    className={`w-full border p-2 rounded-[6px] text-[13px] outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[36px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[38px]'}`}
+                                    disabled={!allowLineItemStructureEditing}
+                                    className={`w-full border px-2 rounded-[6px] text-[12px] outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[32px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[34px]'}`}
                                     value={item.hsn_sac}
                                     onChange={(e) => {
                                       const val = e.target.value;
@@ -2035,11 +2252,11 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top min-w-[88px]">
+                                <td className="p-2 align-top min-w-[60px]">
                                   <input
-                                    disabled={readOnly}
+                                    disabled={!allowLineItemStructureEditing}
                                     type="number"
-                                    className={`w-full border p-2 rounded-[6px] text-[13px] text-right font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`}
+                                    className={`w-full border px-2 rounded-[6px] text-[12px] text-right font-mono outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[32px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[34px]'}`}
                                     value={item.qty}
                                     onChange={(e) => {
                                       const val = Number(e.target.value);
@@ -2047,11 +2264,11 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top min-w-[120px]">
+                                <td className="p-2 align-top min-w-[82px]">
                                   <input
-                                    disabled={readOnly}
+                                    disabled={!allowLineItemStructureEditing}
                                     type="number"
-                                    className={`w-full border p-2 rounded-[6px] text-[13px] text-right font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`}
+                                    className={`w-full border px-2 rounded-[6px] text-[12px] text-right font-mono outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[32px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[34px]'}`}
                                     value={item.rate}
                                     onChange={(e) => {
                                       const val = Number(e.target.value);
@@ -2059,26 +2276,26 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                <td className="p-3 align-top min-w-[96px]">
+                                <td className="p-2 align-top min-w-[68px]">
                                   <div className="relative flex items-center">
                                     <input
-                                      disabled={readOnly}
+                                      disabled={!allowLineItemStructureEditing}
                                       type="number"
-                                      className={`w-full border p-2 rounded-[6px] text-[13px] text-right pr-6 font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px] pr-4' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`}
+                                      className={`w-full border px-2 rounded-[6px] text-[12px] text-right pr-5 font-mono outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[32px] pr-4' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[34px]'}`}
                                       value={item.discount}
                                       onChange={(e) => {
                                         const val = Number(e.target.value);
                                         setLineItems(lineItems.map((ln, i) => i === index ? { ...ln, discount: val } : ln));
                                       }}
                                     />
-                                    {!readOnly && <span className="absolute right-2 text-[12px] text-[#8899AA] font-bold">%</span>}
+                                    {allowLineItemStructureEditing && <span className="absolute right-1.5 text-[11px] text-[#8899AA] font-bold">%</span>}
                                   </div>
                                 </td>
-                                <td className="p-3 align-top min-w-[110px]">
+                                <td className="p-2 align-top min-w-[88px]">
                                   <input
-                                    disabled={readOnly}
+                                    disabled={!allowLineItemStructureEditing}
                                     type="number"
-                                    className={`w-full border p-2 rounded-[6px] text-[13px] text-right font-mono outline-none disabled:opacity-100 ${readOnly ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[36px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[38px]'}`}
+                                    className={`w-full border px-2 rounded-[6px] text-[12px] text-right font-mono outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[32px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[34px]'}`}
                                     value={item.amount}
                                     onChange={(e) => {
                                       const val = Number(e.target.value);
@@ -2086,10 +2303,10 @@ export default function DetailView() {
                                     }}
                                   />
                                 </td>
-                                {!readOnly && (
-                                  <td className="p-3 text-center align-top pt-[14px]">
+                                {allowLineItemStructureEditing && (
+                                  <td className="p-2 text-center align-top pt-[10px]">
                                     <button onClick={() => handleRemoveLineItem(item.id)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-1 rounded-[6px] cursor-pointer border-none bg-transparent transition-colors">
-                                      <Trash2 size={16} />
+                                      <Trash2 size={14} />
                                     </button>
                                   </td>
                                 )}
@@ -2100,7 +2317,7 @@ export default function DetailView() {
                       </div>
                     </div>
 
-                    {!readOnly && (
+                    {allowLineItemStructureEditing && (
                       <div className="px-5 mt-4">
                         <button onClick={handleAddLineItem} className="flex items-center gap-2 text-[#1E6FD9] text-[13px] font-bold border-none bg-transparent hover:text-[#1557B0] cursor-pointer">
                           <Plus size={16} /> Add Line Item
@@ -2109,37 +2326,33 @@ export default function DetailView() {
                     )}
 
                     {/* Amount Summary Section */}
-                    <div className="mt-8 px-8 flex justify-end">
-                      <div className="w-full max-w-[400px] space-y-3 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Taxable Value</span>
-                          <span className="text-[15px] font-black text-slate-900">{fmtExactCurrency(Number(docFields.sub_total || 0))}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">Sum of GST</span>
-                          <span className="text-[15px] font-black text-slate-900">{fmtExactCurrency(Number(docFields.tax_total || 0))}</span>
+                    <div className="mt-4 px-1 flex justify-end">
+                      <div className="w-full max-w-[392px] rounded-[18px] border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F7FAFF_100%)] px-4 py-3 shadow-[0_12px_24px_rgba(148,163,184,0.09)]">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-[14px] border border-[#E7EFFA] bg-white/80 px-3 py-2 shadow-[0_4px_10px_rgba(148,163,184,0.05)]">
+                            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400">Taxable Value</div>
+                            <div className="mt-1 text-[14px] font-black leading-none text-slate-900">{fmtExactCurrency(Number(docFields.sub_total || 0))}</div>
+                          </div>
+                          <div className="rounded-[14px] border border-[#E7EFFA] bg-white/80 px-3 py-2 shadow-[0_4px_10px_rgba(148,163,184,0.05)]">
+                            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400">Sum of GST</div>
+                            <div className="mt-1 text-[14px] font-black leading-none text-slate-900">{fmtExactCurrency(Number(docFields.tax_total || 0))}</div>
+                          </div>
                         </div>
                         {(docFields.cgst > 0 || docFields.sgst > 0) ? (
-                          <>
-                            <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">CGST</span>
-                              <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.cgst || 0))}</span>
-                            </div>
-                            <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
-                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SGST</span>
-                              <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.sgst || 0))}</span>
-                            </div>
-                          </>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold text-slate-500">
+                            <span className="uppercase tracking-[0.14em] text-slate-400">CGST <span className="ml-1 text-slate-700">{fmtExactCurrency(Number(docFields.cgst || 0))}</span></span>
+                            <span className="h-1 w-1 rounded-full bg-slate-300" />
+                            <span className="uppercase tracking-[0.14em] text-slate-400">SGST <span className="ml-1 text-slate-700">{fmtExactCurrency(Number(docFields.sgst || 0))}</span></span>
+                          </div>
                         ) : docFields.igst > 0 && (
-                          <div className="flex justify-between items-center pl-4 border-l-2 border-slate-200">
-                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">IGST</span>
-                            <span className="text-[13px] font-bold text-slate-700">{fmtExactCurrency(Number(docFields.igst || 0))}</span>
+                          <div className="mt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                            IGST <span className="ml-1 text-slate-700">{fmtExactCurrency(Number(docFields.igst || 0))}</span>
                           </div>
                         )}
-                        <div className="h-[1px] bg-slate-200 my-2" />
-                        <div className="flex justify-between items-center">
-                          <span className="text-[13px] font-extrabold text-slate-900 uppercase tracking-widest">Total Invoice Amount</span>
-                          <span className="text-[20px] font-black text-blue-600">{fmtExactCurrency(Number(docFields.grand_total || 0))}</span>
+                        <div className="my-2.5 h-px bg-[linear-gradient(90deg,rgba(203,213,225,0.2),rgba(148,163,184,0.7),rgba(203,213,225,0.2))]" />
+                        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[linear-gradient(90deg,rgba(37,99,235,0.04),rgba(59,130,246,0.02))] px-3 py-2.5">
+                          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#6B84A8]">Total Invoice Amount</div>
+                          <span className="text-[17px] font-black leading-none tracking-tight text-[#2563EB]">{fmtExactCurrency(Number(docFields.grand_total || 0))}</span>
                         </div>
                       </div>
                     </div>
@@ -2149,320 +2362,249 @@ export default function DetailView() {
             </div>
 
             {/* Create Vendor Slide-out */}
-            <div className={`absolute top-0 right-0 h-full w-[460px] bg-white border-l border-slate-200 shadow-[-20px_0_50px_rgba(0,0,0,0.15)] transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-50 flex flex-col ${showVendorSlideout ? 'translate-x-0' : 'translate-x-full'}`}>
-              <div className="p-7 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <div className="flex items-center gap-4">
-                  <div className="bg-blue-600 text-white p-2.5 rounded-2xl shadow-lg shadow-blue-500/30 font-black text-[12px] rotate-3">M</div>
+            <div className={`absolute top-0 right-0 h-full w-[440px] bg-[linear-gradient(180deg,#FFFFFF_0%,#FAFBFF_100%)] border-l border-slate-100 shadow-[-24px_0_60px_rgba(15,23,42,0.12)] transition-transform duration-300 ease-out z-50 flex flex-col ${showVendorSlideout ? 'translate-x-0' : 'translate-x-full'}`}>
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-slate-100 bg-[linear-gradient(180deg,#FFFFFF,#F8FAFF)] flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-[linear-gradient(135deg,#EFF6FF,#DBEAFE)] border border-blue-200 shadow-[0_4px_12px_rgba(37,99,235,0.12)]">
+                    <UserPlus size={16} className="text-blue-600" />
+                  </div>
                   <div>
-                    <h3 className="text-[18px] font-black text-slate-900 tracking-tight">Vendor Master</h3>
-                    <p className="text-[11px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Create Record in ERP</p>
+                    <h3 className="text-[15px] font-black text-slate-900 tracking-tight leading-none">Register Supplier</h3>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">Add to your accounting system</p>
                   </div>
                 </div>
-                <button onClick={() => setShowVendorSlideout(false)} className="text-slate-400 hover:text-slate-900 hover:bg-slate-100 p-2.5 rounded-2xl transition-all">
-                  <X size={20} strokeWidth={3} />
+                <button onClick={() => setShowVendorSlideout(false)} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all">
+                  <X size={16} strokeWidth={2.5} />
                 </button>
               </div>
-              <div className="p-10 flex-1 overflow-y-auto space-y-10">
-                <InputField label="Vendor Name" value={newVendor.name} required onChange={(val: string) => setNewVendor({ ...newVendor, name: val })} disabled={readOnly} />
-                <InputField label="Buyer ERP Name" value={newVendor.buyerErpName} onChange={(val: string) => setNewVendor({ ...newVendor, buyerErpName: val })} disabled={readOnly} />
-                <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="Vendor Code" value={newVendor.vendor_code} onChange={(val: string) => setNewVendor({ ...newVendor, vendor_code: val })} disabled={readOnly} />
-                  <InputField label="Under Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} disabled={readOnly} />
+
+              {/* Form */}
+              <div className="px-5 py-4 flex-1 overflow-y-auto space-y-3">
+                {/* Identity */}
+                <div className="space-y-2.5">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Identity</p>
+                  <InputField label="Supplier Name" value={newVendor.name} required onChange={(val: string) => setNewVendor({ ...newVendor, name: val })} disabled={readOnly} />
+                  <InputField label="Name as in ERP" value={newVendor.buyerErpName} onChange={(val: string) => setNewVendor({ ...newVendor, buyerErpName: val })} disabled={readOnly} />
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <InputField label="Supplier Code" value={newVendor.vendor_code} onChange={(val: string) => setNewVendor({ ...newVendor, vendor_code: val })} disabled={readOnly} />
+                    <InputField label="Account Group" value={newVendor.underGroup} required onChange={(val: string) => setNewVendor({ ...newVendor, underGroup: val })} Icon={ChevronDown} selectOptions={['Sundry Creditors', 'Sundry Debtors', 'Bank Accounts']} disabled={readOnly} />
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="GSTIN" value={newVendor.gstin} required onChange={(val: string) => setNewVendor({ ...newVendor, gstin: val })} disabled={readOnly} />
+
+                {/* Tax */}
+                <div className="space-y-2.5 pt-2.5 border-t border-slate-100">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Tax & Compliance</p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <InputField label="GSTIN" value={newVendor.gstin} required onChange={(val: string) => setNewVendor({ ...newVendor, gstin: val })} disabled={readOnly} />
+                    <InputField label="PAN" value={newVendor.pan} onChange={(val: string) => setNewVendor({ ...newVendor, pan: val })} disabled={readOnly} />
+                  </div>
                   <InputField label="Tax ID" value={newVendor.tax_id} onChange={(val: string) => setNewVendor({ ...newVendor, tax_id: val })} disabled={readOnly} />
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="PAN" value={newVendor.pan} onChange={(val: string) => setNewVendor({ ...newVendor, pan: val })} disabled={readOnly} />
-                  <InputField label="State" value={newVendor.state} required onChange={(val: string) => setNewVendor({ ...newVendor, state: val })} Icon={ChevronDown} selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']} disabled={readOnly} />
-                </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+
+                {/* Address */}
+                <div className="space-y-2.5 pt-2.5 border-t border-slate-100">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Address</p>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="col-span-2">
+                      <InputField label="State" value={newVendor.state} required onChange={(val: string) => setNewVendor({ ...newVendor, state: val })} Icon={ChevronDown} selectOptions={['Karnataka', 'Maharashtra', 'Delhi', 'Tamil Nadu']} disabled={readOnly} />
+                    </div>
+                    <InputField label="Pincode" value={newVendor.pincode} onChange={(val: string) => setNewVendor({ ...newVendor, pincode: val })} disabled={readOnly} />
+                  </div>
                   <InputField label="City" value={newVendor.city} onChange={(val: string) => setNewVendor({ ...newVendor, city: val })} disabled={readOnly} />
-                  <InputField label="Pincode" value={newVendor.pincode} onChange={(val: string) => setNewVendor({ ...newVendor, pincode: val })} disabled={readOnly} />
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-10">
-                  <InputField label="Phone" value={newVendor.phone} onChange={(val: string) => setNewVendor({ ...newVendor, phone: val })} disabled={readOnly} />
-                  <InputField label="Email" value={newVendor.email} onChange={(val: string) => setNewVendor({ ...newVendor, email: val })} disabled={readOnly} />
-                </div>
-                <div className="space-y-6 pt-4 border-t border-slate-100">
-                  <h4 className="text-[12px] font-black text-slate-900 uppercase tracking-widest">Bank Details</h4>
+
+                {/* Contact */}
+                <div className="space-y-2.5 pt-2.5 border-t border-slate-100">
+                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Contact & Bank</p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <InputField label="Phone" value={newVendor.phone} onChange={(val: string) => setNewVendor({ ...newVendor, phone: val })} disabled={readOnly} />
+                    <InputField label="Email" value={newVendor.email} onChange={(val: string) => setNewVendor({ ...newVendor, email: val })} disabled={readOnly} />
+                  </div>
                   <InputField label="Bank Name" value={newVendor.bank_name} onChange={(val: string) => setNewVendor({ ...newVendor, bank_name: val })} disabled={readOnly} />
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-10">
+                  <div className="grid grid-cols-2 gap-2.5">
                     <InputField label="Account No" value={newVendor.bank_account_no} onChange={(val: string) => setNewVendor({ ...newVendor, bank_account_no: val })} disabled={readOnly} />
                     <InputField label="IFSC Code" value={newVendor.bank_ifsc} onChange={(val: string) => setNewVendor({ ...newVendor, bank_ifsc: val })} disabled={readOnly} />
                   </div>
                 </div>
               </div>
+
+              {/* Status messages */}
               {vendorSyncSuccess && (
-                <div className="mx-8 mb-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
-                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                <div className="mx-5 mb-3 flex items-center gap-2.5 rounded-[14px] border border-emerald-200 bg-[linear-gradient(135deg,#F0FDF4,#DCFCE7)] px-4 py-3">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 shadow-[0_4px_10px_rgba(16,185,129,0.25)]">
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </div>
-                  <span className="text-[12px] text-emerald-700 font-medium leading-snug">{vendorSyncSuccess}</span>
+                  <span className="text-[12px] font-semibold text-emerald-700 leading-snug">{vendorSyncSuccess}</span>
                 </div>
               )}
               {vendorSyncError && (
-                <div className="mx-8 mb-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 font-medium leading-snug">
-                  {vendorSyncError}
+                <div className="mx-5 mb-3 flex items-start gap-2.5 rounded-[14px] border border-red-200 bg-[linear-gradient(135deg,#FFF5F6,#FFE9EE)] px-4 py-3">
+                  <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                  <span className="text-[12px] font-semibold text-red-700 leading-snug">{vendorSyncError}</span>
                 </div>
               )}
-              <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => { setShowVendorSlideout(false); setVendorSyncError(null); setVendorSyncSuccess(null); }} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={isSyncingVendor}>Cancel</Button>
-                <Button
+
+              {/* Footer */}
+              <div className="px-5 py-4 border-t border-slate-100 bg-white flex items-center justify-between">
+                <button
+                  onClick={() => { setShowVendorSlideout(false); setVendorSyncError(null); setVendorSyncSuccess(null); }}
                   disabled={isSyncingVendor}
-                  onClick={async () => {
-                    if (!id || !invoice) return;
-                    const name = (newVendor.name || '').trim();
-                    const underGroup = (newVendor.underGroup || '').trim();
-                    const state = (newVendor.state || '').trim();
-                    const gstin = (newVendor.gstin || '').trim();
-                    if (!name) {
-                      toast.error('Vendor name is required');
-                      return;
-                    }
-                    if (!underGroup) {
-                      toast.error('Under Group is required');
-                      return;
-                    }
-                    if (!gstin) {
-                      toast.error('GSTIN is required');
-                      return;
-                    }
-                    if (!state) {
-                      toast.error('State is required');
-                      return;
-                    }
-                    const payload = {
-                      process: { vendor_creation: true },
-                      invoice: {
-                        payload: {
-                          vendorNameAsPerTally: name,
-                          vendorName: name,
-                          "Name as per Tally": newVendor.buyerErpName || '',
-                          group: underGroup || 'Sundry Creditors',
-                          maintainBillByBill: true,
-                          mailingName: name,
-                          address: {
-                            line1: billingAddress || '',
-                            line2: '',
-                            line3: '',
-                            state: state || '',
-                            country: 'India',
-                            pincode: (newVendor.pincode || '').trim() || '',
-                          },
-                          contact: {
-                            mobile: (newVendor.phone || '').trim() || '',
-                            phone: (newVendor.phone || '').trim() || '',
-                            email: (newVendor.email || '').trim() || '',
-                          },
-                          tax: {
-                            pan: (newVendor.pan || '').trim() || '',
-                            gstRegistrationType: 'Regular',
-                            gstin: gstin || '',
-                          },
-                          meta: {
-                            invoice_id: invoice.id || '',
-                            invoice_no: (invoice.invoice_no || invoice.invoice_number || '').trim() || '',
-                            file_name: (invoice.file_name || '').trim() || '',
-                            invoice_vendor_name: (invoice.vendor_name || '').trim() || '',
-                            invoice_vendor_gst: (invoice.vendor_gst || '').trim() || '',
-                          },
-                        },
-                      },
-                    };
-                    console.log('[DetailView] Sync with Tally clicked, payload:', JSON.stringify(payload).slice(0, 200));
-                    setIsSyncingVendor(true);
-                    setVendorSyncError(null);
-                    try {
-                      const result = await syncVendorWithTally(payload);
-                      console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
-                      if (result.success) {
-                        setVendorSyncSuccess(result.message || 'Vendor created successfully in Tally');
-                      } else {
-                        setVendorSyncError(result.message || 'Vendor sync with ERP failed');
+                  className="text-[12px] font-semibold text-slate-400 hover:text-slate-600 disabled:opacity-40 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={isSyncingVendor}
+                  onClick={() => {
+                    setConfirmDialog({
+                      title: 'Register this supplier in ERP?',
+                      description: 'A new supplier master will be created using the details currently shown in this panel.',
+                      confirmLabel: 'Register Supplier',
+                      tone: 'accent',
+                      bullets: [
+                        'The supplier profile will be sent to your ERP/Tally integration.',
+                        'Please validate supplier identity, GSTIN, and account grouping before proceeding.',
+                      ],
+                      note: 'Creating a supplier that already exists may result in duplicate masters.',
+                      onConfirm: async () => {
+                        try {
+                          await handleRegisterSupplier();
+                        } catch (err) {
+                          const msg = err instanceof Error ? err.message : 'Registration failed';
+                          toast.error(msg);
+                        } finally {
+                          setConfirmDialog(null);
+                        }
                       }
-                    } catch (err) {
-                      const msg = err instanceof Error ? err.message : 'Vendor sync failed';
-                      console.error('[DetailView] syncVendorWithTally error:', err);
-                      setVendorSyncError(msg);
-                    } finally {
-                      setIsSyncingVendor(false);
-                    }
+                    });
                   }}
-                  className="h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95"
+                  className="inline-flex items-center gap-2 rounded-xl bg-[linear-gradient(135deg,#2563EB,#3B82F6)] px-5 py-2.5 text-[12px] font-black text-white shadow-[0_6px_20px_rgba(37,99,235,0.28)] hover:shadow-[0_8px_24px_rgba(37,99,235,0.35)] hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all"
                 >
                   {isSyncingVendor ? (
-                    <>
-                      <RefreshCw size={16} className="animate-spin mr-2" />
-                      Syncing with Tally...
-                    </>
+                    <><RefreshCw size={13} className="animate-spin" /> Registering...</>
                   ) : (
-                    'Sync with Tally'
+                    <><UserPlus size={13} /> Register Supplier</>
                   )}
-                </Button>
+                </button>
               </div>
             </div>
             {/* Create Ledger / Stock Item Slide-out */}
-            <div className={`absolute top-0 right-0 h-full w-[460px] bg-white border-l border-slate-200 shadow-[-20px_0_50px_rgba(0,0,0,0.15)] transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) z-50 flex flex-col ${showLedgerSlideout ? 'translate-x-0' : 'translate-x-full'}`}>
-              <div className="p-7 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <div className="flex items-center gap-4">
-                  <div className="bg-emerald-600 text-white p-2.5 rounded-2xl shadow-lg shadow-emerald-500/30 font-black text-[12px] -rotate-3">
-                    {creationMode === 'STOCK_ITEM' ? 'S' : 'L'}
+            <div className={`absolute top-0 right-0 h-full w-[440px] bg-[linear-gradient(180deg,#FFFFFF_0%,#FAFBFF_100%)] border-l border-slate-100 shadow-[-24px_0_60px_rgba(15,23,42,0.12)] transition-transform duration-300 ease-out z-50 flex flex-col ${showLedgerSlideout ? 'translate-x-0' : 'translate-x-full'}`}>
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-slate-100 bg-[linear-gradient(180deg,#FFFFFF,#F8FAFF)] flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-[12px] border shadow-[0_4px_12px_rgba(16,185,129,0.12)] ${creationMode === 'STOCK_ITEM' ? 'bg-[linear-gradient(135deg,#ECFDF5,#D1FAE5)] border-emerald-200' : 'bg-[linear-gradient(135deg,#EFF6FF,#DBEAFE)] border-blue-200'}`}>
+                    {creationMode === 'STOCK_ITEM'
+                      ? <Database size={15} className="text-emerald-600" />
+                      : <FileText size={15} className="text-blue-600" />}
                   </div>
                   <div>
-                    <h3 className="text-[18px] font-black text-slate-900 tracking-tight">
-                      {docFields.doc_type_label?.toLowerCase().includes('goods') ? 'Create Ledger / Stock Item' : 'Expense Ledger'}
+                    <h3 className="text-[15px] font-black text-slate-900 tracking-tight leading-none">
+                      {creationMode === 'STOCK_ITEM' ? 'New Stock Item' : 'New Ledger'}
                     </h3>
-                    <p className="text-[11px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
-                      {creationMode === 'STOCK_ITEM' ? 'Register Stock Inventory' : 'Register Accounting Head'}
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                      {creationMode === 'STOCK_ITEM' ? 'Register in stock inventory' : 'Register accounting head'}
                     </p>
                   </div>
                 </div>
-                <button onClick={() => setShowLedgerSlideout(false)} className="text-slate-400 hover:text-slate-900 hover:bg-slate-100 p-2.5 rounded-2xl transition-all">
-                  <X size={20} strokeWidth={3} />
+                <button onClick={() => setShowLedgerSlideout(false)} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all">
+                  <X size={16} strokeWidth={2.5} />
                 </button>
               </div>
 
+              {/* Mode switcher (goods only) */}
               {docFields.doc_type_label?.toLowerCase().includes('goods') && (
-                <div className="px-10 pt-6">
+                <div className="px-5 pt-3">
                   <Tabs value={creationMode} onValueChange={(val: any) => setCreationMode(val)} className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 p-1 bg-slate-100 rounded-xl h-12">
-                      <TabsTrigger value="STOCK_ITEM" className="rounded-lg font-black text-[12px] uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Stock Item</TabsTrigger>
-                      <TabsTrigger value="LEDGER" className="rounded-lg font-black text-[12px] uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Ledger</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-2 p-1 bg-slate-100 rounded-lg h-9">
+                      <TabsTrigger value="STOCK_ITEM" className="rounded-md text-[11px] font-black uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-emerald-600 data-[state=active]:shadow-sm">Stock Item</TabsTrigger>
+                      <TabsTrigger value="LEDGER" className="rounded-md text-[11px] font-black uppercase tracking-wider data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Ledger</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
               )}
 
-              <div className="p-10 flex-1 overflow-y-auto space-y-10">
+              {/* Form */}
+              <div className="px-5 py-4 flex-1 overflow-y-auto space-y-2.5">
                 {creationMode === 'STOCK_ITEM' ? (
                   <>
                     <InputField label="Stock Item Name" value={newStockItem.name} required onChange={(val: string) => setNewStockItem({ ...newStockItem, name: val })} disabled={readOnly} />
                     <InputField label="Buyer Name" value={newStockItem.buyerName} onChange={(val: string) => setNewStockItem({ ...newStockItem, buyerName: val })} disabled={readOnly} />
-                    <InputField label="Unit of Measure (UOM)" value={newStockItem.uom} required onChange={(val: string) => setNewStockItem({ ...newStockItem, uom: val })} Icon={ChevronDown} selectOptions={['PCS', 'NOS', 'KGS', 'BOX', 'SET']} disabled={readOnly} />
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <InputField label="UOM" value={newStockItem.uom} required onChange={(val: string) => setNewStockItem({ ...newStockItem, uom: val })} Icon={ChevronDown} selectOptions={['PCS', 'NOS', 'KGS', 'BOX', 'SET']} disabled={readOnly} />
+                      <InputField label="GST Rate (%)" value={newStockItem.tax_rate} required onChange={(val: string) => setNewStockItem({ ...newStockItem, tax_rate: val })} Icon={ChevronDown} selectOptions={['0', '5', '12', '18', '28']} disabled={readOnly} />
+                    </div>
                     <InputField label="HSN/SAC Code" value={newStockItem.hsn} required onChange={(val: string) => setNewStockItem({ ...newStockItem, hsn: val })} disabled={readOnly} />
-                    <InputField label="GST Tax Rate (%)" value={newStockItem.tax_rate} required onChange={(val: string) => setNewStockItem({ ...newStockItem, tax_rate: val })} Icon={ChevronDown} selectOptions={['0', '5', '12', '18', '28']} disabled={readOnly} />
                   </>
                 ) : (
                   <>
                     <InputField label="Ledger Name" value={newLedger.name} required onChange={(val: string) => setNewLedger({ ...newLedger, name: val })} disabled={readOnly} />
                     <InputField label="Buyer Name" value={newLedger.buyerName} onChange={(val: string) => setNewLedger({ ...newLedger, buyerName: val })} disabled={readOnly} />
                     <InputField label="Under Group" value={newLedger.underGroup} required onChange={(val: string) => setNewLedger({ ...newLedger, underGroup: val })} Icon={ChevronDown} selectOptions={['Indirect Expenses', 'Direct Expenses', 'Fixed Assets', 'Direct Incomes', 'Indirect Incomes']} disabled={readOnly} />
-                    <InputField label="Is GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} disabled={readOnly} />
+                    <InputField label="GST Applicable" value={newLedger.gstApplicable} required onChange={(val: string) => setNewLedger({ ...newLedger, gstApplicable: val })} Icon={ChevronDown} selectOptions={['Yes', 'No', 'Not Applicable']} disabled={readOnly} />
                   </>
                 )}
               </div>
 
+              {/* Status */}
               {masterSyncSuccess && (
-                <div className="mx-8 mb-2 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
-                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                <div className="mx-5 mb-3 flex items-center gap-2.5 rounded-[14px] border border-emerald-200 bg-[linear-gradient(135deg,#F0FDF4,#DCFCE7)] px-4 py-3">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 shadow-[0_4px_10px_rgba(16,185,129,0.25)]">
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </div>
-                  <span className="text-[12px] text-emerald-700 font-medium leading-snug">{masterSyncSuccess}</span>
+                  <span className="text-[12px] font-semibold text-emerald-700 leading-snug">{masterSyncSuccess}</span>
                 </div>
               )}
               {masterSyncError && (
-                <div className="mx-8 mb-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 font-medium leading-snug">
-                  {masterSyncError}
+                <div className="mx-5 mb-3 flex items-start gap-2.5 rounded-[14px] border border-red-200 bg-[linear-gradient(135deg,#FFF5F6,#FFE9EE)] px-4 py-3">
+                  <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                  <span className="text-[12px] font-semibold text-red-700 leading-snug">{masterSyncError}</span>
                 </div>
               )}
-              <div className="p-8 border-t border-slate-100 bg-white flex justify-end gap-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
-                <Button variant="ghost" onClick={() => { setShowLedgerSlideout(false); setMasterSyncError(null); setMasterSyncSuccess(null); }} className="h-12 px-8 font-black text-slate-400 hover:text-slate-600 rounded-2xl" disabled={saving}>Cancel</Button>
-                <Button
+
+              {/* Footer */}
+              <div className="px-5 py-4 border-t border-slate-100 bg-white flex items-center justify-between">
+                <button
+                  onClick={() => { setShowLedgerSlideout(false); setMasterSyncError(null); setMasterSyncSuccess(null); }}
                   disabled={saving}
-                  onClick={async () => {
-                    console.log('[MasterCreation] Button clicked. CreationMode:', creationMode);
-                    if (readOnly) {
-                      console.warn('[MasterCreation] Blocked: View is read-only');
-                      return;
-                    }
-                    if (activeLedgerIndex === null) {
-                      console.warn('[MasterCreation] Blocked: No active ledger index');
-                      return;
-                    }
-
-                    const label = docFields?.doc_type_label || '';
-                    const isGoods = label.toLowerCase().includes('goods');
-
-                    setSaving(true);
-                    setMasterSyncError(null);
-                    setMasterSyncSuccess(null);
-                    try {
-                      if (creationMode === 'STOCK_ITEM') {
-                        const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
-                        console.log('[MasterCreation] Creating Stock Item:', { name, uom, hsn, tax_rate, buyerName });
-                        if (!name.trim()) throw new Error('Item name is required');
-
-                        toast.info('Item creation started');
-                        const result = await createItemMaster({
-                          name: name.trim(),
-                          uom: uom.trim(),
-                          hsn: hsn.trim(),
-                          tax_rate: tax_rate,
-                          company_id: (invoice as any)?.company_id ?? null,
-                          meta: {
-                            buyer_name: buyerName,
-                            invoice_id: id,
-                            invoice_no: (invoice?.invoice_no || '').trim(),
-                            file_name: (invoice?.file_name || '').trim()
-                          }
-                        });
-                        console.log('[MasterCreation] API Result:', result);
-
-                        if (!result.success || !result.item) throw new Error(result.message || 'Failed to create item');
-
-                        const createdName = result.item.item_name || name;
-                        setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
-                        applyGoodsStockItemSelection(activeLedgerIndex, createdName);
-                        setMasterSyncSuccess(result.message || 'Stock item created successfully in Tally');
-                      } else {
-                        const { name, underGroup, buyerName, gstApplicable } = newLedger;
-                        if (!name.trim()) throw new Error('Ledger name is required');
-
-                        toast.info('Ledger creation started');
-                        const result = await createLedgerMaster({
-                          name, parent_group: underGroup, account_type: 'expense',
-                          company_id: (invoice as any)?.company_id ?? null,
-                          meta: {
-                            gst_applicable: gstApplicable,
-                            buyer_name: buyerName,
-                            invoice_id: id
-                          }
-                        });
-
-                        if (!result.success || !result.ledger) throw new Error(result.message || 'Failed to create ledger');
-
-                        const createdId = String(result.ledger.id);
-                        const createdName = String(result.ledger.name || name);
-
-                        setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
-                        setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
-                        setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
-
-                        if (isGoods && allowCategorizedLineItemPicker) {
-                          const converted = await handleGoodsLedgerSelection(activeLedgerIndex, createdName, createdId);
-                          if (converted) {
-                            // Conversion flow already surfaces its own persisted success message.
-                          } else {
-                            setMasterSyncSuccess(result.message || 'Ledger created successfully in Tally');
-                          }
-                        } else {
-                          applyLedgerSelection(activeLedgerIndex, createdName, createdId);
-                          setMasterSyncSuccess(result.message || 'Ledger created successfully in Tally');
+                  className="text-[12px] font-semibold text-slate-400 hover:text-slate-600 disabled:opacity-40 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={saving}
+                  onClick={() => {
+                    setConfirmDialog({
+                      title: creationMode === 'STOCK_ITEM' ? 'Create this stock item?' : 'Create this ledger?',
+                      description: creationMode === 'STOCK_ITEM'
+                        ? 'A new stock item master will be created and linked back to the selected line item.'
+                        : 'A new ledger master will be created and linked back to the selected line item.',
+                      confirmLabel: creationMode === 'STOCK_ITEM' ? 'Create Stock Item' : 'Create Ledger',
+                      tone: 'accent',
+                      bullets: [
+                        'This creates a new master in the target accounting setup.',
+                        'The created master will be applied to the current invoice line after success.',
+                      ],
+                      note: 'Please verify naming, grouping, and tax settings before proceeding.',
+                      onConfirm: async () => {
+                        try {
+                          await handleCreateMaster();
+                        } catch (err) {
+                          const msg = err instanceof Error ? err.message : 'Creation failed';
+                          toast.error(msg);
+                        } finally {
+                          setConfirmDialog(null);
                         }
                       }
-                    } catch (err: any) {
-                      setMasterSyncError(err.message || 'Creation failed');
-                    } finally {
-                      setSaving(false);
-                    }
+                    });
                   }}
-                  className="h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-95"
+                  className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-[12px] font-black text-white shadow-[0_6px_20px_rgba(16,185,129,0.25)] hover:shadow-[0_8px_24px_rgba(16,185,129,0.32)] hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all ${creationMode === 'STOCK_ITEM' ? 'bg-[linear-gradient(135deg,#059669,#10B981)]' : 'bg-[linear-gradient(135deg,#2563EB,#3B82F6)]'}`}
                 >
-                  {saving ? <RefreshCw size={16} className="animate-spin mr-2" /> : null}
-                  {creationMode === 'STOCK_ITEM' ? 'Create' : 'Create'}
-                </Button>
+                  {saving
+                    ? <><RefreshCw size={13} className="animate-spin" /> Creating...</>
+                    : <><Plus size={13} /> {creationMode === 'STOCK_ITEM' ? 'Create Stock Item' : 'Create Ledger'}</>}
+                </button>
               </div>
             </div>
           </ResizablePanel>
@@ -2518,6 +2660,21 @@ export default function DetailView() {
             </div>
           </div>
         )}
+        <PremiumConfirmDialog
+          open={!!confirmDialog}
+          onOpenChange={(open) => { if (!open) setConfirmDialog(null); }}
+          title={confirmDialog?.title || 'Confirm action'}
+          description={confirmDialog?.description || ''}
+          confirmLabel={confirmDialog?.confirmLabel || 'Proceed'}
+          note={confirmDialog?.note}
+          bullets={confirmDialog?.bullets}
+          tone={confirmDialog?.tone || 'accent'}
+          busy={saving || isSyncingVendor}
+          onConfirm={async () => {
+            if (!confirmDialog) return;
+            await confirmDialog.onConfirm();
+          }}
+        />
         <AlertDialog open={!!conversionDialog} onOpenChange={(open) => { if (!open && conversionDialog) closeConversionDialog(false); }}>
           <AlertDialogContent className="sm:max-w-md">
             <AlertDialogHeader>
