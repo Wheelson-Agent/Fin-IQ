@@ -147,8 +147,8 @@ export async function getStatusCounts(companyId?: string): Promise<StatusCount[]
  * @param vendor - Vendor data (partial for updates)
  * @returns The saved vendor
  */
-export async function saveVendor(vendor: Partial<Vendor>): Promise<Vendor> {
-    return invoke<Vendor>('vendors:save', { vendor });
+export async function saveVendor(vendor: Partial<Vendor>): Promise<any> {
+    return invoke<any>('vendors:save', { vendor });
 }
 
 /**

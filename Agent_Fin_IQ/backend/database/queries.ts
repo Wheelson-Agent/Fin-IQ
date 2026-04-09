@@ -1433,6 +1433,13 @@ export async function getVendorById(id: string) {
  * @param gstin - GST number (optional)
  * @returns Vendor row (existing or newly created)
  */
+export async function getVendorByGstin(gstin: string, companyId: string) {
+    const cleanGstin = gstin.trim().toUpperCase();
+    console.log(`[DB] getVendorByGstin check: ${cleanGstin} for company ${companyId}`);
+    const result = await query('SELECT * FROM vendors WHERE UPPER(TRIM(gstin)) = $1 AND company_id = $2', [cleanGstin, companyId]);
+    return result.rows[0] || null;
+}
+
 export async function upsertVendor(name: string, gstin?: string, companyId?: string) {
     let existing;
     if (companyId) {
@@ -1442,6 +1449,13 @@ export async function upsertVendor(name: string, gstin?: string, companyId?: str
     }
     
     if (existing.rows.length > 0) return existing.rows[0];
+
+    // Check if GSTIN already exists for this company
+    if (gstin && companyId) {
+        const cleanGstin = gstin.trim().toUpperCase();
+        const gstMatch = await query('SELECT * FROM vendors WHERE UPPER(TRIM(gstin)) = $1 AND company_id = $2', [cleanGstin, companyId]);
+        if (gstMatch.rows.length > 0) return gstMatch.rows[0];
+    }
 
     const result = await query(
         `INSERT INTO vendors (name, gstin, company_id) VALUES ($1, $2, $3) RETURNING *`,
@@ -1474,6 +1488,20 @@ export async function saveVendor(data: {
     bank_account_no?: string;
     bank_ifsc?: string;
 }) {
+    // PREVENT DUPLICATE GSTIN
+    if (data.gstin && data.company_id) {
+        const cleanGstin = data.gstin.trim().toUpperCase();
+        const existing = await query(
+            'SELECT id, name FROM vendors WHERE UPPER(TRIM(gstin)) = $1 AND company_id = $2',
+            [cleanGstin, data.company_id]
+        );
+        // If someone else has this GSTIN, throw error
+        if (existing.rows.length > 0 && (!data.id || existing.rows[0].id !== data.id)) {
+            console.warn(`[DB] Blocked duplicate vendor: GSTIN ${cleanGstin} already exists for ${existing.rows[0].name}`);
+            throw new Error(`ALREADY_EXISTS: Vendor with GSTIN ${data.gstin} already exists (${existing.rows[0].name})`);
+        }
+    }
+
     if (data.id) {
         const result = await query(
             `UPDATE vendors SET 
