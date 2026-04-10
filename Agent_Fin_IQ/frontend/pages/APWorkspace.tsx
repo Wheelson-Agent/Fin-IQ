@@ -199,13 +199,21 @@ const itemDescriptionMatches = (description: string, selectedItemName: string) =
   );
 } */
 
-function RoutingRuleBadges({ record, valueLimitConfig, invoiceDateRangeConfig, supplierFilterConfig, itemFilterConfig }: {
+function RoutingRuleBadges({ record, postingMode, valueLimitConfig, invoiceDateRangeConfig, supplierFilterConfig, itemFilterConfig }: {
   record: { isHighAmount: boolean; date: string; vendorGst: string; docTypeLabel: string; itemDescriptions: string[]; status: RecordStatus };
+  postingMode: 'manual' | 'auto' | 'touchless';
   valueLimitConfig: { enabled: boolean; limit: number } | null;
   invoiceDateRangeConfig: { enabled: boolean; from: string; to: string } | null;
   supplierFilterConfig: { enabled: boolean; blockedGstins: string[] } | null;
   itemFilterConfig: { enabled: boolean; blockedItemNames: string[] } | null;
 }) {
+  if (postingMode === 'manual') {
+    return (
+      <div className="inline-flex items-center rounded-full border border-slate-200 bg-[linear-gradient(135deg,#FFFFFF,#F8FAFC)] px-2.5 py-1 shadow-[0_6px_16px_rgba(15,23,42,0.05)]">
+        <span className="text-[10px] font-semibold text-slate-400">Manual</span>
+      </div>
+    );
+  }
   const flags: { icon: React.ReactNode; label: string; title: string; className: string; iconWrapClassName: string; iconClassName: string; textClassName: string }[] = [];
 
   if (record.isHighAmount && valueLimitConfig?.enabled) {
@@ -380,6 +388,7 @@ export default function APWorkspace() {
   const { selectedCompany } = useCompany();
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
+  const [postingMode, setPostingMode] = useState<'manual' | 'auto' | 'touchless'>('manual');
   const [valueLimitConfig, setValueLimitConfig] = useState<{ enabled: boolean; limit: number } | null>(null);
   const [invoiceDateRangeConfig, setInvoiceDateRangeConfig] = useState<{ enabled: boolean; from: string; to: string } | null>(null);
   const [supplierFilterConfig, setSupplierFilterConfig] = useState<{ enabled: boolean; blockedGstins: string[] } | null>(null);
@@ -634,62 +643,76 @@ export default function APWorkspace() {
   }, [selectedCompany]);
 
 
-  useEffect(() => {
-    (async () => {
-      try {
-        // @ts-ignore
-        const rules = await window.api.invoke('config:get-rules');
-        if (rules?.criteria?.enableValueLimit) {
-          setValueLimitConfig({ enabled: true, limit: Number(rules.criteria.valueLimit || 0) });
-        } else {
-          setValueLimitConfig({ enabled: false, limit: 0 });
-        }
+  const loadRulesConfig = async () => {
+    try {
+      // @ts-ignore
+      const companyId = selectedCompany && selectedCompany !== 'ALL' ? selectedCompany : undefined;
+      // @ts-ignore
+      const rules = await window.api.invoke('config:get-rules', { companyId });
+      setPostingMode((rules?.postingMode as 'manual' | 'auto' | 'touchless') || 'manual');
 
-        if (rules?.criteria?.filter_invoice_date_enabled) {
-          setInvoiceDateRangeConfig({
-            enabled: true,
-            from: normalizeDateOnly(rules.criteria.filter_invoice_date_from),
-            to: normalizeDateOnly(rules.criteria.filter_invoice_date_to)
-          });
-        } else {
-          setInvoiceDateRangeConfig({ enabled: false, from: '', to: '' });
-        }
-
-        const selectedSupplierIds = Array.isArray(rules?.criteria?.filter_supplier_ids) ? rules.criteria.filter_supplier_ids : [];
-        if (rules?.criteria?.filter_supplier_enabled && selectedSupplierIds.length) {
-          // Resolve selected vendor IDs to GSTs so the routing badge matches the backend GST-based rule.
-          // @ts-ignore
-          const vendors = await window.api.invoke('vendors:get-all');
-          const blockedGstins = Array.from(new Set((vendors || [])
-            .filter((vendor: any) => selectedSupplierIds.includes(vendor.id))
-            .map((vendor: any) => normalizeGstValue(vendor.gstin))
-            .filter(Boolean))) as string[];
-          setSupplierFilterConfig({ enabled: blockedGstins.length > 0, blockedGstins });
-        } else {
-          setSupplierFilterConfig({ enabled: false, blockedGstins: [] });
-        }
-
-        const selectedItemIds = Array.isArray(rules?.criteria?.filter_item_ids) ? rules.criteria.filter_item_ids : [];
-        if (rules?.criteria?.filter_item_enabled && selectedItemIds.length) {
-          // Resolve selected item IDs to names so the routing badge stays aligned with backend name-based matching.
-          // @ts-ignore
-          const items = await window.api.invoke('items:get-all');
-          const blockedItemNames: string[] = Array.from(new Set((items || [])
-            .filter((item: any) => item?.is_active !== false && selectedItemIds.includes(item.id))
-            .map((item: any) => String(normalizeItemText(item.item_name) ?? ''))
-            .filter(Boolean)));
-          setItemFilterConfig({ enabled: blockedItemNames.length > 0, blockedItemNames });
-        } else {
-          setItemFilterConfig({ enabled: false, blockedItemNames: [] });
-        }
-      } catch {
-        setValueLimitConfig(null);
-        setInvoiceDateRangeConfig(null);
-        setSupplierFilterConfig(null);
-        setItemFilterConfig(null);
+      if (rules?.criteria?.enableValueLimit) {
+        setValueLimitConfig({ enabled: true, limit: Number(rules.criteria.valueLimit || 0) });
+      } else {
+        setValueLimitConfig({ enabled: false, limit: 0 });
       }
-    })();
-  }, []);
+
+      if (rules?.criteria?.filter_invoice_date_enabled) {
+        setInvoiceDateRangeConfig({
+          enabled: true,
+          from: normalizeDateOnly(rules.criteria.filter_invoice_date_from),
+          to: normalizeDateOnly(rules.criteria.filter_invoice_date_to)
+        });
+      } else {
+        setInvoiceDateRangeConfig({ enabled: false, from: '', to: '' });
+      }
+
+      const selectedSupplierIds = Array.isArray(rules?.criteria?.filter_supplier_ids) ? rules.criteria.filter_supplier_ids : [];
+      if (rules?.criteria?.filter_supplier_enabled && selectedSupplierIds.length) {
+        // @ts-ignore
+        const vendors = await window.api.invoke('vendors:get-all');
+        const blockedGstins = Array.from(new Set((vendors || [])
+          .filter((vendor: any) => selectedSupplierIds.includes(vendor.id))
+          .map((vendor: any) => normalizeGstValue(vendor.gstin))
+          .filter(Boolean))) as string[];
+        setSupplierFilterConfig({ enabled: blockedGstins.length > 0, blockedGstins });
+      } else {
+        setSupplierFilterConfig({ enabled: false, blockedGstins: [] });
+      }
+
+      const selectedItemIds = Array.isArray(rules?.criteria?.filter_item_ids) ? rules.criteria.filter_item_ids : [];
+      if (rules?.criteria?.filter_item_enabled && selectedItemIds.length) {
+        // @ts-ignore
+        const items = await window.api.invoke('items:get-all');
+        const blockedItemNames: string[] = Array.from(new Set((items || [])
+          .filter((item: any) => item?.is_active !== false && selectedItemIds.includes(item.id))
+          .map((item: any) => String(normalizeItemText(item.item_name) ?? ''))
+          .filter(Boolean)));
+        setItemFilterConfig({ enabled: blockedItemNames.length > 0, blockedItemNames });
+      } else {
+        setItemFilterConfig({ enabled: false, blockedItemNames: [] });
+      }
+    } catch {
+      setPostingMode('manual');
+      setValueLimitConfig(null);
+      setInvoiceDateRangeConfig(null);
+      setSupplierFilterConfig(null);
+      setItemFilterConfig(null);
+    }
+  };
+
+  useEffect(() => {
+    loadRulesConfig();
+
+    // Re-fetch rules + invoices whenever the user saves rules in Config tab
+    const handleRulesSaved = () => {
+      loadRulesConfig();
+      fetchData(true);
+    };
+    window.addEventListener('rules:saved', handleRulesSaved);
+    return () => window.removeEventListener('rules:saved', handleRulesSaved);
+  }, [selectedCompany]);
+
 
   const resetAllPages = () => {
     setCurrentPage(prev => ({
@@ -2305,7 +2328,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="pl-6">
-                          {record.status !== 'handoff' && <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />}
+                          {record.status !== 'handoff' && <RoutingRuleBadges record={record} postingMode={postingMode} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />}
                         </TableCell>
                         <TableCell className="pl-6 pr-6 py-2.5 whitespace-normal align-middle">
                           <div className="flex flex-col items-start gap-1.5">
@@ -2425,7 +2448,7 @@ export default function APWorkspace() {
                           {renderApprovalSnapshot(record)}
                         </TableCell>
                         <TableCell className="pl-6">
-                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
+                          <RoutingRuleBadges record={record} postingMode={postingMode} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -2535,7 +2558,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="pl-6">
-                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
+                          <RoutingRuleBadges record={record} postingMode={postingMode} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -2722,7 +2745,7 @@ export default function APWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="pl-6">
-                          <RoutingRuleBadges record={record} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
+                          <RoutingRuleBadges record={record} postingMode={postingMode} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
                         </TableCell>
                         <TableCell className="pr-2" onClick={(e) => e.stopPropagation()}>
                           <input

@@ -809,14 +809,20 @@ export default function Config() {
 
                     try {
                         const ext = await window.api.invoke('config:get-extended-criteria', { companyId: activeCompanyId });
-                        if (ext) setCriteriaExtended(ext);
+                        if (ext) {
+                            setCriteriaExtended(ext);
+                            setCommittedConfig(prev => ({ ...prev, criteriaExtended: ext }));
+                        }
                     } catch (e) {
                         console.error('[Config] Failed to load criteria-extended:', e);
                     }
 
                     try {
                         const stor = await window.api.invoke('config:get-storage-path', { companyId: activeCompanyId });
-                        if (stor) setStorage(stor);
+                        if (stor) {
+                            setStorage(stor);
+                            setCommittedConfig(prev => ({ ...prev, storage: stor }));
+                        }
                     } catch (e) {
                         console.error('[Config] Failed to load storage:', e);
                     }
@@ -1015,6 +1021,7 @@ export default function Config() {
                     companyId: activeCompanyId
                 });
                 rulesSaved = true;
+                window.dispatchEvent(new CustomEvent('rules:saved'));
             } catch (rulesErr) {
                 console.error('[Config] config:save-rules failed:', rulesErr);
                 toast.error('Failed to save posting rules. Please try again.');
