@@ -216,7 +216,7 @@ const setStructuredLineField = (
   target[outputKey] = coerceToExistingShape(existingValue, nextValue);
 };
 
-const buildStructuredLineItem = (baseItem: any, uiItem: any, index: number) => {
+const buildStructuredLineItem = (baseItem: any, uiItem: any, index: number, docTypeHint?: string) => {
   const structured = (baseItem && typeof baseItem === 'object' && !Array.isArray(baseItem))
     ? { ...baseItem }
     : {};
@@ -231,9 +231,14 @@ const buildStructuredLineItem = (baseItem: any, uiItem: any, index: number) => {
   const computedAmount = Number.isFinite(explicitAmount) && explicitAmount !== 0
     ? explicitAmount
     : safeQty * safeRate * (1 - safeDiscount / 100);
+  const normalizedDocType = String(docTypeHint ?? '').trim().toLowerCase();
+  const persistedLedgerValue =
+    normalizedDocType === 'service' || normalizedDocType === 'services'
+      ? 'services'
+      : (uiItem?.ledger ?? '');
 
   setStructuredLineField(structured, ['description', 'item_description'], uiItem?.description ?? '', 'description');
-  setStructuredLineField(structured, ['ledger', 'gl_account_id'], uiItem?.ledger ?? '', structured.gl_account_id !== undefined ? 'gl_account_id' : 'ledger');
+  setStructuredLineField(structured, ['ledger', 'gl_account_id'], persistedLedgerValue, structured.gl_account_id !== undefined ? 'gl_account_id' : 'ledger');
   setStructuredLineField(structured, ['matched_stock_item'], String(uiItem?.matched_stock_item ?? '').trim(), 'matched_stock_item');
   setStructuredLineField(structured, ['matched_id'], uiItem?.matched_id ?? '', 'matched_id');
   setStructuredLineField(structured, ['mapped_ledger', 'gl_mapped'], String(uiItem?.mapped_ledger ?? '').trim(), structured.gl_mapped !== undefined ? 'gl_mapped' : 'mapped_ledger');
@@ -296,9 +301,16 @@ const buildSavePayloadPreservingStructure = (
     (Array.isArray(rawPayload?.line_items) && rawPayload?.line_items) ||
     (Array.isArray(rawPayload?.__ap_workspace?.line_items) && rawPayload.__ap_workspace.line_items) ||
     [];
+  const effectiveDocType = String(
+    docFields?.doc_type ??
+    nextPayload.doc_type ??
+    rawPayload?.doc_type ??
+    rawPayload?.__ap_workspace?.doc_type ??
+    ''
+  ).trim();
 
   const savedLineItems = lineItemsChanged
-    ? (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index))
+    ? (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index, effectiveDocType))
     : sourceLineItems;
 
   if (lineItemsChanged || sourceLineItems.length > 0) {
@@ -327,8 +339,15 @@ const buildWorkspaceRawPayloadSnapshot = (
     (Array.isArray(rawPayload?.line_items) && rawPayload?.line_items) ||
     (Array.isArray(rawPayload?.__ap_workspace?.line_items) && rawPayload.__ap_workspace.line_items) ||
     [];
+  const effectiveDocType = String(
+    nextDocType ??
+    nextPayload.doc_type ??
+    rawPayload?.doc_type ??
+    rawPayload?.__ap_workspace?.doc_type ??
+    ''
+  ).trim();
 
-  const savedLineItems = (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index));
+  const savedLineItems = (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index, effectiveDocType));
 
   nextPayload.line_items = savedLineItems;
   if (nextDocType) {
@@ -353,6 +372,11 @@ const isGenericGoodsMarker = (value: any): boolean => {
 const isGenericServiceMarker = (value: any): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
   return !normalized || normalized === 'services';
+};
+
+const isServiceDocumentType = (value: any): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'service' || normalized === 'services';
 };
 
 const findMatchingOption = (value: any, options: string[]): string => {
@@ -941,13 +965,19 @@ export default function DetailView() {
             const safeDiscount = Number.isFinite(discount) ? discount : 0;
             const rawAmount = Number(item?.total_amount ?? item?.amount ?? item?.line_amount);
             const amount = Number.isFinite(rawAmount) && rawAmount !== 0 ? rawAmount : safeQty * safeRate * (1 - safeDiscount / 100);
+            const mappedLedgerLabel = String(item?.mapped_ledger ?? item?.gl_mapped ?? '').trim();
+            const rawLedgerValue = item?.ledger ?? item?.gl_account_id ?? item?.gl_mapped ?? item?.mapped_ledger ?? '';
+            const effectiveLedgerValue =
+              isServiceDocumentType(raw?.doc_type) && isGenericServiceMarker(rawLedgerValue) && mappedLedgerLabel
+                ? (resolveLedgerId(mappedLedgerLabel) || mappedLedgerLabel)
+                : rawLedgerValue;
             return {
               id: item?.id ?? `${Date.now()}_${idx}`,
               description: item?.description ?? item?.item_description ?? '',
-              ledger: item?.ledger ?? item?.gl_account_id ?? item?.gl_mapped ?? item?.mapped_ledger ?? '',
+              ledger: effectiveLedgerValue,
               matched_stock_item: item?.matched_stock_item ?? '',
               matched_id: item?.matched_id ?? '',
-              mapped_ledger: item?.mapped_ledger ?? item?.gl_mapped ?? '',
+              mapped_ledger: mappedLedgerLabel,
               possible_gl_names: normalizeSelectableNames(item?.possible_gl_names),
               match_status: item?.match_status ?? '',
               hsn_sac: item?.hsn_sac ?? item?.hsn ?? '',
