@@ -62,6 +62,9 @@ const ALLOWED_CHANNELS = [
     'api/companies',
     'dashboard:get-metrics',
     'dashboard:tally-sync',
+    'dashboard:top-suppliers',
+    'dashboard:pipeline',
+    'dashboard:recent-activity',
     // Audit
     'audit:get-logs',
     'audit:delete-log',

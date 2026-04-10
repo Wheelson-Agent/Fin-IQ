@@ -2233,6 +2233,12 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                 const total = Number(invData.grand_total || 0);
                 isHighAmount = total > 0 && total > limit;
             }
+
+            // Stamp the active posting mode onto the invoice at OCR-complete time.
+            // postingRules is already fetched above — no extra DB call.
+            // Valid values: 'manual' | 'hybrid' | 'touchless' | null (no config saved).
+            // The Pipeline widget reads this column to group invoices by mode.
+            invData.posting_mode = postingRules?.postingMode || null;
         } catch (flagErr) {}
         invData.is_high_amount = isHighAmount;
 
@@ -2244,7 +2250,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             "approval_delay_time", "failure_reason", "failure_category", "uploader_name", "n8n_val_json_data",
             "invoice_number", "tally_id", "pre_ocr_status", "vendor_gst", "n8n_validation_status", "irn",
             "doc_type", "processing_status", "ack_no", "erp_sync_id", "erp_sync_status", "eway_bill_no",
-            "file_name", "file_path", "file_location", "batch_id", "vendor_name", "po_number", "gl_account"
+            "file_name", "file_path", "file_location", "batch_id", "vendor_name", "po_number", "gl_account",
+            "posting_mode" // Pipeline widget: which config mode was active when OCR completed
         ];
 
         const allowedLinesCols = [
@@ -2998,15 +3005,56 @@ export async function getDashboardMetrics(companyId?: string) {
     const totalInvoices = await query(`SELECT COUNT(*)::int as count FROM ap_invoices ${whereClause}`, params);
     const totalAmount = await query(`SELECT SUM(grand_total)::numeric as total FROM ap_invoices ${whereClause}`, params);
     const pendingApproval = await query(`SELECT COUNT(*)::int as count FROM ap_invoices ${whereClause} ${whereClause ? 'AND' : 'WHERE'} processing_status = 'Pending Approval'`, params);
+    const monthlyPosted = await query(
+        `SELECT
+             COALESCE(
+                 SUM(
+                     CASE
+                         WHEN updated_at >= date_trunc('month', NOW())
+                         THEN grand_total
+                         ELSE 0
+                     END
+                 ),
+                 0
+             )::numeric AS current_amount,
+             COUNT(CASE WHEN updated_at >= date_trunc('month', NOW()) THEN 1 END)::int AS current_count,
+             COALESCE(
+                 SUM(
+                     CASE
+                         WHEN updated_at >= date_trunc('month', NOW()) - INTERVAL '1 month'
+                          AND updated_at <  date_trunc('month', NOW())
+                         THEN grand_total
+                         ELSE 0
+                     END
+                 ),
+                 0
+             )::numeric AS previous_amount
+         FROM ap_invoices
+         ${whereClause} ${whereClause ? 'AND' : 'WHERE'} erp_sync_id IS NOT NULL`,
+        params
+    );
 
     // Status counts for pie charts
     const statusCounts = await getInvoiceStatusCounts(companyId);
+    const currentMonthAmount = Number(monthlyPosted.rows[0]?.current_amount || 0);
+    const currentMonthCount = Number(monthlyPosted.rows[0]?.current_count || 0);
+    const previousMonthAmount = Number(monthlyPosted.rows[0]?.previous_amount || 0);
+    // Posted invoices are identified the same way the workspace does: a confirmed ERP sync ID exists.
+    // We use updated_at as the best available posting-time proxy because the schema has no dedicated posted_at column.
+    const trendPct = previousMonthAmount > 0
+        ? ((currentMonthAmount - previousMonthAmount) / previousMonthAmount) * 100
+        : 0;
 
     return {
         totalInvoices: totalInvoices.rows[0].count,
         totalAmount: Number(totalAmount.rows[0].total || 0),
         pendingApproval: pendingApproval.rows[0].count,
-        statusCounts
+        statusCounts,
+        netThisMonth: {
+            amount: currentMonthAmount,
+            count: currentMonthCount,
+            trendPct
+        }
     };
 }
 
@@ -3023,6 +3071,366 @@ export async function getDashboardMetrics(companyId?: string) {
  * recent   — last 5 tally_sync_logs events joined with invoice for vendor + amount
  * blocked  — breakdown of handoff invoices by failure reason category
  */
+/**
+ * Invoice Pipeline widget — lane counts/amounts, touchless rate, avg processing time, oldest unreviewed.
+ *
+ * Lanes:
+ *   touchless — Auto-Posted (fully automated, no human touch)
+ *   hybrid    — Awaiting Input / Pending Approval / Ready to Post (rules-flagged, needs review)
+ *   manual    — Failed / Handoff / Manual Review (OCR/pre-OCR failure, needs manual fix)
+ *
+ * Lanes are determined by the posting_mode column stamped onto each invoice at OCR-complete time.
+ * posting_mode = 'touchless' | 'hybrid' | 'manual' — set from app_config.posting_rules.postingMode.
+ * NULL rows (invoices processed before this column existed, or fallback-path invoices) are excluded.
+ *
+ * touchless_rate: % of invoices this calendar month that were processed in touchless mode.
+ * touchless_rate_prev: same for the previous calendar month.
+ * avg_time: mean of (updated_at - created_at) per lane — touchless in minutes, hybrid in hours, manual in days.
+ * oldest_unreviewed_days: age in days of the oldest non-touchless invoice created this month.
+ */
+export async function getPipelineStats(companyId?: string) {
+    const companyParam = companyId && companyId !== 'ALL' ? companyId : null;
+
+    // Single pass over this month's rows only.
+    // Groups by posting_mode (the config mode active when OCR completed).
+    // NULL posting_mode rows are excluded from all counts — they predate this feature.
+    const laneSql = `
+        SELECT
+            -- TOUCHLESS lane: invoices processed while mode = touchless
+            SUM(CASE WHEN posting_mode = 'touchless'
+                THEN 1 ELSE 0 END)::int                                                AS touchless_count,
+            COALESCE(SUM(CASE WHEN posting_mode = 'touchless'
+                THEN grand_total ELSE 0 END), 0)                                       AS touchless_amount,
+
+            -- HYBRID lane: invoices processed while mode = hybrid
+            SUM(CASE WHEN posting_mode = 'hybrid'
+                THEN 1 ELSE 0 END)::int                                                AS hybrid_count,
+            COALESCE(SUM(CASE WHEN posting_mode = 'hybrid'
+                THEN grand_total ELSE 0 END), 0)                                       AS hybrid_amount,
+
+            -- MANUAL lane: invoices processed while mode = manual
+            SUM(CASE WHEN posting_mode = 'manual'
+                THEN 1 ELSE 0 END)::int                                                AS manual_count,
+            COALESCE(SUM(CASE WHEN posting_mode = 'manual'
+                THEN grand_total ELSE 0 END), 0)                                       AS manual_amount,
+
+            -- Total non-NULL rows this month (denominator for touchless rate)
+            SUM(CASE WHEN posting_mode IS NOT NULL
+                THEN 1 ELSE 0 END)::int                                                AS total_this_month,
+
+            -- Avg processing time per lane in seconds (updated_at - created_at).
+            -- NULL AVG means no rows in that lane this month.
+            AVG(CASE WHEN posting_mode = 'touchless' AND updated_at > created_at
+                THEN EXTRACT(EPOCH FROM (updated_at - created_at)) END)               AS touchless_avg_sec,
+            AVG(CASE WHEN posting_mode = 'hybrid' AND updated_at > created_at
+                THEN EXTRACT(EPOCH FROM (updated_at - created_at)) END)               AS hybrid_avg_sec,
+            AVG(CASE WHEN posting_mode = 'manual' AND updated_at > created_at
+                THEN EXTRACT(EPOCH FROM (updated_at - created_at)) END)               AS manual_avg_sec
+        FROM ap_invoices
+        WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+          AND date_trunc('month', created_at) = date_trunc('month', NOW())
+    `;
+
+    // Touchless rate for previous calendar month — separate query to keep the main SQL readable
+    const prevMonthSql = `
+        SELECT
+            SUM(CASE WHEN posting_mode = 'touchless' THEN 1 ELSE 0 END)::int AS touchless_last_month,
+            SUM(CASE WHEN posting_mode IS NOT NULL   THEN 1 ELSE 0 END)::int AS total_last_month
+        FROM ap_invoices
+        WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+          AND date_trunc('month', created_at) = date_trunc('month', NOW()) - INTERVAL '1 month'
+    `;
+
+    // Age in whole days of the oldest non-touchless invoice created this month (hybrid card footer)
+    const oldestSql = `
+        SELECT COALESCE(
+            EXTRACT(DAY FROM (NOW() - MIN(created_at))),
+            0
+        )::int AS oldest_days
+        FROM ap_invoices
+        WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+          AND date_trunc('month', created_at) = date_trunc('month', NOW())
+          AND posting_mode IS NOT NULL
+          AND posting_mode != 'touchless'
+    `;
+
+    // Run all three queries in parallel — they are independent reads
+    const [laneResult, prevMonthResult, oldestResult] = await Promise.all([
+        query(laneSql,      [companyParam]),
+        query(prevMonthSql, [companyParam]),
+        query(oldestSql,    [companyParam]),
+    ]);
+
+    const r    = laneResult.rows[0];
+    const prev = prevMonthResult.rows[0];
+
+    // Extract counts for rate calculation
+    const touchlessThisMonth = Number(r.touchless_count    ?? 0);
+    const totalThisMonth     = Number(r.total_this_month   ?? 0);
+    const touchlessLastMonth = Number(prev.touchless_last_month ?? 0);
+    const totalLastMonth     = Number(prev.total_last_month     ?? 0);
+
+    return {
+        touchless: {
+            count:  Number(r.touchless_count  ?? 0),
+            amount: Number(r.touchless_amount ?? 0),
+        },
+        hybrid: {
+            count:  Number(r.hybrid_count  ?? 0),
+            amount: Number(r.hybrid_amount ?? 0),
+        },
+        manual: {
+            count:  Number(r.manual_count  ?? 0),
+            amount: Number(r.manual_amount ?? 0),
+        },
+        // Touchless rate: % of this/last month's invoices that used touchless mode; 1 decimal
+        touchless_rate:      totalThisMonth  > 0 ? Math.round((touchlessThisMonth  / totalThisMonth)  * 1000) / 10 : 0,
+        touchless_rate_prev: totalLastMonth  > 0 ? Math.round((touchlessLastMonth  / totalLastMonth)  * 1000) / 10 : 0,
+        avg_time: {
+            // Convert raw seconds → display unit per lane; 0 if no timing data for that lane
+            touchless_min:  r.touchless_avg_sec != null ? Math.round(Number(r.touchless_avg_sec) / 60    * 10) / 10 : 0,
+            hybrid_hours:   r.hybrid_avg_sec   != null ? Math.round(Number(r.hybrid_avg_sec)   / 3600  * 10) / 10 : 0,
+            manual_days:    r.manual_avg_sec   != null ? Math.round(Number(r.manual_avg_sec)   / 86400 * 10) / 10 : 0,
+        },
+        oldest_unreviewed_days: Number(oldestResult.rows[0]?.oldest_days ?? 0),
+    };
+}
+
+/**
+ * Top Suppliers widget — last 30 days spend from erp_data_invoices.
+ * Returns up to 5 suppliers ranked by total spend, with bar_pct, concentration, and new-vendor count.
+ * Returns empty top_suppliers array if no invoice data exists in the 30-day window.
+ */
+export async function getTopSuppliers(companyId?: string) {
+    console.log(`[getTopSuppliers] called with companyId=${companyId}`);
+    // Fetch top-5 suppliers by spend in the last 30 days, scoped to company if provided
+    const suppliersResult = await query(
+        `SELECT
+             seller_name,
+             seller_gstin,
+             SUM(total_amount) AS total_spend
+         FROM erp_data_invoices
+         WHERE total_amount  > 0
+           AND seller_name  IS NOT NULL
+           AND invoice_date >= NOW() - INTERVAL '30 days'
+           AND ($1::uuid IS NULL OR company_id = $1::uuid)
+         GROUP BY seller_name, seller_gstin
+         ORDER BY total_spend DESC
+         LIMIT 5`,
+        [companyId || null]
+    );
+
+    const rows = suppliersResult.rows;
+
+    // No data in the 30-day window — widget renders empty state
+    if (!rows.length) {
+        return { top_suppliers: [], concentration_top3_pct: 0, new_this_month: 0 };
+    }
+
+    // Top supplier = 100%, all others are proportional
+    const maxSpend = Number(rows[0].total_spend);
+    const topSuppliers = rows.map((row: any, idx: number) => ({
+        rank:    idx + 1,
+        name:    row.seller_name as string,
+        gstin:   (row.seller_gstin as string) || '',
+        amount:  Math.round(Number(row.total_spend)),
+        bar_pct: maxSpend > 0 ? Math.round((Number(row.total_spend) / maxSpend) * 1000) / 10 : 0,
+    }));
+
+    // Spend concentration: top-3 share of total top-5 spend (risk signal when >60%)
+    const totalSpend = topSuppliers.reduce((sum: number, s: any) => sum + s.amount, 0);
+    const top3Spend  = topSuppliers.slice(0, 3).reduce((sum: number, s: any) => sum + s.amount, 0);
+    const concentration_top3_pct = totalSpend > 0
+        ? Math.round((top3Spend / totalSpend) * 1000) / 10
+        : 0;
+
+    // New vendors this calendar month (first seen = created_at >= month start)
+    const newResult = await query(
+        `SELECT COUNT(*) AS new_count
+         FROM vendors
+         WHERE created_at >= date_trunc('month', NOW())
+           AND ($1::uuid IS NULL OR company_id = $1::uuid)`,
+        [companyId || null]
+    );
+    const new_this_month = Number(newResult.rows[0]?.new_count ?? 0);
+
+    return { top_suppliers: topSuppliers, concentration_top3_pct, new_this_month };
+}
+
+function formatDashboardActivityAmount(amount: number | null | undefined) {
+    if (!Number.isFinite(amount as number)) return null;
+    const value = Number(amount);
+    if (value >= 10000000) return `Rs ${(value / 10000000).toFixed(1)}Cr`;
+    if (value >= 100000) return `Rs ${(value / 100000).toFixed(1)}L`;
+    if (value >= 1000) return `Rs ${(value / 1000).toFixed(1)}K`;
+    return `Rs ${Math.round(value).toLocaleString('en-IN')}`;
+}
+
+export async function getRecentDashboardActivity(companyId?: string) {
+    const result = await query(
+        `WITH activity AS (
+            SELECT
+                'sync_status_log'::text AS source_kind,
+                'sync_failed'::text AS event_type,
+                ssl.created_at AS ts,
+                NULL::uuid AS invoice_id,
+                NULL::text AS invoice_number,
+                NULL::text AS supplier_name,
+                NULL::numeric AS amount,
+                COALESCE(NULLIF(ssl.user_message, ''), 'Sync failed') AS detail_text
+            FROM sync_status_log ssl
+            WHERE ssl.sync_status = 'failure'
+              AND ssl.entity_name = 'invoice'
+              AND ($1::uuid IS NULL OR ssl.company_id = $1::uuid)
+
+            UNION ALL
+
+            SELECT
+                'audit_logs'::text AS source_kind,
+                CASE
+                    WHEN a.event_type IN ('Approved', 'Auto-Posted') THEN 'auto_posted'
+                    WHEN a.event_type = 'Revalidated' THEN 'revalidated'
+                    WHEN a.event_type = 'Created' THEN 'created'
+                    WHEN a.event_type = 'Deleted' THEN 'deleted'
+                    ELSE NULL
+                END AS event_type,
+                a.timestamp AS ts,
+                a.invoice_id,
+                a.invoice_no AS invoice_number,
+                a.vendor_name AS supplier_name,
+                ai.grand_total AS amount,
+                COALESCE(NULLIF(a.description, ''), a.event_type) AS detail_text
+            FROM audit_logs a
+            LEFT JOIN ap_invoices ai ON ai.id = a.invoice_id
+            WHERE ($1::uuid IS NULL OR a.company_id = $1::uuid)
+              AND a.event_type IN ('Approved', 'Auto-Posted', 'Revalidated', 'Created', 'Deleted')
+
+            UNION ALL
+
+            SELECT
+                'processing_jobs'::text AS source_kind,
+                'ocr_processed'::text AS event_type,
+                COALESCE(pj.completed_at, pj.started_at) AS ts,
+                ai.id AS invoice_id,
+                ai.invoice_number AS invoice_number,
+                ai.vendor_name AS supplier_name,
+                ai.grand_total AS amount,
+                'Awaiting validation'::text AS detail_text
+            FROM processing_jobs pj
+            JOIN ap_invoices ai ON ai.id = pj.invoice_id
+            WHERE pj.stage = 'OCR'
+              AND pj.status = 'PASSED'
+              AND ($1::uuid IS NULL OR ai.company_id = $1::uuid)
+
+            UNION ALL
+
+            SELECT
+                'ap_invoices'::text AS source_kind,
+                CASE
+                    WHEN ai.processing_status = 'Awaiting Input' THEN 'awaiting_input'
+                    ELSE 'blocked'
+                END AS event_type,
+                ai.updated_at AS ts,
+                ai.id AS invoice_id,
+                ai.invoice_number AS invoice_number,
+                ai.vendor_name AS supplier_name,
+                ai.grand_total AS amount,
+                COALESCE(NULLIF(ai.failure_reason, ''), ai.processing_status, 'Needs attention') AS detail_text
+            FROM ap_invoices ai
+            WHERE ai.processing_status IN ('Awaiting Input', 'Handoff', 'Failed', 'Manual Review')
+              AND ai.updated_at >= NOW() - INTERVAL '14 days'
+              AND ($1::uuid IS NULL OR ai.company_id = $1::uuid)
+        ),
+        ranked AS (
+            SELECT
+                source_kind,
+                event_type,
+                ts,
+                invoice_id,
+                invoice_number,
+                supplier_name,
+                amount,
+                detail_text,
+                ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(invoice_id::text, source_kind || ':' || event_type || ':' || COALESCE(detail_text, ''))
+                    ORDER BY ts DESC
+                ) AS rn
+            FROM activity
+            WHERE event_type IS NOT NULL
+              AND ts IS NOT NULL
+        )
+        SELECT source_kind, event_type, ts, invoice_id, invoice_number, supplier_name, amount, detail_text
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY ts DESC
+        LIMIT 5`,
+        [companyId || null]
+    );
+
+    const events = result.rows.map((row: any) => {
+        const supplier = String(row.supplier_name || '').trim();
+        const invoiceNumber = String(row.invoice_number || '').trim();
+        const detailText = String(row.detail_text || '').trim();
+        const amountText = formatDashboardActivityAmount(row.amount);
+        const supplierText = supplier ? `**${supplier}**` : 'An invoice';
+        const invoiceText = invoiceNumber ? ` ${invoiceNumber}` : '';
+
+        switch (row.event_type) {
+            case 'sync_failed':
+                return {
+                    type: 'sync_failed',
+                    text: `Tally sync failed - ${detailText}`,
+                    ts: row.ts,
+                };
+            case 'auto_posted':
+                return {
+                    type: 'auto_posted',
+                    text: `Auto-posted - ${supplierText}${invoiceText}${amountText ? ` ${amountText}` : ''} to Tally.`,
+                    ts: row.ts,
+                };
+            case 'revalidated':
+                return {
+                    type: 'revalidated',
+                    text: `Revalidated - ${supplierText}${invoiceText}. ${detailText}`,
+                    ts: row.ts,
+                };
+            case 'ocr_processed':
+                return {
+                    type: 'ocr_processed',
+                    text: `Invoice captured - ${supplierText}${invoiceText}. Ready for review.`,
+                    ts: row.ts,
+                };
+            case 'awaiting_input':
+                return {
+                    type: 'awaiting_input',
+                    text: `Awaiting input - ${supplierText}${invoiceText}. ${detailText}.`,
+                    ts: row.ts,
+                };
+            case 'created':
+                return {
+                    type: 'created',
+                    text: `Created - ${supplierText}${invoiceText}.`,
+                    ts: row.ts,
+                };
+            case 'deleted':
+                return {
+                    type: 'deleted',
+                    text: `Deleted - ${supplierText}${invoiceText}.`,
+                    ts: row.ts,
+                };
+            case 'blocked':
+            default:
+                return {
+                    type: 'blocked',
+                    text: `Blocked - ${supplierText}${invoiceText}. ${detailText}.`,
+                    ts: row.ts,
+                };
+        }
+    });
+
+    return { events };
+}
+
 export async function getTallySyncStats(companyId?: string) {
     const hasCompany = companyId && companyId !== 'ALL';
     const invoices = await getAllInvoices(companyId);

@@ -694,8 +694,50 @@ export function registerIpcHandlers() {
         return await queries.getTallySyncLogs(entityId);
     });
 
+    ipcMain.handle('dashboard:get-metrics', async (_event, { companyId } = {}) => {
+        return await queries.getDashboardMetrics(companyId);
+    });
+
     ipcMain.handle('dashboard:tally-sync', async (_event, { companyId } = {}) => {
         return await queries.getTallySyncStats(companyId);
+    });
+
+    /**
+     * Invoice Pipeline widget — lane counts/amounts, touchless rate, avg processing time, oldest unreviewed.
+     *
+     * Lanes: touchless (Auto-Posted) | hybrid (Awaiting Input / Pending Approval / Ready to Post)
+     *        | manual (Failed / Handoff / Manual Review)
+     * touchless_rate / touchless_rate_prev: % of invoices auto-posted this month vs last month.
+     * avg_time: mean (updated_at - created_at) per lane — minutes / hours / days.
+     * oldest_unreviewed_days: age in days of the oldest non-Auto-Posted invoice.
+     *
+     * Input:  { companyId?: string }
+     * Output: PipelineData shape matching Dashboard.tsx PipelineData interface
+     */
+    ipcMain.handle('dashboard:pipeline', async (_event, { companyId } = {}) => {
+        return await queries.getPipelineStats(companyId);
+    });
+
+    /**
+     * Top Suppliers widget — last 30 days spend by seller from erp_data_invoices.
+     *
+     * Returns up to 5 suppliers ranked by total invoice spend.
+     * Each row includes: rank, name, gstin, amount (INR), bar_pct (relative to #1 = 100),
+     * plus two footer KPIs: concentration_top3_pct and new_this_month.
+     *
+     * Company filter: pass companyId to scope to one company; omit (or null) for ALL.
+     * Date filter:    last 30 calendar days. Returns empty array if no data in window
+     *                 (caller renders an empty state — no silent fallback to all-time).
+     *
+     * Input:  { companyId?: string }
+     * Output: { top_suppliers, concentration_top3_pct, new_this_month }
+     */
+    ipcMain.handle('dashboard:top-suppliers', async (_event, { companyId } = {}) => {
+        return await queries.getTopSuppliers(companyId);
+    });
+
+    ipcMain.handle('dashboard:recent-activity', async (_event, { companyId } = {}) => {
+        return await queries.getRecentDashboardActivity(companyId);
     });
 
     // ─── PROCESSING ────────────────────────────────────────

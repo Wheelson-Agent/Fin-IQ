@@ -397,6 +397,39 @@ export async function getDashboardMetrics(companyId?: string): Promise<Dashboard
     return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
 }
 
+// ─── DASHBOARD: INVOICE PIPELINE ────────────────────────────
+
+/**
+ * Shape returned by dashboard:pipeline — mirrors the PipelineData interface in Dashboard.tsx.
+ * touchless  — Auto-Posted invoices (fully automated)
+ * hybrid     — Awaiting Input / Pending Approval / Ready to Post (rules-flagged)
+ * manual     — Failed / Handoff / Manual Review (OCR / pre-OCR failure)
+ * touchless_rate / touchless_rate_prev — % of invoices auto-posted this/last calendar month
+ * avg_time   — mean processing time per lane (minutes / hours / days)
+ * oldest_unreviewed_days — age of the oldest invoice not yet Auto-Posted
+ */
+export interface PipelineStats {
+    touchless: { count: number; amount: number };
+    hybrid:    { count: number; amount: number };
+    manual:    { count: number; amount: number };
+    touchless_rate:         number;
+    touchless_rate_prev:    number;
+    avg_time: {
+        touchless_min:  number;
+        hybrid_hours:   number;
+        manual_days:    number;
+    };
+    oldest_unreviewed_days: number;
+}
+
+/**
+ * Fetch live Invoice Pipeline widget data.
+ * @param companyId - Optional UUID to scope to one company; omit for ALL.
+ */
+export async function getPipelineStats(companyId?: string): Promise<PipelineStats> {
+    return invoke<PipelineStats>('dashboard:pipeline', { companyId });
+}
+
 export interface TallySyncStats {
     posted:  number;
     pending: number;
@@ -446,6 +479,64 @@ export async function getTallyPostStatus(invoiceId: string, since: string): Prom
         'invoices:get-tally-post-status', { invoiceId, since }
     );
     return res;
+}
+
+// ─── DASHBOARD: TOP SUPPLIERS ─────────────────────────────
+
+/**
+ * A single supplier row returned by the top-suppliers endpoint.
+ */
+export interface TopSupplierRow {
+    rank:    number;
+    name:    string;
+    gstin:   string;
+    amount:  number;  // INR, rounded integer
+    bar_pct: number;  // 0–100, top supplier = 100
+}
+
+/**
+ * Full response shape for the top-suppliers dashboard widget.
+ */
+export interface TopSuppliersData {
+    top_suppliers:          TopSupplierRow[];
+    concentration_top3_pct: number;  // % of total spend held by top-3 vendors
+    new_this_month:         number;  // vendor GSTINs first seen this calendar month
+}
+
+export type DashboardActivityType =
+    | 'sync_failed'
+    | 'sync_success'
+    | 'auto_posted'
+    | 'revalidated'
+    | 'ocr_processed'
+    | 'blocked'
+    | 'awaiting_input'
+    | 'created'
+    | 'deleted';
+
+export interface DashboardActivityRow {
+    type: DashboardActivityType;
+    text: string;
+    ts: string;
+}
+
+export interface DashboardActivityData {
+    events: DashboardActivityRow[];
+}
+
+/**
+ * Fetch top-5 suppliers by invoice spend in the last 30 days.
+ * Returns an empty top_suppliers array if no data exists in that window —
+ * the widget renders an empty state rather than falling back to all-time data.
+ *
+ * @param companyId - Optional UUID to scope to a single company; omit for ALL.
+ */
+export async function getTopSuppliers(companyId?: string): Promise<TopSuppliersData> {
+    return invoke<TopSuppliersData>('dashboard:top-suppliers', { companyId });
+}
+
+export async function getRecentDashboardActivity(companyId?: string): Promise<DashboardActivityData> {
+    return invoke<DashboardActivityData>('dashboard:recent-activity', { companyId });
 }
 
 // ─── SYNC STATUS ──────────────────────────────────────────

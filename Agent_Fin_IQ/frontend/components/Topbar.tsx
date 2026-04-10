@@ -548,40 +548,6 @@ export function Topbar({
             </div>
 
             <div className="flex items-center gap-[10px]">
-                {/* Theme Selector */}
-                <div ref={dropRef} className="relative">
-                    <button
-                        onClick={() => setThemeOpen(v => !v)}
-                        className="flex items-center gap-2 h-[34px] px-3 rounded-lg border text-xs font-semibold hover:bg-slate-50 transition-all"
-                    >
-                        <span>{active.icon}</span>
-                        <span>{active.label}</span>
-                        <ChevronDown size={13} />
-                    </button>
-
-                    <AnimatePresence>
-                        {themeOpen && (
-                            <motion.div
-                                initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-                                className="absolute right-0 top-[calc(100%+8px)] w-[180px] rounded-xl shadow-2xl border bg-white z-50 overflow-hidden p-1"
-                            >
-                                {themes.map(t => (
-                                    <button
-                                        key={t.id} onClick={() => { onToggleTheme(t.id); setThemeOpen(false); }}
-                                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${t.id === theme ? 'bg-slate-100 font-bold' : 'hover:bg-slate-50'}`}
-                                    >
-                                        <span className="text-lg">{t.icon}</span>
-                                        <div className="flex-1">
-                                            <div className="text-[12px]">{t.label}</div>
-                                        </div>
-                                        {t.id === theme && <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
-                                    </button>
-                                ))}
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-
                 <button onClick={handleRefresh} title="Refresh data" className="w-[34px] h-[34px] rounded-lg border flex items-center justify-center hover:bg-slate-50 transition-all">
                     <motion.div animate={{ rotate: isRefreshing ? 360 : 0 }} transition={{ duration: 1, repeat: isRefreshing ? Infinity : 0, ease: 'linear' }}>
                         <RefreshCw size={14} />
