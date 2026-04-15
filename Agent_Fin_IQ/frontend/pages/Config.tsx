@@ -572,6 +572,7 @@ export default function Config() {
         return () => clearInterval(intervalId);
     }, []);
 
+
     useEffect(() => {
         if (!companies.length) return;
 
@@ -809,14 +810,20 @@ export default function Config() {
 
                     try {
                         const ext = await window.api.invoke('config:get-extended-criteria', { companyId: activeCompanyId });
-                        if (ext) setCriteriaExtended(ext);
+                        if (ext) {
+                            setCriteriaExtended(ext);
+                            setCommittedConfig(prev => ({ ...prev, criteriaExtended: ext }));
+                        }
                     } catch (e) {
                         console.error('[Config] Failed to load criteria-extended:', e);
                     }
 
                     try {
                         const stor = await window.api.invoke('config:get-storage-path', { companyId: activeCompanyId });
-                        if (stor) setStorage(stor);
+                        if (stor) {
+                            setStorage(stor);
+                            setCommittedConfig(prev => ({ ...prev, storage: stor }));
+                        }
                     } catch (e) {
                         console.error('[Config] Failed to load storage:', e);
                     }
@@ -1015,6 +1022,7 @@ export default function Config() {
                     companyId: activeCompanyId
                 });
                 rulesSaved = true;
+                window.dispatchEvent(new CustomEvent('rules:saved'));
             } catch (rulesErr) {
                 console.error('[Config] config:save-rules failed:', rulesErr);
                 toast.error('Failed to save posting rules. Please try again.');
@@ -1205,6 +1213,11 @@ export default function Config() {
                                     onClick={() => {
                                         setCompanies(pendingSyncData.all);
                                         setPendingSyncData(null);
+                                        // If companies were removed, auto-purge their audit data silently
+                                        if (pendingSyncData.removed.length > 0) {
+                                            // @ts-ignore
+                                            window.api.invoke('companies:purge-audit').catch(() => {});
+                                        }
                                     }}
                                     className="flex-1 w-full px-[16px] py-[12px] bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold rounded-[12px] transition-colors cursor-pointer"
                                     style={{ boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)' }}
@@ -1298,7 +1311,7 @@ export default function Config() {
                                                         >
                                                             <RefreshCw size={12} className={isSyncing ? "animate-spin" : ""} /> Sync with Tally
                                                         </button>
-                                                        <button
+<button
                                                             onClick={() => { setCompanyView('add'); setEditingCompany(null); setNewCompany(DEFAULT_COMPANY); }}
                                                             className="flex items-center gap-[5px] text-[11px] font-bold px-[12px] py-[6px] rounded-[8px] border transition-all cursor-pointer bg-[#F0FDF4] text-[#16A34A] border-[#BBF7D0] hover:bg-[#DCFCE7]"
                                                         >

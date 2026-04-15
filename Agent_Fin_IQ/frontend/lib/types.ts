@@ -342,4 +342,9 @@ export interface DashboardMetrics {
     totalAmount: number;
     pendingApproval: number;
     statusCounts: StatusCount[];
+    netThisMonth: {
+        amount: number;
+        count: number;
+        trendPct: number;
+    };
 }

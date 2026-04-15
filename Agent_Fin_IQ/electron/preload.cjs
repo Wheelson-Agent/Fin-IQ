@@ -59,9 +59,13 @@ const ALLOWED_CHANNELS = [
     'companies:get-active',
     'companies:get-all',
     'companies:update-gstin',
+    'companies:purge-audit',
     'api/companies',
     'dashboard:get-metrics',
     'dashboard:tally-sync',
+    'dashboard:top-suppliers',
+    'dashboard:pipeline',
+    'dashboard:recent-activity',
     // Audit
     'audit:get-logs',
     'audit:delete-log',
