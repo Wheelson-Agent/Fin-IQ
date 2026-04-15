@@ -1780,8 +1780,8 @@ export default function Dashboard() {
           </div>
         </PulseCard>
 
-        {/* Card 4 — Net This Month */}
-        <PulseCard label="Net this month" delay={0.08} accentColor={C.tealMid}>
+        {/* Card 4 — invoice processed */}
+        <PulseCard label="Invoice processed" delay={0.08} accentColor={C.tealMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
             fontSize:   '26px',

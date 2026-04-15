@@ -280,17 +280,13 @@ export function Topbar({
     dateFilter, setDateFilter, notifications = [] 
 }: TopbarProps) {
     const isMono = theme === 'mono';
-    const [themeOpen, setThemeOpen] = useState(false);
     const [companyOpen, setCompanyOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isErpSyncing, setIsErpSyncing] = useState(false);
     const [syncDot, setSyncDot] = useState<SyncDotStatus>('idle');
     const [syncTooltip, setSyncTooltip] = useState<string>('Sync ERP');
-    const dropRef = useRef<HTMLDivElement>(null);
     const companyDropRef = useRef<HTMLDivElement>(null);
     const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const active = themes.find(t => t.id === theme)!;
-
     const currentCompany = selectedCompany || 'All Companies';
 
     // On mount: show last known sync status from DB
@@ -415,7 +411,6 @@ export function Topbar({
 
     useEffect(() => {
         function handleClick(e: MouseEvent) {
-            if (dropRef.current && !dropRef.current.contains(e.target as Node)) setThemeOpen(false);
             if (companyDropRef.current && !companyDropRef.current.contains(e.target as Node)) setCompanyOpen(false);
         }
         document.addEventListener('mousedown', handleClick);

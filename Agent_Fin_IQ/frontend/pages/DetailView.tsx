@@ -2229,6 +2229,9 @@ export default function DetailView() {
                                         setCreationMode('LEDGER');
                                       }
                                       setNewLedger(prev => ({ ...prev, name: '', buyerName: suggestedBuyer }));
+                                      // Clear previous success/error so stale message never shows on a fresh open
+                                      setMasterSyncSuccess(null);
+                                      setMasterSyncError(null);
                                       setShowLedgerSlideout(true);
                                     }}
                                   />

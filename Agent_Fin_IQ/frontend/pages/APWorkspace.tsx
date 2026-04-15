@@ -1080,7 +1080,8 @@ export default function APWorkspace() {
 
     try {
       await updateInvoiceStatus(id, 'Auto-Posted', 'Admin');
-      toast.info('Posting to Tally — confirming…');
+      // Hold the toast ID so we can dismiss it the moment a result arrives — prevents overlap with the success/error banner
+      const confirmingToastId = toast.info('Posting to Tally — confirming…');
       fetchData(true);
       let attempts = 0;
       const MAX_ATTEMPTS = 15; // 15 × 2s = 30s
@@ -1091,18 +1092,22 @@ export default function APWorkspace() {
           const outcome = await getTallyPostStatus(id, clickedAt);
           if (outcome.status === 'success') {
             clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            toast.dismiss(confirmingToastId);
             setTallySuccess({ invoiceNo, supplier, voucherNumber: outcome.voucherNumber, erpSyncId: outcome.erpSyncId });
             fetchData(true);
           } else if (outcome.status === 'soft_failed') {
             clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            toast.dismiss(confirmingToastId);
             setTallyError({ invoiceNo, supplier, reason: outcome.failureReason });
             fetchData(true);
           } else if (outcome.status === 'hard_failed') {
             clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            toast.dismiss(confirmingToastId);
             setTallyError({ invoiceNo, supplier, reason: outcome.userMessage });
             fetchData(true);
           } else if (attempts >= MAX_ATTEMPTS) {
             clearInterval(tallyPollRef.current!); tallyPollRef.current = null;
+            toast.dismiss(confirmingToastId);
             toast.warning('Tally confirmation timed out — check Tally manually');
           }
         } catch {

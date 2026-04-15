@@ -1242,6 +1242,29 @@ export function registerIpcHandlers() {
                 is_active: true
             });
 
+            // 3. Audit log — fire-and-forget, same pattern as vendors:sync-tally
+            // Fetch invoice to get invoice_no for proper audit trail linkage
+            const invoiceId = typeof meta?.invoice_id === 'string' ? meta.invoice_id : '';
+            if (invoiceId) {
+                queries.getInvoiceById(invoiceId).then(invoice => {
+                    return queries.createAuditLog({
+                        invoice_id:  invoiceId,
+                        invoice_no:  invoice?.invoice_number || meta?.invoice_no || undefined,
+                        vendor_name: invoice?.vendor_name   || meta?.buyer_name  || undefined,
+                        event_type:  'Edited',
+                        event_code:  'STOCK_ITEM_CREATED',
+                        user_name:   _session?.userName || 'System',
+                        changed_by_user_id: _session?.userId,
+                        company_id:  company_id || undefined,
+                        description: `Stock item "${name}" created in Tally (HSN: ${hsn || '—'}, UOM: ${uom || '—'}, GST: ${tax_rate ?? 0}%).`,
+                        summary:     `Stock item "${name}" created in Tally.`,
+                        new_values:  { name, uom, hsn, tax_rate },
+                    });
+                }).catch((auditErr: any) => {
+                    console.warn('[IPC] Non-critical: masters:create-item audit log failed:', auditErr?.message);
+                });
+            }
+
             return {
                 success: true,
                 item,
@@ -1272,6 +1295,14 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('companies:update-gstin', async (_event, { companyId, gstin } = {}) => {
         return await queries.updateCompanyGstin(companyId, gstin);
+    });
+
+    /**
+     * Delete audit log rows that belong to inactive or fully-orphaned company IDs.
+     * Returns { inactive_deleted, orphaned_deleted } for UI feedback.
+     */
+    ipcMain.handle('companies:purge-audit', async () => {
+        return await queries.purgeInactiveCompanyAuditLogs();
     });
 
     // ─── DASHBOARD ──────────────────────────────────────────────

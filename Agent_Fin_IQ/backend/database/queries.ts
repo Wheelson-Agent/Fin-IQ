@@ -193,10 +193,12 @@ function summarizeWorkspaceLineForAudit(line: any, index: number) {
     const mappedLedger = String(line?.mapped_ledger ?? line?.gl_mapped ?? '').trim();
     const ledger = String(line?.ledger ?? line?.gl_account_id ?? '').trim();
     const targetLedger = mappedLedger || ledger || 'Unmapped';
+    // Include matched_stock_item in key so stock item dropdown changes are detected in the diff
+    const stockItem = String(line?.matched_stock_item ?? '').trim();
 
     return {
-        key: `${description}|${targetLedger}|${line?.hsn_sac ?? line?.hsn ?? ''}|${line?.qty ?? line?.quantity ?? ''}|${line?.rate ?? line?.unit_price ?? ''}`,
-        summary: `${description} -> ${targetLedger}`,
+        key: `${description}|${targetLedger}|${line?.hsn_sac ?? line?.hsn ?? ''}|${line?.qty ?? line?.quantity ?? ''}|${line?.rate ?? line?.unit_price ?? ''}|${stockItem}`,
+        summary: `${description} -> ${targetLedger}${stockItem ? ` [${stockItem}]` : ''}`,
     };
 }
 
@@ -843,6 +845,9 @@ export async function getAllInvoices(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE company_id = $1';
         params.push(companyId);
+    } else {
+        // ALL mode: exclude invoices belonging to inactive (deregistered) companies
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -1261,6 +1266,8 @@ export async function getInvoiceStatusCounts(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE company_id = $1';
         params.push(companyId);
+    } else {
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
 
     sql += ' GROUP BY processing_status';
@@ -1348,7 +1355,8 @@ export async function getActiveCompany() {
  * @returns Array of company rows
  */
 export async function getAllCompanies() {
-    const { rows } = await query(`SELECT id, name, gstin, is_active FROM companies ORDER BY name ASC`);
+    // Only return active companies — inactive ones are deleted/deregistered in Tally
+    const { rows } = await query(`SELECT id, name, gstin, is_active FROM companies WHERE is_active = true ORDER BY name ASC`);
     return rows;
 }
 
@@ -1380,6 +1388,33 @@ export async function getSyncedCompanies() {
         console.error('[QUERIES] getSyncedCompanies failed:', err.message);
         throw err;
     }
+}
+
+/**
+ * Delete audit_logs rows for companies that are no longer valid.
+ * Two separate cases treated differently:
+ *   - inactive: company row exists but is_active = false (deregistered in Tally)
+ *   - orphaned: company_id references a UUID that no longer exists in the companies table at all
+ * Returns counts for each case so the UI can give meaningful feedback.
+ */
+export async function purgeInactiveCompanyAuditLogs(): Promise<{ inactive_deleted: number; orphaned_deleted: number }> {
+    // Case 1: company exists but is marked inactive
+    const inactiveRes = await query(`
+        DELETE FROM audit_logs
+        WHERE company_id IN (SELECT id FROM companies WHERE is_active = false)
+    `);
+
+    // Case 2: company_id is set but no matching row in companies table at all
+    const orphanedRes = await query(`
+        DELETE FROM audit_logs
+        WHERE company_id IS NOT NULL
+          AND company_id NOT IN (SELECT id FROM companies)
+    `);
+
+    return {
+        inactive_deleted: inactiveRes.rowCount ?? 0,
+        orphaned_deleted: orphanedRes.rowCount ?? 0,
+    };
 }
 
 export async function updateCompanyGstin(companyId: string, gstin: string) {
@@ -1467,6 +1502,9 @@ export async function getAllVendors(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE v.company_id = $1';
         params.push(companyId);
+    } else {
+        // ALL mode: exclude vendors belonging to inactive (deregistered) companies
+        sql += ' WHERE (v.company_id IS NULL OR v.company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
 
     sql += `
@@ -2427,6 +2465,8 @@ export async function getAllItems(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE company_id = $1';
         params.push(companyId);
+    } else {
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
     sql += ' ORDER BY item_name ASC';
     const { rows } = await query(sql, params);
@@ -2538,6 +2578,22 @@ let _auditLogColumnsCache: string[] | null = null;
  */
 async function insertAuditLog(executor: AuditQueryExecutor, data: AuditLogWriteInput) {
     try {
+        // 0. Resolve company_id if not provided by the caller.
+        //    Uses pool directly (not the caller's executor) so it works safely inside
+        //    transactions too — this is a read-only lookup, never part of the transaction.
+        //    Priority: explicit company_id > resolved from invoice_id > null.
+        let resolvedCompanyId = data.company_id || null;
+        if (!resolvedCompanyId && data.invoice_id) {
+            try {
+                const res = await pool.query('SELECT company_id FROM ap_invoices WHERE id = $1', [data.invoice_id]);
+                resolvedCompanyId = res.rows[0]?.company_id ?? null;
+            } catch (_e) {
+                // Non-critical — proceed without company_id rather than failing the log
+            }
+        }
+        // Merge the resolved value back so the mapping block below uses it
+        data = { ...data, company_id: resolvedCompanyId ?? undefined };
+
         // 1. Fetch available columns if not cached
         if (!_auditLogColumnsCache) {
             const colRes = await pool.query(
@@ -2674,6 +2730,9 @@ export async function getAuditLogs(params: {
     if (params.companyId && params.companyId !== 'ALL') {
         conditions.push(`a.company_id = $${idx++}::uuid`);
         values.push(params.companyId);
+    } else {
+        // ALL mode: exclude audit logs from inactive (deregistered) companies
+        conditions.push(`(a.company_id IS NULL OR a.company_id IN (SELECT id FROM companies WHERE is_active = true))`);
     }
     if (params.eventType && params.eventType !== 'All') {
         conditions.push(`a.event_type = $${idx++}`);
@@ -2947,6 +3006,8 @@ export async function getAllPurchaseOrders(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE company_id = $1';
         params.push(companyId);
+    } else {
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
     sql += ' ORDER BY po_date DESC';
     const { rows } = await query(sql, params);
@@ -2968,6 +3029,8 @@ export async function getAllGoodsReceipts(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE company_id = $1';
         params.push(companyId);
+    } else {
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
     sql += ' ORDER BY receipt_date DESC';
     const { rows } = await query(sql, params);
@@ -2984,6 +3047,8 @@ export async function getAllServiceEntrySheets(companyId?: string) {
     if (companyId && companyId !== 'ALL') {
         sql += ' WHERE company_id = $1';
         params.push(companyId);
+    } else {
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     }
     sql += ' ORDER BY service_date DESC';
     const { rows } = await query(sql, params);
@@ -2999,7 +3064,10 @@ export async function getAllServiceEntrySheets(companyId?: string) {
  * @param companyId - Filter by company
  */
 export async function getDashboardMetrics(companyId?: string) {
-    const whereClause = companyId && companyId !== 'ALL' ? 'WHERE company_id = $1' : '';
+    // Specific company → filter by UUID. ALL → restrict to active companies only.
+    const whereClause = companyId && companyId !== 'ALL'
+        ? 'WHERE company_id = $1'
+        : 'WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
     const params = companyId && companyId !== 'ALL' ? [companyId] : [];
 
     const totalInvoices = await query(`SELECT COUNT(*)::int as count FROM ap_invoices ${whereClause}`, params);
@@ -3102,10 +3170,10 @@ export async function getPipelineStats(companyId?: string) {
             COALESCE(SUM(CASE WHEN posting_mode = 'touchless'
                 THEN grand_total ELSE 0 END), 0)                                       AS touchless_amount,
 
-            -- HYBRID lane: invoices processed while mode = hybrid
-            SUM(CASE WHEN posting_mode = 'hybrid'
+            -- HYBRID lane: Config UI saves this mode as 'auto' internally (display label is "Hybrid")
+            SUM(CASE WHEN posting_mode = 'auto'
                 THEN 1 ELSE 0 END)::int                                                AS hybrid_count,
-            COALESCE(SUM(CASE WHEN posting_mode = 'hybrid'
+            COALESCE(SUM(CASE WHEN posting_mode = 'auto'
                 THEN grand_total ELSE 0 END), 0)                                       AS hybrid_amount,
 
             -- MANUAL lane: invoices processed while mode = manual
@@ -3122,12 +3190,15 @@ export async function getPipelineStats(companyId?: string) {
             -- NULL AVG means no rows in that lane this month.
             AVG(CASE WHEN posting_mode = 'touchless' AND updated_at > created_at
                 THEN EXTRACT(EPOCH FROM (updated_at - created_at)) END)               AS touchless_avg_sec,
-            AVG(CASE WHEN posting_mode = 'hybrid' AND updated_at > created_at
+            AVG(CASE WHEN posting_mode = 'auto' AND updated_at > created_at
                 THEN EXTRACT(EPOCH FROM (updated_at - created_at)) END)               AS hybrid_avg_sec,
             AVG(CASE WHEN posting_mode = 'manual' AND updated_at > created_at
                 THEN EXTRACT(EPOCH FROM (updated_at - created_at)) END)               AS manual_avg_sec
         FROM ap_invoices
-        WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+        WHERE (
+            ($1::uuid IS NOT NULL AND company_id = $1::uuid)
+            OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
+        )
           AND date_trunc('month', created_at) = date_trunc('month', NOW())
     `;
 
@@ -3137,7 +3208,10 @@ export async function getPipelineStats(companyId?: string) {
             SUM(CASE WHEN posting_mode = 'touchless' THEN 1 ELSE 0 END)::int AS touchless_last_month,
             SUM(CASE WHEN posting_mode IS NOT NULL   THEN 1 ELSE 0 END)::int AS total_last_month
         FROM ap_invoices
-        WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+        WHERE (
+            ($1::uuid IS NOT NULL AND company_id = $1::uuid)
+            OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
+        )
           AND date_trunc('month', created_at) = date_trunc('month', NOW()) - INTERVAL '1 month'
     `;
 
@@ -3148,7 +3222,10 @@ export async function getPipelineStats(companyId?: string) {
             0
         )::int AS oldest_days
         FROM ap_invoices
-        WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+        WHERE (
+            ($1::uuid IS NOT NULL AND company_id = $1::uuid)
+            OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
+        )
           AND date_trunc('month', created_at) = date_trunc('month', NOW())
           AND posting_mode IS NOT NULL
           AND posting_mode != 'touchless'
@@ -3213,7 +3290,10 @@ export async function getTopSuppliers(companyId?: string) {
          WHERE total_amount  > 0
            AND seller_name  IS NOT NULL
            AND invoice_date >= NOW() - INTERVAL '30 days'
-           AND ($1::uuid IS NULL OR company_id = $1::uuid)
+           AND (
+               ($1::uuid IS NOT NULL AND company_id = $1::uuid)
+               OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
+           )
          GROUP BY seller_name, seller_gstin
          ORDER BY total_spend DESC
          LIMIT 5`,
@@ -3249,7 +3329,10 @@ export async function getTopSuppliers(companyId?: string) {
         `SELECT COUNT(*) AS new_count
          FROM vendors
          WHERE created_at >= date_trunc('month', NOW())
-           AND ($1::uuid IS NULL OR company_id = $1::uuid)`,
+           AND (
+               ($1::uuid IS NOT NULL AND company_id = $1::uuid)
+               OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
+           )`,
         [companyId || null]
     );
     const new_this_month = Number(newResult.rows[0]?.new_count ?? 0);
@@ -3281,7 +3364,10 @@ export async function getRecentDashboardActivity(companyId?: string) {
             FROM sync_status_log ssl
             WHERE ssl.sync_status = 'failure'
               AND ssl.entity_name = 'invoice'
-              AND ($1::uuid IS NULL OR ssl.company_id = $1::uuid)
+              AND (
+                  ($1::uuid IS NOT NULL AND ssl.company_id = $1::uuid)
+                  OR ($1::uuid IS NULL AND (ssl.company_id IS NULL OR ssl.company_id IN (SELECT id FROM companies WHERE is_active = true)))
+              )
 
             UNION ALL
 
@@ -3302,7 +3388,10 @@ export async function getRecentDashboardActivity(companyId?: string) {
                 COALESCE(NULLIF(a.description, ''), a.event_type) AS detail_text
             FROM audit_logs a
             LEFT JOIN ap_invoices ai ON ai.id = a.invoice_id
-            WHERE ($1::uuid IS NULL OR a.company_id = $1::uuid)
+            WHERE (
+                ($1::uuid IS NOT NULL AND a.company_id = $1::uuid)
+                OR ($1::uuid IS NULL AND (a.company_id IS NULL OR a.company_id IN (SELECT id FROM companies WHERE is_active = true)))
+            )
               AND a.event_type IN ('Approved', 'Auto-Posted', 'Revalidated', 'Created', 'Deleted')
 
             UNION ALL
@@ -3320,7 +3409,10 @@ export async function getRecentDashboardActivity(companyId?: string) {
             JOIN ap_invoices ai ON ai.id = pj.invoice_id
             WHERE pj.stage = 'OCR'
               AND pj.status = 'PASSED'
-              AND ($1::uuid IS NULL OR ai.company_id = $1::uuid)
+              AND (
+                  ($1::uuid IS NOT NULL AND ai.company_id = $1::uuid)
+                  OR ($1::uuid IS NULL AND (ai.company_id IS NULL OR ai.company_id IN (SELECT id FROM companies WHERE is_active = true)))
+              )
 
             UNION ALL
 
@@ -3339,7 +3431,10 @@ export async function getRecentDashboardActivity(companyId?: string) {
             FROM ap_invoices ai
             WHERE ai.processing_status IN ('Awaiting Input', 'Handoff', 'Failed', 'Manual Review')
               AND ai.updated_at >= NOW() - INTERVAL '14 days'
-              AND ($1::uuid IS NULL OR ai.company_id = $1::uuid)
+              AND (
+                  ($1::uuid IS NOT NULL AND ai.company_id = $1::uuid)
+                  OR ($1::uuid IS NULL AND (ai.company_id IS NULL OR ai.company_id IN (SELECT id FROM companies WHERE is_active = true)))
+              )
         ),
         ranked AS (
             SELECT

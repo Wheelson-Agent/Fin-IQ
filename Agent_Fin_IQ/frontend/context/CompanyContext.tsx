@@ -24,6 +24,13 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
         try {
             const data = await getCompanies();
             setCompanies(data || []);
+            // If localStorage holds a company that no longer exists or is inactive, reset to ALL.
+            // This prevents stale UUIDs from silently scoping all data to a deregistered company.
+            const stored = localStorage.getItem('selected_company_id');
+            if (stored && stored !== 'ALL' && !data?.find((c: Company) => c.id === stored)) {
+                setSelectedCompanyState('ALL');
+                localStorage.setItem('selected_company_id', 'ALL');
+            }
         } catch (err) {
             console.error('[CompanyContext] Failed to fetch companies:', err);
         } finally {
