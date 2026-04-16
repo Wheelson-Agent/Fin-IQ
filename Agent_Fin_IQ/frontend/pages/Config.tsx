@@ -361,7 +361,6 @@ export default function Config() {
             knownVendor: true,
             valueLimit: '100000',
             poMatch: true,
-            twoWayMatch: true,
             enableValueLimit: false,
             filter_invoice_date_enabled: false,
             filter_invoice_date_from: '',
@@ -1944,17 +1943,7 @@ export default function Config() {
                                                          </div>
                                                          <Toggle checked={criteria.knownVendor} onChange={() => setCriteria({ ...criteria, knownVendor: !criteria.knownVendor })} />
                                                      </div>
-                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex items-center justify-between">
-                                                         <div className="flex items-center gap-[12px]">
-                                                             <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#10B981]"><FileCheck size={16} /></div>
-                                                             <div>
-                                                                 <div className="text-[13px] font-bold text-[#1A2640]">Two-way Match (PO & Invoice)</div>
-                                                                 <div className="text-[11px] text-[#94A3B8]">Ensure invoice values match purchase order line items</div>
-                                                             </div>
-                                                         </div>
-                                                         <Toggle checked={criteria.twoWayMatch} onChange={() => setCriteria({ ...criteria, twoWayMatch: !criteria.twoWayMatch })} />
-                                                     </div>
-                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px]">
+                                                      <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px]">
                                                          <div className="flex items-center justify-between">
                                                              <div className="flex items-center gap-[12px]">
                                                                  <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#F59E0B]"><Receipt size={16} /></div>

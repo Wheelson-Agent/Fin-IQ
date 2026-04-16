@@ -68,6 +68,12 @@ interface APRecord {
   uploadedAt: string;
   docTypeLabel: string;
   isHighAmount: boolean;
+  poIssue?: {
+    code: string;
+    label: string;
+    detail: string;
+    tone: 'amber' | 'rose' | 'emerald';
+  };
   taxBreakdown: {
     igst: number | null;
     cgst: number | null;
@@ -83,6 +89,7 @@ interface APRecord {
     supplier: boolean;
     duplication: boolean;
     ledger: boolean;
+    poMatch: boolean;
   };
 }
 
@@ -129,6 +136,32 @@ const getStatusSupportText = (record: APRecord) => {
     case 'received':
     default:        return 'Freshly captured and queued';
   }
+};
+
+const getPoIssueDisplay = (poValidation: any): APRecord['poIssue'] | undefined => {
+  const code = String(poValidation?.code || '').trim();
+  if (!code || code === 'PO_FOUND') return undefined;
+
+  const detail = String(poValidation?.message || '').trim() || 'Purchase order review required';
+  if (code === 'PO_WAIVED') {
+    return { code, label: 'PO Waived', detail, tone: 'emerald' };
+  }
+  if (code === 'PO_OVERBILLED') {
+    return { code, label: 'PO Overbilled', detail, tone: 'rose' };
+  }
+  if (code === 'PO_MISSING') {
+    return { code, label: 'PO Missing', detail, tone: 'amber' };
+  }
+  if (code === 'PO_NOT_FOUND') {
+    return { code, label: 'PO Not Found', detail, tone: 'amber' };
+  }
+  if (code === 'PO_CLOSED') {
+    return { code, label: 'PO Closed', detail, tone: 'rose' };
+  }
+  if (code === 'PO_HEADER_MISMATCH') {
+    return { code, label: 'PO Mismatch', detail, tone: 'rose' };
+  }
+  return { code, label: 'PO Review', detail, tone: 'amber' };
 };
 
 const formatDateRangeLabel = (value: string) => {
@@ -488,6 +521,9 @@ export default function APWorkspace() {
             valData[key] = n8nData[key];
             valData[normalized] = n8nData[key];
           });
+          const poValidation = parseJSON(inv.po_validation_json);
+          const poMatch = poValidation.status === 'matched' || poValidation.status === 'waived';
+          const poIssue = getPoIssueDisplay(poValidation);
 
           const getVal = (key: string, oldKey?: string) => {
             const val = valData[key] ??
@@ -513,7 +549,7 @@ export default function APWorkspace() {
 
           // ─── CANONICAL READY-TO-POST RULE ───
           // Must pass all required checks AND NOT be a duplicate
-          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && lMatch;
+          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && lMatch && poMatch;
           const n8nAllPassed = mandatoryChecksPassed && isDupPassed;
 
           if (inv.erp_sync_id) {
@@ -526,13 +562,13 @@ export default function APWorkspace() {
             // Duplicates always go to Handoff (Awaiting Input / Review) 
             // as per "Duplicate Check = false means failed"
             status = 'handoff';
-          } else if (n8nAllPassed || bStatus === 'ready to post') {
+          } else if (n8nAllPassed || (bStatus === 'ready to post' && poMatch)) {
             // Ready to Post only if all mandatory checks pass AND it is NOT a duplicate
-            // bStatus === 'ready to post' is the backend's canonical decision
+            // Ready backend status still requires the locally visible mandatory PO gate.
             status = 'ready';
           } else if (!bVerif || !gValid || !dValid || isUnknownFile || isUnknownInv) {
             status = 'handoff';
-          } else if (!vVerif || !lMatch) {
+          } else if (!vVerif || !lMatch || !poMatch) {
             status = 'input';
           } else if (bStatus === 'processing') {
             // Processing only if not already failed/passed via other rules
@@ -571,6 +607,7 @@ export default function APWorkspace() {
           if (!isDupPassed) reasons.push('Duplicate Found');
           if (!vVerif) reasons.push('Vendor setup required');
           if (!lMatch) reasons.push(isGoods ? 'Stock item mapping required' : 'Ledger mapping required');
+          if (!poMatch) reasons.push(String(poValidation.message || '').trim() || 'Purchase order match required');
 
           const docTypeLabel = isUnknownInv ? 'Unknown' : (inv.doc_type_label || (inv.doc_type || 'Invoice (Service)'));
 
@@ -599,6 +636,7 @@ export default function APWorkspace() {
             uploadedAt: inv.uploaded_date ? new Date(inv.uploaded_date).toISOString() : 'Unknown',
             docTypeLabel: docTypeLabel,
             isHighAmount: !!inv.is_high_amount,
+            poIssue,
             taxBreakdown: {
               igst: raw.igst ?? raw.IGST ?? null,
               cgst: raw.cgst ?? raw.CGST ?? null,
@@ -614,6 +652,7 @@ export default function APWorkspace() {
               supplier: vVerif,
               duplication: isDupPassed,
               ledger: lMatch,
+              poMatch,
             }
           };
         });
@@ -768,6 +807,8 @@ export default function APWorkspace() {
   const hasRemarks = (record: APRecord) => normalizeText(record.remarks).length > 0;
   const isRoutedRecord = (record: APRecord) => Boolean(record.isHighAmount && valueLimitConfig?.enabled);
   const getInputRequirementLabel = (record: APRecord) => {
+    if (record.poIssue) return record.poIssue.label;
+
     const normalizeReason = (value?: string | null) => {
       const text = normalizeText(value);
       if (!text) return '';
@@ -1771,6 +1812,45 @@ export default function APWorkspace() {
     );
   };
 
+  const renderInputRequirement = (record: APRecord) => {
+    if (!record.poIssue) {
+      return (
+        <div className="inline-flex max-w-[220px] items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
+          <span className="truncate">{getInputRequirementLabel(record)}</span>
+        </div>
+      );
+    }
+
+    const toneClass = record.poIssue.tone === 'rose'
+      ? 'border-rose-200 bg-rose-50 text-rose-700'
+      : record.poIssue.tone === 'emerald'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-amber-200 bg-amber-50 text-amber-700';
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={`inline-flex max-w-[160px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-black uppercase tracking-[0.05em] leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)] ${toneClass}`}
+          >
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{record.poIssue.label}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={10}
+          className="max-w-[300px] rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))] px-4 py-3 text-white shadow-[0_22px_50px_rgba(15,23,42,0.35)]"
+        >
+          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/60">PO Review</div>
+          <div className="mt-2 text-[11px] font-semibold leading-[1.4] text-white">{record.poIssue.detail}</div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
   const renderFilterChips = (tab: TableTab) => {
     const chips = getActiveFilterChips(tab);
     if (chips.length === 0) return null;
@@ -2558,9 +2638,7 @@ export default function APWorkspace() {
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
                         <TableCell className="text-right pr-6 font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]">{formatCurrency(record.amount)}</TableCell>
                         <TableCell className="text-center">
-                          <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
-                            {getInputRequirementLabel(record)}
-                          </div>
+                          {renderInputRequirement(record)}
                         </TableCell>
                         <TableCell className="pl-6">
                           <RoutingRuleBadges record={record} postingMode={postingMode} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />

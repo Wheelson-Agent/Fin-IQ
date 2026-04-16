@@ -353,6 +353,14 @@ export const revalidateInvoice = async (id: string) => {
   return await window.api.invoke('invoices:revalidate', { id });
 };
 
+/**
+ * Mark the invoice as not requiring a PO. Backend stores the decision in
+ * po_validation_json and writes an audit entry with the supplied reason.
+ */
+export const waiveInvoicePo = async (id: string, reason: string): Promise<Invoice> => {
+  return await window.api.invoke('invoices:waive-po', { id, reason });
+};
+
 export async function getBatchLogs(batchName: string) {
     return invoke<any[]>('processing:get-batch-logs', { batchName });
 }
