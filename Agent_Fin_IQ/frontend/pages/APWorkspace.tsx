@@ -2116,7 +2116,7 @@ export default function APWorkspace() {
             onClick={() => document.getElementById('ap-workspace-upload')?.click()}
           >
             <UploadCloud className="w-4 h-4" />
-            <span className="text-[13px] tracking-tight">Upload Invoices</span>
+            <span className="text-[13px] tracking-tight">Upload Invoice</span>
           </Button>
         </div>
       </div>
