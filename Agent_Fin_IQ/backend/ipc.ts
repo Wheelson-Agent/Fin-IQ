@@ -42,6 +42,7 @@ import dotenv from 'dotenv';
 import { hasPermission } from './auth/roles';
 import * as n8n from './sync/n8n';
 import * as tallyPosting from './sync/tally_posting';
+import { refreshPurchaseOrderOutstandingFromTally } from './sync/po_outstanding';
 import * as n8nWatcher from './sync/n8nStatusWatcher';
 import * as ocr from './ocr/bridge';
 import { createBatchStructure } from './utils/filesystem';
@@ -63,6 +64,8 @@ dotenv.config({ path: envPath });
 // ─── Active session (set on login, cleared on logout) ────────
 // Gives every backend audit call real user attribution.
 let _session: { userId: string; userName: string } | null = null;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function buildStageMetrics(startedAt: Date, completedAt: Date, extra: Record<string, any> = {}) {
     return {
@@ -497,6 +500,19 @@ export function registerIpcHandlers() {
             console.error('[IPC] Revalidation error:', err.message);
             return { success: false, error: err.message };
         }
+    });
+
+    /**
+     * Waive mandatory PO requirement with audit trail.
+     * Input: { id: string, reason: string }
+     */
+    ipcMain.handle('invoices:waive-po', async (_event, { id, reason }) => {
+        return await queries.waiveInvoicePoRequirement(
+            id,
+            reason,
+            _session?.userName || 'System',
+            _session?.userId || null
+        );
     });
 
     /**
@@ -1379,6 +1395,7 @@ export function registerIpcHandlers() {
         }
 
         lastSyncTime = now;
+        const syncRequestedAt = new Date(now).toISOString();
         try {
             const syncUrl = process.env.N8N_ERP_sync_URL;
             console.log(`[IPC] ERP Sync requested. Target: ${syncUrl}`);
@@ -1444,6 +1461,30 @@ export function registerIpcHandlers() {
             }
 
             console.log(`[IPC] ERP Sync successful via ${requestResult.method}:`, data);
+
+            try {
+                for (let attempt = 0; attempt < 8; attempt += 1) {
+                    const statusRows = await queries.getLatestSyncStatus(syncRequestedAt, undefined);
+                    const poSyncFinished = statusRows.some((row: any) =>
+                        row.workflow_name === 'FC-PO-sync' &&
+                        row.sync_status === 'success'
+                    );
+
+                    if (poSyncFinished) break;
+                    await delay(1000);
+                }
+
+                const companies = await queries.getAllCompanies();
+                const activeCompanies = (companies || []).filter((company: any) => company?.id);
+
+                for (const company of activeCompanies) {
+                    // Manual sync should also refresh PO status from Tally's actual voucher allocations.
+                    await refreshPurchaseOrderOutstandingFromTally(company.id);
+                }
+            } catch (refreshErr) {
+                console.error('[IPC] PO outstanding refresh failed after ERP sync:', refreshErr);
+            }
+
             return { success: true, data, method: requestResult.method };
         } catch (err: any) {
             console.error('[IPC] ERP Sync failed:', err.message);

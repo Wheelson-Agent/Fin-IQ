@@ -19,6 +19,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { query } from '../database/connection';
 
 // ESM Compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -53,6 +54,68 @@ function sanitizeOcrRawPayloadForTally(ocrRawPayload: any) {
     return sanitized;
 }
 
+function getUniqueLineItemIds(lineItems: any[]): string[] {
+    const ids = new Set<string>();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    for (const line of lineItems) {
+        const matchedId = String(line?.matched_id || '').trim();
+        if (uuidPattern.test(matchedId)) {
+            ids.add(matchedId);
+        }
+    }
+
+    return Array.from(ids);
+}
+
+async function enrichLineItemsWithTallyUom(ocrRawPayload: any) {
+    if (!ocrRawPayload || typeof ocrRawPayload !== 'object' || Array.isArray(ocrRawPayload)) {
+        return ocrRawPayload;
+    }
+
+    const lineItems = Array.isArray(ocrRawPayload.line_items) ? ocrRawPayload.line_items : [];
+    const companyId = String(ocrRawPayload.company_id || '').trim();
+    const matchedIds = getUniqueLineItemIds(lineItems);
+
+    if (!companyId || matchedIds.length === 0) {
+        return ocrRawPayload;
+    }
+
+    try {
+        const { rows } = await query(
+            `SELECT id, uom
+             FROM item_master
+             WHERE company_id = $1::uuid
+               AND id = ANY($2::uuid[])
+               AND is_active = true
+               AND deleted_at IS NULL`,
+            [companyId, matchedIds]
+        );
+
+        const uomByItemId = new Map(
+            rows
+                .filter((row) => row.uom)
+                .map((row) => [String(row.id), String(row.uom).trim()])
+        );
+
+        if (uomByItemId.size === 0) {
+            return ocrRawPayload;
+        }
+
+        // Preserve the OCR unit for auditability; tally_uom is the ERP posting unit.
+        return {
+            ...ocrRawPayload,
+            line_items: lineItems.map((line: any) => {
+                const tallyUom = uomByItemId.get(String(line?.matched_id || '').trim());
+                return tallyUom ? { ...line, tally_uom: tallyUom } : line;
+            }),
+        };
+    } catch (error: any) {
+        console.warn('[TALLY-POSTING] Could not enrich line item UOM from item_master:', error.message);
+        return ocrRawPayload;
+    }
+}
+
 /**
  * Sends the invoice data to the Tally posting webhook.
  */
@@ -64,8 +127,11 @@ export async function sendInvoiceToTally(invoiceId: string, ocrRawPayload: any):
         return { success: false, status: 'failed', error: 'N8N_TALLY_POST_URL not configured' };
     }
 
+    const sanitizedOcrPayload = sanitizeOcrRawPayloadForTally(ocrRawPayload);
+    const tallyReadyOcrPayload = await enrichLineItemsWithTallyUom(sanitizedOcrPayload);
+
     const payload = {
-        ocr_raw_payload: sanitizeOcrRawPayloadForTally(ocrRawPayload),
+        ocr_raw_payload: tallyReadyOcrPayload,
         id: invoiceId,
         invoice_posting: true,
         sync_data: {

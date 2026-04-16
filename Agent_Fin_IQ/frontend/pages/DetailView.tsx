@@ -46,7 +46,8 @@ import {
   syncVendorWithTally,
   revalidateInvoice,
   deleteInvoice,
-  saveAllInvoiceData
+  saveAllInvoiceData,
+  waiveInvoicePo
 } from '../lib/api';
 import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
@@ -88,6 +89,7 @@ const getCanonicalKey = (key: string): string => {
   if (normalized === 'e-way_bill_no' || normalized === 'e_way_bill_no') return 'eway_bill_no';
   if (normalized === 'buyer_name' || normalized === 'buyer') return 'buyer_name';
   if (normalized === 'buyer_gst' || normalized === 'customer_gst') return 'buyer_gst';
+  if (normalized === 'po_number' || normalized === 'order_no' || normalized === 'buyers_order_no' || normalized === 'purchase_order_no') return 'po_number';
   if (normalized === 'round_off') return 'round_off';
   if (normalized === 'invoice_ocr_data_valdiation') return 'invoice_ocr_data_validation';
   return normalized;
@@ -100,6 +102,7 @@ const DETAIL_VALIDATION_KEYS = new Set([
   'vendor_verification',
   'duplicate_check',
   'line_item_match_status',
+  'po_match_status',
 ]);
 
 const normalizeSelectableNames = (value: any): string[] => {
@@ -137,6 +140,7 @@ const PREFERRED_RAW_KEYS: Record<string, string> = {
   supplier_address: 'Supplier Address',
   buyer_name: 'Buyer Name',
   buyer_gst: 'Buyer GST',
+  po_number: 'Order No',
   sub_total: 'Taxable Value',
   round_off: 'Round Off',
   grand_total: 'Total Invoice Amount',
@@ -155,6 +159,7 @@ const PREFERRED_RAW_KEYS: Record<string, string> = {
   vendor_verification: 'vendor_verification',
   duplicate_check: 'duplicate_check',
   line_item_match_status: 'line_item_match_status',
+  po_match_status: 'po_match_status',
 };
 
 type LineItemPickerMode = 'STOCK_ITEM' | 'LEDGER';
@@ -476,6 +481,90 @@ const itemDescriptionMatches = (description: string, selectedItemName: string) =
     new RegExp(`(^| )${escapeRegExp(normalizedDescription)}( |$)`).test(normalizedItemName);
 };
 
+const toBooleanCheck = (value: any) => value === true || String(value).toLowerCase() === 'true';
+
+function PoApprovalSnapshot({ checks, message }: { checks: Record<string, any>; message?: string | null }) {
+  const lineMatch = checks?.line_match || {};
+  const consumption = checks?.consumption || {};
+  const hasConsumption = Object.keys(consumption).length > 0;
+  const amountReviewOnly = checks?.amount_enforced === false;
+  const lineReviewOnly = lineMatch?.enforced === false;
+  const consumptionReviewOnly = consumption?.enforced === false;
+  const lineClear = Number(lineMatch?.total_invoice_lines || 0) > 0 &&
+    Number(lineMatch?.matched_lines || 0) === Number(lineMatch?.total_invoice_lines || 0) &&
+    (lineMatch?.unmatched_lines || []).length === 0;
+  const consumptionClear = consumption?.status !== 'overbilled';
+
+  const snapshotItems = [
+    { label: 'PO', passed: toBooleanCheck(checks?.po_exists), note: 'Exists' },
+    { label: 'Supplier', passed: toBooleanCheck(checks?.supplier_match), note: 'Header' },
+    { label: 'Buyer', passed: checks?.buyer_match !== false, note: 'Header' },
+    { label: 'Amount', passed: checks?.amount_within_po_total === true, note: amountReviewOnly ? 'Review' : 'Value' },
+    { label: 'Lines', passed: lineClear, note: lineReviewOnly ? 'Review' : 'Items' },
+  ];
+  if (hasConsumption) {
+    // PO consumption is visible for review, but it does not enforce routing yet.
+    snapshotItems.push({ label: 'Usage', passed: consumptionClear, note: consumptionReviewOnly ? 'Review' : 'Balance' });
+  }
+  const passedCount = snapshotItems.filter((item) => item.passed).length;
+
+  return (
+    <div className="w-[260px] rounded-[18px] bg-[#111827] p-4 text-white shadow-[0_22px_60px_rgba(15,23,42,0.28)]">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">PO Snapshot</p>
+          <p className="mt-1 text-[12px] font-bold text-white">{message || 'Purchase order validation'}</p>
+        </div>
+        <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-black text-emerald-300">
+          {passedCount}/{snapshotItems.length}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {snapshotItems.map((item) => (
+          <div
+            key={item.label}
+            className={`rounded-xl border px-3 py-2 ${item.passed ? 'border-emerald-300/20 bg-emerald-300/10' : 'border-amber-300/20 bg-amber-300/10'}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[10px] font-black uppercase tracking-[0.08em] text-slate-200">{item.label}</span>
+              <span className={item.passed ? 'text-emerald-300' : 'text-amber-300'}>{item.passed ? '✓' : '!'}</span>
+            </div>
+            <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">{item.note}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+        <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+          <span>Lines matched</span>
+          <span>{Number(lineMatch?.matched_lines || 0)}/{Number(lineMatch?.total_invoice_lines || 0)}</span>
+        </div>
+        {checks?.amount_difference !== null && checks?.amount_difference !== undefined && (
+          <div className="mt-1 flex items-center justify-between text-[11px] font-bold text-slate-300">
+            <span>Amount variance</span>
+            <span>{fmt(Number(checks.amount_difference || 0))}</span>
+          </div>
+        )}
+        {hasConsumption && consumption?.remaining_after_current !== null && consumption?.remaining_after_current !== undefined && (
+          <div className="mt-1 flex items-center justify-between text-[11px] font-bold text-slate-300">
+            <span>{consumption?.status === 'overbilled' ? 'Overbilled' : 'PO balance after'}</span>
+            <span className={consumption?.status === 'overbilled' ? 'text-rose-300' : 'text-emerald-300'}>
+              {fmt(Number(consumption?.status === 'overbilled' ? consumption?.overbilled_amount || 0 : consumption?.remaining_after_current || 0))}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {(lineMatch?.unmatched_lines || []).length > 0 && (
+        <p className="mt-3 text-[10px] font-semibold leading-4 text-amber-200">
+          {(lineMatch.unmatched_lines || []).length} invoice line{(lineMatch.unmatched_lines || []).length === 1 ? '' : 's'} need PO-line review.
+        </p>
+      )}
+    </div>
+  );
+}
+
 
 export default function DetailView() {
   const { id } = useParams();
@@ -542,6 +631,8 @@ export default function DetailView() {
   const [originalLineItems, setOriginalLineItems] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [isRevalidating, setIsRevalidating] = useState(false);
+  const [poWaiverDialog, setPoWaiverDialog] = useState<{ reason: string } | null>(null);
+  const [isWaivingPo, setIsWaivingPo] = useState(false);
 
   const isDirty = React.useMemo(() => {
     // Deep comparison via stringify is sufficient for these flat/nested objects
@@ -624,6 +715,28 @@ export default function DetailView() {
     }
   };
 
+  const handlePoWaiverSubmit = async () => {
+    if (!id || isWaivingPo) return;
+    const reason = String(poWaiverDialog?.reason || '').trim();
+    if (!reason) {
+      toast.error('Please enter a reason for waiving PO requirement');
+      return;
+    }
+
+    try {
+      setIsWaivingPo(true);
+      await waiveInvoicePo(id, reason);
+      toast.success('PO requirement waived');
+      setPoWaiverDialog(null);
+      await loadData();
+    } catch (err: any) {
+      console.error('[DetailView] PO waiver failed:', err);
+      toast.error(err?.message || 'Failed to waive PO requirement');
+    } finally {
+      setIsWaivingPo(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!id || !isDirty || saving) return;
 
@@ -637,7 +750,7 @@ export default function DetailView() {
       irn: 'IRN', ack_no: 'Ack No', ack_date: 'Ack Date', eway_bill_no: 'E-Way Bill No',
       invoice_no: 'Invoice No', date: 'Invoice Date', vendor_name: 'Seller Name',
       vendor_gst: 'Supplier GST', supplier_pan: 'Supplier PAN', supplier_address: 'Supplier Address',
-      buyer_name: 'Buyer Name', buyer_gst: 'Buyer GST', sub_total: 'Taxable Value',
+      buyer_name: 'Buyer Name', buyer_gst: 'Buyer GST', po_number: 'PO Number', sub_total: 'Taxable Value',
       round_off: 'Round Off', grand_total: 'Total Invoice Amount', cgst: 'CGST',
       sgst: 'SGST', igst: 'IGST', tax_total: 'Sum of GST Amount'
     };
@@ -825,6 +938,17 @@ export default function DetailView() {
             n8nValidation = {};
           }
         }
+        let poValidation: any = {};
+        if (invoiceRecord.po_validation_json) {
+          try {
+            poValidation = typeof invoiceRecord.po_validation_json === 'string'
+              ? JSON.parse(invoiceRecord.po_validation_json)
+              : invoiceRecord.po_validation_json;
+          } catch (e) {
+            console.warn('[DetailView] Failed to parse po_validation_json');
+            poValidation = {};
+          }
+        }
         const companyVerifiedFromN8n = getOptionalBooleanFlag(n8nValidation?.buyer_verification) === true;
 
         setRawPayload(raw);
@@ -873,13 +997,13 @@ export default function DetailView() {
           irn: '', ack_no: '', ack_date: '', eway_bill_no: '',
           invoice_no: '', date: '', vendor_name: '', vendor_gst: '',
           supplier_pan: '', supplier_address: '',
-          buyer_name: '', buyer_gst: '', round_off: '0',
+          buyer_name: '', buyer_gst: '', po_number: '', round_off: '0',
           sub_total: 0, tax_total: 0, grand_total: 0,
           cgst: 0, sgst: 0, igst: 0, cgst_pct: 0, sgst_pct: 0, igst_pct: 0,
           doc_type: 'Services', remarks: '',
           buyer_verification: false, gst_validation_status: false,
           invoice_ocr_data_validation: false, vendor_verification: false,
-          duplicate_check: true, line_item_match_status: false,
+          duplicate_check: true, line_item_match_status: false, po_match_status: false,
         };
 
         // Prefer canonical keys first (your saved UI shape), then fall back to older OCR keys.
@@ -905,6 +1029,12 @@ export default function DetailView() {
             fields[normalizedKey] = n8nValidation[key];
           }
         });
+        // PO validation is app-owned state stored separately from OCR and n8n payloads.
+        fields.po_match_status = poValidation.status === 'matched' || poValidation.status === 'waived';
+        fields.po_match_code = poValidation.code || null;
+        fields.po_match_message = poValidation.message || null;
+        fields.po_match_checks = poValidation.checks || {};
+        fields.po_waiver_reason = poValidation.waiver_reason || null;
 
         const companyVerified =
           fields.buyer_verification === true ||
@@ -920,6 +1050,7 @@ export default function DetailView() {
         }
 
         fields.doc_type = invoiceRecord.doc_type || raw?.doc_type || fields.doc_type;
+        fields.po_number = invoiceRecord.po_number || raw?.po_number || raw?.['Order No'] || fields.po_number || '';
 
         // Always keep a display file name for UI use (non-edit)
         fields.file_name = invoiceRecord.file_name || raw?.file_name || fields.file_name || '';
@@ -1251,6 +1382,7 @@ export default function DetailView() {
     const gValid = docFields.gst_validation_status === true || String(docFields.gst_validation_status).toLowerCase() === 'true';
     const dValid = docFields.invoice_ocr_data_validation === true || String(docFields.invoice_ocr_data_validation).toLowerCase() === 'true';
     const isDupPassed = docFields.duplicate_check === true || String(docFields.duplicate_check).toLowerCase() === 'true';
+    const poMatch = docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
 
     const isUnknownFile = !invoice.file_name || invoice.file_name.toLowerCase() === 'unknown' || invoice.file_name === 'N/A';
     const isUnknownInv = !(invoice.invoice_number || invoice.invoice_no) ||
@@ -1261,7 +1393,7 @@ export default function DetailView() {
     if (bStatus === 'posted' || bStatus === 'auto-posted' || bStatus === 'ready to post') return false;
 
     // Prioritize: If all validations passed, it's NOT a handoff record
-    const n8nAllPassed = bVerif && gValid && dValid && isDupPassed && vVerif;
+    const n8nAllPassed = bVerif && gValid && dValid && isDupPassed && vVerif && poMatch;
     if (invoice.status === 'Ready to Post' || n8nAllPassed) return false;
 
     return !bVerif || !gValid || !dValid || !isDupPassed || isUnknownFile || isUnknownInv || bStatus === 'failed' || bStatus === 'ocr_failed';
@@ -1269,6 +1401,18 @@ export default function DetailView() {
 
   const isManualReview = invoice.status === 'Manual Review';
   const isFailed = invoice.status === 'Failed';
+  const poMatchPassed = docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
+  const poWaived = docFields.po_match_code === 'PO_WAIVED';
+  const canWaivePo = !readOnly && !poMatchPassed && !poWaived && (fromTab === 'input' || fromTab === 'handoff');
+  const poWaiverIsOverbilling = docFields.po_match_code === 'PO_OVERBILLED';
+  const poWaiverTitle = poWaiverIsOverbilling ? 'Approve PO overbilling exception?' : 'Mark PO as not required?';
+  const poWaiverActionLabel = poWaiverIsOverbilling ? 'Approve Exception' : 'Waive PO Requirement';
+  const poWaiverPlaceholder = poWaiverIsOverbilling
+    ? 'Example: Approved by finance because PO revision is pending in Tally'
+    : 'Example: Professional service invoice approved without PO';
+  const poWaiverDescription = poWaiverIsOverbilling
+    ? 'This records an audited exception for the PO overbilling tolerance breach. It does not modify OCR data, n8n validation payloads, or purchase order records.'
+    : 'This records an audited exception for this invoice. It does not modify OCR data, n8n validation payloads, or purchase order records.';
 
   const isUuid = (value: unknown) =>
     typeof value === 'string' &&
@@ -1746,6 +1890,19 @@ export default function DetailView() {
             </Button>
           )}
 
+          {canWaivePo && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 text-amber-700 bg-[linear-gradient(180deg,#FFFBEB_0%,#FEF3C7_100%)] hover:bg-amber-100 rounded-2xl border border-amber-200 shadow-[0_10px_24px_rgba(245,158,11,0.12)] transition-all hover:-translate-y-0.5 hover:scale-[1.02] active:scale-95"
+              title={poWaiverTitle}
+              onClick={() => setPoWaiverDialog({ reason: '' })}
+              disabled={isWaivingPo}
+            >
+              <FileText size={20} />
+            </Button>
+          )}
+
           <div className="flex items-center gap-2 border-l border-slate-200 pl-4 ml-2">
             {!readOnly && !invoice?.erp_sync_id && fromTab !== 'ready' && (
               <Button
@@ -1938,6 +2095,7 @@ export default function DetailView() {
                     { label: 'Supplier', key: 'vendor_verification', showIf: 'all' },
                     { label: 'Duplication', key: 'duplicate_check', showIf: 'all' },
                     { label: isGoodsDocument ? 'Stock Item' : 'Ledger', key: 'line_item_match_status', showIf: 'all' },
+                    { label: poWaived ? 'PO Waived' : 'PO Match', key: 'po_match_status', showIf: 'all' },
                   ].filter(item => {
                     if (item.showIf === 'all') return true;
                     return true;
@@ -1950,9 +2108,8 @@ export default function DetailView() {
                       // No inversion needed anymore as true = success
                     }
 
-                    return (
+                    const badge = (
                       <div
-                        key={key}
                         className={`inline-flex items-center gap-1 px-2 py-[3px] rounded-full border text-[9px] font-black uppercase tracking-[0.12em] whitespace-nowrap ${isSuccess
                           ? 'bg-[linear-gradient(180deg,#F4FFF9_0%,#EDFBF3_100%)] text-emerald-600 border-emerald-100/80'
                           : 'bg-[linear-gradient(180deg,#FFF5F7_0%,#FFEEF2_100%)] text-rose-500 border-rose-100/80'
@@ -1962,6 +2119,26 @@ export default function DetailView() {
                         <span>{label}</span>
                       </div>
                     );
+
+                    if (key === 'po_match_status') {
+                      return (
+                        <Popover.Root key={key}>
+                          <Popover.Trigger asChild>
+                            <button type="button" className="cursor-help rounded-full outline-none focus:ring-2 focus:ring-blue-500/20">
+                              {badge}
+                            </button>
+                          </Popover.Trigger>
+                          <Popover.Portal>
+                            <Popover.Content side="bottom" align="center" sideOffset={10} className="z-[170] outline-none">
+                              <PoApprovalSnapshot checks={docFields.po_match_checks || {}} message={docFields.po_match_message} />
+                              <Popover.Arrow className="fill-[#111827]" />
+                            </Popover.Content>
+                          </Popover.Portal>
+                        </Popover.Root>
+                      );
+                    }
+
+                    return <React.Fragment key={key}>{badge}</React.Fragment>;
                   })}
                 </div>
               </div>
@@ -2113,6 +2290,7 @@ export default function DetailView() {
                         { label: 'Supplier Address', key: 'supplier_address' },
                         { label: 'Buyer Name', key: 'buyer_name' },
                         { label: 'Buyer GST', key: 'buyer_gst', errorKey: 'gst_validation_status' },
+                        { label: 'PO Number', key: 'po_number' },
                         { label: 'Taxable Value', key: 'sub_total', errorKey: 'invoice_ocr_data_validation' },
                         { label: 'Round Off', key: 'round_off', errorKey: 'invoice_ocr_data_validation' },
                         { label: 'Total Invoice Amount', key: 'grand_total', errorKey: 'invoice_ocr_data_validation' },
@@ -2720,6 +2898,43 @@ export default function DetailView() {
               <AlertDialogCancel onClick={() => closeConversionDialog(false)}>Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={() => closeConversionDialog(true)}>
                 {conversionDialog?.confirmLabel || 'Continue'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <AlertDialog open={!!poWaiverDialog} onOpenChange={(open) => { if (!open && !isWaivingPo) setPoWaiverDialog(null); }}>
+          <AlertDialogContent className="sm:max-w-lg rounded-[24px] border-amber-100 bg-[linear-gradient(135deg,#FFFFFF_0%,#FFFBEB_100%)]">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{poWaiverTitle}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {poWaiverDescription}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-2">
+              <label className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+                Waiver reason
+              </label>
+              <textarea
+                value={poWaiverDialog?.reason || ''}
+                onChange={(e) => setPoWaiverDialog({ reason: e.target.value })}
+                placeholder={poWaiverPlaceholder}
+                className="min-h-[104px] w-full resize-none rounded-2xl border border-amber-100 bg-white/90 px-4 py-3 text-[13px] font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-300 focus:border-amber-300 focus:ring-4 focus:ring-amber-100"
+                disabled={isWaivingPo}
+              />
+              <p className="text-[11px] leading-5 text-slate-500">
+                The reason will be saved in PO validation state and audit trail for review.
+              </p>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isWaivingPo}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isWaivingPo || !String(poWaiverDialog?.reason || '').trim()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  void handlePoWaiverSubmit();
+                }}
+              >
+                {isWaivingPo ? 'Saving...' : poWaiverActionLabel}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
