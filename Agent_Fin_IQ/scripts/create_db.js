@@ -145,7 +145,7 @@ async function run() {
             invoice_no TEXT,
             vendor_name TEXT,
             event_type TEXT NOT NULL,
-            user_name TEXT NOT NULL DEFAULT 'agent_w',
+            user_name TEXT NOT NULL DEFAULT 'agent_fc',
             description TEXT,
             before_data JSONB,
             after_data JSONB,

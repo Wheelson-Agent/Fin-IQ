@@ -45,7 +45,7 @@ export function FloatingAgent() {
                                     <Zap size={14} fill="white" className="text-white" />
                                 </div>
                                 <div>
-                                    <div className="text-[13px] font-black text-white">agent_w</div>
+                                    <div className="text-[13px] font-black text-white">agent_fc</div>
                                     <div className="flex items-center gap-[4px]">
                                         <div className="w-[5px] h-[5px] rounded-full bg-[#10B981] animate-pulse" />
                                         <span className="text-[9.5px] text-white/35 font-mono">Live · Dec 9 · 08:02 AM</span>
@@ -97,7 +97,7 @@ export function FloatingAgent() {
                                 onClick={() => goToAgent()}
                                 className="w-full mt-[8px] text-[10.5px] text-white/35 hover:text-white/70 transition-colors text-center"
                             >
-                                Open full agent_w workspace →
+                                Open full agent_fc workspace →
                             </button>
                         </div>
                     </motion.div>

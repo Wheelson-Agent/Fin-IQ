@@ -52,7 +52,7 @@ export default function UserProfile() {
         { label: 'Invoice Approval', granted: true },
         { label: 'Batch Upload', granted: true },
         { label: 'Vendor Management', granted: true },
-        { label: 'agent_w Tally Posting', granted: true },
+        { label: 'agent_fc Tally Posting', granted: true },
         { label: 'Report Export', granted: true },
         { label: 'User Management', granted: false },
         { label: 'System Configuration', granted: false },
@@ -331,12 +331,12 @@ export default function UserProfile() {
                                             <Briefcase size={18} className="text-[#059669]" />
                                         </div>
                                         <div>
-                                            <div className="text-[14px] font-bold text-[#1A2640]">agent_w Control Hub</div>
+                                            <div className="text-[14px] font-bold text-[#1A2640]">agent_fc Control Hub</div>
                                             <div className="text-[11px] text-[#8899AA]">Tally integration settings</div>
                                         </div>
                                     </div>
                                     {[
-                                        { label: 'agent_w Version', value: 'Prime 4.1' },
+                                        { label: 'agent_fc Version', value: 'Prime 4.1' },
                                         { label: 'Fiscal Year', value: '2024–25' },
                                         { label: 'GST Mode', value: 'Auto-Compute' },
                                         { label: 'Sync Status', value: activeCompany?.is_active ? 'Enabled — Real-time' : 'Disabled' },

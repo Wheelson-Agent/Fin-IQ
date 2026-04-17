@@ -431,7 +431,7 @@ export function Topbar({
         <div className={`h-[56px] backdrop-blur-[12px] border-b flex items-center justify-between px-[28px] shrink-0 relative z-50 w-full transition-colors duration-300 ${isMono ? 'bg-white/95 border-[#e4e4e7] shadow-[0_1px_0_rgba(0,0,0,0.06)]' : 'bg-white/90 border-[#D0D9E8]/50 shadow-[0_1px_0_rgba(0,0,0,0.04),_0_4px_12px_rgba(13,27,42,0.04)]'}`}>
             <div className="flex items-center gap-[12px]">
                 <div className={`flex items-center gap-[6px] text-[12px] ${isMono ? 'text-[#71717a]' : 'text-[#4A5568]'}`}>
-                    <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>agent_w</span>
+                    <span className={`font-semibold ${isMono ? 'text-[#09090b]' : 'text-[#1A2640]'}`}>agent_fc</span>
                     <ConnectionStatusIndicator isMono={isMono} />
                     {pageTitle !== 'Accounts Payable  Workspace' && (
                         <>

@@ -718,6 +718,10 @@ export function registerIpcHandlers() {
         return await queries.getTallySyncStats(companyId);
     });
 
+    ipcMain.handle('dashboard:po-health', async (_event, { companyId } = {}) => {
+        return await queries.getPoHealthStats(companyId);
+    });
+
     /**
      * Invoice Pipeline widget — lane counts/amounts, touchless rate, avg processing time, oldest unreviewed.
      *

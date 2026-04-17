@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { Check, TrendingUp, TrendingDown, MessageCircle, ArrowUpRight } from 'lucide-react';
 import {
   getDashboardMetrics,
+  getPoHealthStats,
   getRecentDashboardActivity,
   getTallySyncStats,
   getTopSuppliers,
@@ -12,6 +13,7 @@ import {
   type TallySyncStats,
   type TopSuppliersData,
   type PipelineStats,
+  type PoHealthStats,
 } from '../lib/api';
 import type { DashboardMetrics } from '../lib/types';
 import { useCompany } from '../context/CompanyContext';
@@ -1000,6 +1002,187 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
 }
 
 // ============================================================
+// Accounts Payable  KPI DASHBOARD — PO HEALTH WIDGET
+// ============================================================
+
+/**
+ * Live PO control card.
+ * Keeps display-only PO health separate from validation/posting logic.
+ */
+function PoHealthWidget({ data }: { data: PoHealthStats | null }) {
+  if (!data) {
+    return (
+      <div style={{
+        background: C.surface,
+        border: `0.5px solid ${C.inkGhost}`,
+        borderRadius: '12px',
+        padding: '20px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: C.inkGhost,
+        fontSize: '13px',
+        fontFamily: 'inherit',
+      }}>
+        Loading PO health...
+      </div>
+    );
+  }
+
+  const consumedPct = Math.max(0, Math.min(100, data.consumed_pct || 0));
+  const blocked = data.exceptions.blocked_invoices;
+  const statusAccent = blocked > 0 ? C.amberMid : C.tealMid;
+  const ring = `conic-gradient(${statusAccent} ${consumedPct * 3.6}deg, #EDF2F7 0deg)`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: 'easeOut', delay: 0.34 }}
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        background: 'linear-gradient(145deg, #FFFFFF 0%, #F7FBFF 58%, #F6FFFB 100%)',
+        border: `0.5px solid ${blocked > 0 ? C.amberMid : C.inkGhost}`,
+        borderRadius: '12px',
+        padding: '20px 24px',
+        boxShadow: '0 14px 32px rgba(15, 23, 42, 0.05)',
+      }}
+    >
+      <div style={{
+        position: 'absolute',
+        right: '-42px',
+        top: '-42px',
+        width: '120px',
+        height: '120px',
+        borderRadius: '999px',
+        background: blocked > 0 ? 'rgba(186,117,23,0.10)' : 'rgba(29,158,117,0.10)',
+      }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+          <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', fontWeight: 600, color: C.ink, fontFamily: 'inherit' }}>
+            PO control tower
+          </span>
+        </div>
+        <span style={{
+          position: 'relative',
+          zIndex: 1,
+          fontSize: '10px',
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: blocked > 0 ? C.amberDeep : C.tealDeep,
+          background: blocked > 0 ? C.amberLight : C.tealLight,
+          border: `0.5px solid ${blocked > 0 ? C.amberMid : C.tealMid}`,
+          borderRadius: '999px',
+          padding: '3px 8px',
+          whiteSpace: 'nowrap',
+        }}>
+          {blocked > 0 ? `${blocked} blocker${blocked !== 1 ? 's' : ''}` : 'Clear'}
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 74px', gap: '14px', alignItems: 'center', marginBottom: '14px' }}>
+        <div>
+          <div style={{ fontSize: '10px', color: C.inkMuted, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 700 }}>
+            Outstanding exposure
+          </div>
+          <div style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '22px',
+            fontWeight: 700,
+            color: blocked > 0 ? C.amberDeep : C.ink,
+            marginTop: '4px',
+          }}>
+            {formatINRAbbr(data.outstanding_amount)}
+          </div>
+          <div style={{ fontSize: '11px', color: C.inkMuted, marginTop: '3px' }}>
+            {formatINRAbbr(data.consumed_amount)} consumed of {formatINRAbbr(data.total_po_value)}
+          </div>
+        </div>
+        <div style={{
+          width: '68px',
+          height: '68px',
+          borderRadius: '999px',
+          background: ring,
+          display: 'grid',
+          placeItems: 'center',
+        }}>
+          <div style={{
+            width: '52px',
+            height: '52px',
+            borderRadius: '999px',
+            background: C.surface,
+            display: 'grid',
+            placeItems: 'center',
+            boxShadow: 'inset 0 0 0 0.5px rgba(148,163,184,0.35)',
+          }}>
+            <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '13px', fontWeight: 700, color: statusAccent }}>
+              {consumedPct.toFixed(0)}%
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
+        {[
+          { label: 'Open', value: data.counts.open, color: C.amberDeep, bg: C.amberLight },
+          { label: 'Partial', value: data.counts.partial, color: C.navy, bg: C.navyLight },
+          { label: 'Closed', value: data.counts.closed, color: C.tealDeep, bg: C.tealLight },
+        ].map(item => (
+          <div key={item.label} style={{ background: item.bg, borderRadius: '7px', padding: '8px 9px' }}>
+            <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '15px', fontWeight: 700, color: item.color, lineHeight: 1 }}>
+              {item.value}
+            </div>
+            <div style={{ fontSize: '10px', color: item.color, marginTop: '4px', fontWeight: 600 }}>
+              {item.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {data.top_outstanding.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+          {data.top_outstanding.map(po => {
+            const pct = Math.max(0, Math.min(100, po.consumed_pct || 0));
+            return (
+              <div key={`${po.po_no}-${po.vendor_name}`} style={{ borderTop: `0.5px solid ${C.inkGhost}`, paddingTop: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '5px' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {po.po_no} · {po.vendor_name}
+                    </div>
+                    <div style={{ fontSize: '10px', color: C.inkMuted }}>
+                      {po.status} · {po.line_count} line{po.line_count !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: '11px', color: C.ink, flexShrink: 0 }}>
+                    {formatINRAbbr(po.outstanding_amount)}
+                  </span>
+                </div>
+                <div style={{ height: '5px', borderRadius: '999px', background: '#EEF4F8', overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', borderRadius: '999px', background: pct >= 95 ? C.tealMid : pct >= 50 ? C.amberMid : C.navy }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div style={{ borderTop: `0.5px solid ${C.inkGhost}`, paddingTop: '12px', fontSize: '12px', color: C.inkMuted }}>
+          No active PO outstanding rows yet.
+        </div>
+      )}
+
+      <div style={{ marginTop: '12px', fontSize: '10px', color: C.inkGhost, fontFamily: 'inherit' }}>
+        Last PO refresh: {data.last_refreshed_at ? timeAgo(data.last_refreshed_at) : 'not available'}
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================
 // Accounts Payable  KPI DASHBOARD — TOP SUPPLIERS WIDGET
 // ============================================================
 
@@ -1540,6 +1723,24 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(interval); };
   }, [selectedCompany]);
 
+  // — PO health live state (read-only rollup from PO master + outstanding sync tables)
+  const [poHealth, setPoHealth] = useState<PoHealthStats | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPoHealth() {
+      try {
+        const companyId = selectedCompany && selectedCompany !== 'ALL' ? selectedCompany : undefined;
+        const data = await getPoHealthStats(companyId);
+        if (!cancelled) setPoHealth(data);
+      } catch (err) {
+        console.error('[Dashboard] dashboard:po-health failed:', err);
+        if (!cancelled) setPoHealth(null);
+      }
+    }
+    loadPoHealth();
+    return () => { cancelled = true; };
+  }, [selectedCompany]);
+
   // — Invoice Pipeline live state (dashboard:pipeline IPC)
   // null = still loading (widget shows skeleton); populated after first fetch
   const [pipelineData, setPipelineData] = useState<PipelineStats | null>(null);
@@ -1877,16 +2078,17 @@ export default function Dashboard() {
       </div>
       {/* ── END BOTTOM SECTION LABEL ───────────────────────────── */}
 
-      {/* ── BOTTOM ROW (1fr | 1.4fr | 1fr) ────────────────────── */}
+      {/* ── BOTTOM ROW (Tally | PO health | Activity | Briefing) ── */}
       <div style={{
         display:             'grid',
-        gridTemplateColumns: '1fr 1.4fr 1fr',
+        gridTemplateColumns: '1fr 1.15fr 1.35fr 1fr',
         gap:                 '20px',
       }}>
         {tallySync
           ? <TallySyncWidgetV2 data={tallySync} />
           : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '12px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: 'inherit' }}>Loading Tally sync…</div>
         }
+        <PoHealthWidget data={poHealth} />
         <ActivityWidget  data={activityData}    />
         <BriefingWidget  data={MOCK_BRIEFING}   />
       </div>

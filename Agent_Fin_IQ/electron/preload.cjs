@@ -64,6 +64,7 @@ const ALLOWED_CHANNELS = [
     'api/companies',
     'dashboard:get-metrics',
     'dashboard:tally-sync',
+    'dashboard:po-health',
     'dashboard:top-suppliers',
     'dashboard:pipeline',
     'dashboard:recent-activity',

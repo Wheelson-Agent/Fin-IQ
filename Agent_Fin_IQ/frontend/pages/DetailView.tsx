@@ -483,7 +483,20 @@ const itemDescriptionMatches = (description: string, selectedItemName: string) =
 
 const toBooleanCheck = (value: any) => value === true || String(value).toLowerCase() === 'true';
 
-function PoApprovalSnapshot({ checks, message }: { checks: Record<string, any>; message?: string | null }) {
+function PoApprovalSnapshot({ checks, message, notApplicable }: { checks: Record<string, any>; message?: string | null; notApplicable?: boolean }) {
+  // Not-applicable state: PO check was skipped by config rules
+  if (notApplicable) {
+    return (
+      <div className="w-[260px] rounded-[18px] bg-[#111827] p-4 text-white shadow-[0_22px_60px_rgba(15,23,42,0.28)]">
+        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 mb-2">PO Snapshot</p>
+        <div className="rounded-xl border border-slate-600/30 bg-slate-700/30 px-3 py-3 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+          <p className="text-[12px] font-bold text-slate-300">{message || 'PO check not applicable'}</p>
+        </div>
+      </div>
+    );
+  }
+
   const lineMatch = checks?.line_match || {};
   const consumption = checks?.consumption || {};
   const hasConsumption = Object.keys(consumption).length > 0;
@@ -494,17 +507,29 @@ function PoApprovalSnapshot({ checks, message }: { checks: Record<string, any>; 
     Number(lineMatch?.matched_lines || 0) === Number(lineMatch?.total_invoice_lines || 0) &&
     (lineMatch?.unmatched_lines || []).length === 0;
   const consumptionClear = consumption?.status !== 'overbilled';
+  const firstLineIssue = (lineMatch?.unmatched_lines || [])[0] || (lineMatch?.review_lines || [])[0] || (lineMatch?.matched_line_checks || []).find((line: any) => line?.status === 'review');
+  const lineIssueText = firstLineIssue
+    ? `${firstLineIssue.reason || 'Line needs review'}${firstLineIssue.invoice_line_number ? ` · Invoice line ${firstLineIssue.invoice_line_number}` : ''}${firstLineIssue.po_line_number ? ` · PO line ${firstLineIssue.po_line_number}` : ''}`
+    : `${Number(lineMatch?.total_invoice_lines || 0) - Number(lineMatch?.matched_lines || 0)} invoice line(s) need PO-line review`;
+  const amountIssueText = checks?.amount_within_po_total === false
+    ? `Invoice total ${fmt(Number(checks?.invoice_total || 0))} vs PO total ${fmt(Number(checks?.po_total || 0))}; variance ${fmt(Number(checks?.amount_difference || 0))}`
+    : 'Amount check passed';
+  const buyerIssueText = checks?.buyer_match === false ? 'Invoice buyer GST does not match the PO buyer GST' : 'Buyer header matched';
+  const supplierIssueText = checks?.supplier_match === false ? 'Invoice supplier does not match the PO supplier' : 'Supplier header matched';
+  const usageIssueText = consumption?.status === 'overbilled'
+    ? `Projected PO usage exceeds allowed balance by ${fmt(Number(consumption?.overbilled_amount || 0))}`
+    : `PO balance after this invoice: ${fmt(Number(consumption?.remaining_after_current || 0))}`;
 
   const snapshotItems = [
-    { label: 'PO', passed: toBooleanCheck(checks?.po_exists), note: 'Exists' },
-    { label: 'Supplier', passed: toBooleanCheck(checks?.supplier_match), note: 'Header' },
-    { label: 'Buyer', passed: checks?.buyer_match !== false, note: 'Header' },
-    { label: 'Amount', passed: checks?.amount_within_po_total === true, note: amountReviewOnly ? 'Review' : 'Value' },
-    { label: 'Lines', passed: lineClear, note: lineReviewOnly ? 'Review' : 'Items' },
+    { label: 'PO', passed: toBooleanCheck(checks?.po_exists), note: 'Exists', detail: checks?.po_exists ? 'Purchase order exists in synced Tally data' : 'Purchase order was not found' },
+    { label: 'Supplier', passed: toBooleanCheck(checks?.supplier_match), note: 'Header', detail: supplierIssueText },
+    { label: 'Buyer', passed: checks?.buyer_match !== false, note: 'Header', detail: buyerIssueText },
+    { label: 'Amount', passed: checks?.amount_within_po_total === true, note: amountReviewOnly ? 'Review' : 'Value', detail: amountIssueText },
+    { label: 'Lines', passed: lineClear, note: lineReviewOnly ? 'Review' : 'Items', detail: lineClear ? 'All invoice lines matched PO lines' : lineIssueText },
   ];
   if (hasConsumption) {
     // PO consumption is visible for review, but it does not enforce routing yet.
-    snapshotItems.push({ label: 'Usage', passed: consumptionClear, note: consumptionReviewOnly ? 'Review' : 'Balance' });
+    snapshotItems.push({ label: 'Usage', passed: consumptionClear, note: consumptionReviewOnly ? 'Review' : 'Balance', detail: usageIssueText });
   }
   const passedCount = snapshotItems.filter((item) => item.passed).length;
 
@@ -524,13 +549,19 @@ function PoApprovalSnapshot({ checks, message }: { checks: Record<string, any>; 
         {snapshotItems.map((item) => (
           <div
             key={item.label}
-            className={`rounded-xl border px-3 py-2 ${item.passed ? 'border-emerald-300/20 bg-emerald-300/10' : 'border-amber-300/20 bg-amber-300/10'}`}
+            title={item.detail}
+            className={`group relative rounded-xl border px-3 py-2 ${item.passed ? 'border-emerald-300/20 bg-emerald-300/10' : 'border-amber-300/20 bg-amber-300/10'}`}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-[10px] font-black uppercase tracking-[0.08em] text-slate-200">{item.label}</span>
               <span className={item.passed ? 'text-emerald-300' : 'text-amber-300'}>{item.passed ? '✓' : '!'}</span>
             </div>
             <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">{item.note}</p>
+            {!item.passed && (
+              <div className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-[220] hidden w-[220px] rounded-xl border border-amber-200/20 bg-[#0B1220] px-3 py-2 text-[10px] font-semibold leading-4 text-amber-100 shadow-[0_18px_50px_rgba(0,0,0,0.35)] group-hover:block">
+                {item.detail}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1030,7 +1061,10 @@ export default function DetailView() {
           }
         });
         // PO validation is app-owned state stored separately from OCR and n8n payloads.
-        fields.po_match_status = poValidation.status === 'matched' || poValidation.status === 'waived';
+        // null = not applicable (skipped by config rules); true = matched/waived; false = failed
+        fields.po_match_status = poValidation.status === 'not_applicable'
+          ? null
+          : (poValidation.status === 'matched' || poValidation.status === 'waived');
         fields.po_match_code = poValidation.code || null;
         fields.po_match_message = poValidation.message || null;
         fields.po_match_checks = poValidation.checks || {};
@@ -1382,7 +1416,9 @@ export default function DetailView() {
     const gValid = docFields.gst_validation_status === true || String(docFields.gst_validation_status).toLowerCase() === 'true';
     const dValid = docFields.invoice_ocr_data_validation === true || String(docFields.invoice_ocr_data_validation).toLowerCase() === 'true';
     const isDupPassed = docFields.duplicate_check === true || String(docFields.duplicate_check).toLowerCase() === 'true';
-    const poMatch = docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
+    // null = not applicable (skipped by rules) → treat as gate passing
+    const poMatch = docFields.po_match_status === null || docFields.po_match_code === 'PO_NOT_APPLICABLE'
+      || docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
 
     const isUnknownFile = !invoice.file_name || invoice.file_name.toLowerCase() === 'unknown' || invoice.file_name === 'N/A';
     const isUnknownInv = !(invoice.invoice_number || invoice.invoice_no) ||
@@ -1401,9 +1437,11 @@ export default function DetailView() {
 
   const isManualReview = invoice.status === 'Manual Review';
   const isFailed = invoice.status === 'Failed';
-  const poMatchPassed = docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
+  const poNotApplicable = docFields.po_match_status === null || docFields.po_match_code === 'PO_NOT_APPLICABLE';
+  const poMatchPassed = poNotApplicable || docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
   const poWaived = docFields.po_match_code === 'PO_WAIVED';
-  const canWaivePo = !readOnly && !poMatchPassed && !poWaived && (fromTab === 'input' || fromTab === 'handoff');
+  // Waive button should not show when PO check is not applicable or already passing
+  const canWaivePo = !readOnly && !poMatchPassed && !poWaived && !poNotApplicable && (fromTab === 'input' || fromTab === 'handoff');
   const poWaiverIsOverbilling = docFields.po_match_code === 'PO_OVERBILLED';
   const poWaiverTitle = poWaiverIsOverbilling ? 'Approve PO overbilling exception?' : 'Mark PO as not required?';
   const poWaiverActionLabel = poWaiverIsOverbilling ? 'Approve Exception' : 'Waive PO Requirement';
@@ -2101,22 +2139,22 @@ export default function DetailView() {
                     return true;
                   }).map(({ label, key }) => {
                     const value = docFields[key];
-                    let isSuccess = value === true || (typeof value === 'string' && value.toLowerCase() === 'true');
-
-                    // DUPLICATE CHECK: true means check PASSED (no duplicate found)
-                    if (key === 'duplicate_check') {
-                      // No inversion needed anymore as true = success
-                    }
+                    // null on po_match_status means not applicable (skipped by config rules)
+                    const isNotApplicable = key === 'po_match_status' && (value === null || docFields.po_match_code === 'PO_NOT_APPLICABLE');
+                    const isSuccess = !isNotApplicable && (value === true || (typeof value === 'string' && value.toLowerCase() === 'true'));
 
                     const badge = (
                       <div
-                        className={`inline-flex items-center gap-1 px-2 py-[3px] rounded-full border text-[9px] font-black uppercase tracking-[0.12em] whitespace-nowrap ${isSuccess
-                          ? 'bg-[linear-gradient(180deg,#F4FFF9_0%,#EDFBF3_100%)] text-emerald-600 border-emerald-100/80'
-                          : 'bg-[linear-gradient(180deg,#FFF5F7_0%,#FFEEF2_100%)] text-rose-500 border-rose-100/80'
-                          }`}
+                        className={`inline-flex items-center gap-1 px-2 py-[3px] rounded-full border text-[9px] font-black uppercase tracking-[0.12em] whitespace-nowrap ${
+                          isNotApplicable
+                            ? 'bg-[linear-gradient(180deg,#F8FAFC_0%,#F1F5F9_100%)] text-slate-400 border-slate-200/80'
+                            : isSuccess
+                              ? 'bg-[linear-gradient(180deg,#F4FFF9_0%,#EDFBF3_100%)] text-emerald-600 border-emerald-100/80'
+                              : 'bg-[linear-gradient(180deg,#FFF5F7_0%,#FFEEF2_100%)] text-rose-500 border-rose-100/80'
+                        }`}
                       >
-                        <div className={`w-1 h-1 rounded-full shrink-0 ${isSuccess ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-                        <span>{label}</span>
+                        <div className={`w-1 h-1 rounded-full shrink-0 ${isNotApplicable ? 'bg-slate-300' : isSuccess ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                        <span>{isNotApplicable ? 'PO N/A' : label}</span>
                       </div>
                     );
 
@@ -2130,7 +2168,7 @@ export default function DetailView() {
                           </Popover.Trigger>
                           <Popover.Portal>
                             <Popover.Content side="bottom" align="center" sideOffset={10} className="z-[170] outline-none">
-                              <PoApprovalSnapshot checks={docFields.po_match_checks || {}} message={docFields.po_match_message} />
+                              <PoApprovalSnapshot checks={docFields.po_match_checks || {}} message={docFields.po_match_message} notApplicable={poNotApplicable} />
                               <Popover.Arrow className="fill-[#111827]" />
                             </Popover.Content>
                           </Popover.Portal>

@@ -207,7 +207,7 @@ function AppShell() {
     if (path.startsWith('/reports')) return 'Reports';
     if (path.startsWith('/config')) return 'Control Hub';
     if (path.startsWith('/user')) return 'User & Company';
-    if (path.startsWith('/agent')) return 'Ask agent_w';
+    if (path.startsWith('/agent')) return 'Ask agent_fc';
     return 'Dashboard';
   };
 

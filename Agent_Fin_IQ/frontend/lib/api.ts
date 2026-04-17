@@ -405,6 +405,45 @@ export async function getDashboardMetrics(companyId?: string): Promise<Dashboard
     return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
 }
 
+export interface PoHealthStats {
+    total_po_value: number;
+    outstanding_amount: number;
+    consumed_amount: number;
+    consumed_pct: number;
+    counts: {
+        open: number;
+        partial: number;
+        closed: number;
+    };
+    exceptions: {
+        blocked_invoices: number;
+        closed_po: number;
+        overbilled: number;
+        header_mismatch: number;
+        missing_po: number;
+    };
+    top_outstanding: Array<{
+        po_no: string;
+        vendor_name: string;
+        status: string;
+        total_amount: number;
+        outstanding_amount: number;
+        consumed_amount: number;
+        consumed_pct: number;
+        line_count: number;
+        last_synced_at: string | null;
+    }>;
+    last_refreshed_at: string | null;
+}
+
+/**
+ * Fetch live PO health for the dashboard.
+ * Values are read-only rollups from purchase_orders and purchase_order_outstandings.
+ */
+export async function getPoHealthStats(companyId?: string): Promise<PoHealthStats> {
+    return invoke<PoHealthStats>('dashboard:po-health', { companyId });
+}
+
 // ─── DASHBOARD: INVOICE PIPELINE ────────────────────────────
 
 /**
