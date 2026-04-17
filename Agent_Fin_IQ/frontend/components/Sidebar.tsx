@@ -16,7 +16,7 @@ const navItemsMain = [
   { id: 'dashboard', label: 'Dashboard', path: '/', icon: LayoutDashboard },
   { id: 'ap-workspace', label: 'Accounts Payable  Workspace', path: '/ap-workspace', icon: CreditCard },
   { id: 'audit', label: 'Audit Trail', path: '/audit', icon: ClipboardList },
-  { id: 'agent', label: 'Ask agent_w', path: '/agent', icon: Sparkles, isAI: true, badge: 'AI', badgeColor: 'bg-[#6366F1]' },
+  { id: 'agent', label: 'Ask agent_fc', path: '/agent', icon: Sparkles, isAI: true, badge: 'AI', badgeColor: 'bg-[#6366F1]' },
 ];
 
 const navItemsManage = [
@@ -81,7 +81,7 @@ export function Sidebar({ expanded, setExpanded }: SidebarProps) {
                   transition={{ duration: 0.2 }}
                   className="whitespace-nowrap overflow-hidden flex flex-col justify-center"
                 >
-                  <div className="text-[14px] font-bold text-white tracking-[-0.2px] leading-[1.2]">agent_w</div>
+                  <div className="text-[14px] font-bold text-white tracking-[-0.2px] leading-[1.2]">agent_fc</div>
                   <div className="text-[9.5px] text-white/35 font-mono mt-[1px]">v2.4 · AI Powered</div>
                 </motion.div>
               )}

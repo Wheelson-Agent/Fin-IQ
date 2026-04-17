@@ -55,7 +55,7 @@ export default function Login() {
                         <ShieldCheck size={32} className="text-[#1E6FD9]" />
                     </div>
                     <h1 className="text-[28px] font-black text-[#1A2640] tracking-tight mb-[8px]">Welcome Back</h1>
-                    <p className="text-[14px] text-[#64748B] font-medium text-center">Secure access to the agent_w console.</p>
+                    <p className="text-[14px] text-[#64748B] font-medium text-center">Secure access to the agent_fc console.</p>
                 </motion.div>
 
                 {/* Login Card */}

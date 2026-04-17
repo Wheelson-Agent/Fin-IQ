@@ -35,7 +35,7 @@ const RESPONSES: { test: RegExp; reply: string; cards?: React.ReactNode }[] = [
     },
     {
         test: /vendor|supplier/i,
-        reply: `You have **47 active vendors** in agent_w. Here's a quick health snapshot:\n\n**Top performers** (>95% auto-post rate):\n→ Amazon Web Services, Adobe Creative Cloud, Microsoft Azure\n\n**Needs attention:**\n→ TCS — 3 failed invoices this quarter, format inconsistency\n→ BlueDart — Missing HSN codes since January\n→ Reliance Jio — Duplicate invoice submitted twice (IN-2024-881)\n\n**New vendors pending setup:** 2 vendors from last batch haven't been mapped to GL accounts yet. Want me to suggest GL mappings based on their invoice categories?`,
+        reply: `You have **47 active vendors** in agent_fc. Here's a quick health snapshot:\n\n**Top performers** (>95% auto-post rate):\n→ Amazon Web Services, Adobe Creative Cloud, Microsoft Azure\n\n**Needs attention:**\n→ TCS — 3 failed invoices this quarter, format inconsistency\n→ BlueDart — Missing HSN codes since January\n→ Reliance Jio — Duplicate invoice submitted twice (IN-2024-881)\n\n**New vendors pending setup:** 2 vendors from last batch haven't been mapped to GL accounts yet. Want me to suggest GL mappings based on their invoice categories?`,
     },
     {
         test: /invoice|process|queue/i,
@@ -43,7 +43,7 @@ const RESPONSES: { test: RegExp; reply: string; cards?: React.ReactNode }[] = [
     },
     {
         test: /hello|hi|hey|what can|help/i,
-        reply: `Hey! I'm **agent_w**, your AI-powered Accounts Payable  automation assistant.\n\nI have full real-time access to your Document Processing Queue, vendor database, GST records, and payment ledger. Here's what I can help you with:\n\n→ **Invoice analysis** — drill into any invoice or batch\n→ **Risk detection** — aging payables, duplicate flags, GST mismatches\n→ **Automation insights** — why invoices fail, how to improve your auto-post rate\n→ **Vendor health** — supplier scorecards, format issues, compliance flags\n→ **Reports** — instant summaries, trend analysis, export to Excel\n\nWhat would you like to explore first?`,
+        reply: `Hey! I'm **agent_fc**, your AI-powered Accounts Payable  automation assistant.\n\nI have full real-time access to your Document Processing Queue, vendor database, GST records, and payment ledger. Here's what I can help you with:\n\n→ **Invoice analysis** — drill into any invoice or batch\n→ **Risk detection** — aging payables, duplicate flags, GST mismatches\n→ **Automation insights** — why invoices fail, how to improve your auto-post rate\n→ **Vendor health** — supplier scorecards, format issues, compliance flags\n→ **Reports** — instant summaries, trend analysis, export to Excel\n\nWhat would you like to explore first?`,
     },
 ];
 
@@ -265,7 +265,7 @@ export default function AgentPage() {
                             </div>
                             <div>
                                 <div className="flex items-center gap-[8px]">
-                                    <h1 className="text-[22px] font-black text-white tracking-tight leading-none">agent_w</h1>
+                                    <h1 className="text-[22px] font-black text-white tracking-tight leading-none">agent_fc</h1>
                                     <span className="text-[10px] font-black uppercase tracking-widest text-[#1E6FD9] bg-[#1E6FD9]/15 border border-[#1E6FD9]/30 px-[8px] py-[3px] rounded-full">AI · Live</span>
                                 </div>
                                 <p className="text-[12px] text-white/40 mt-[3px] font-medium">Your Accounts Payable  intelligence layer — ask anything about your invoices, vendors, or compliance</p>
@@ -375,7 +375,7 @@ export default function AgentPage() {
                             value={input}
                             onChange={e => setInput(e.target.value)}
                             onKeyDown={handleKey}
-                            placeholder="Ask agent_w anything... (Enter to send, Shift+Enter for newline)"
+                            placeholder="Ask agent_fc anything... (Enter to send, Shift+Enter for newline)"
                             rows={1}
                             className="flex-1 bg-transparent border-none outline-none text-[13.5px] text-[#1A2640] placeholder:text-[#8899AA] resize-none leading-relaxed font-medium py-[2px]"
                             style={{ minHeight: '24px', maxHeight: '120px' }}
@@ -402,7 +402,7 @@ export default function AgentPage() {
                     <div className="flex items-center justify-between mt-[8px] px-[2px]">
                         <div className="flex items-center gap-[4px] text-[10.5px] text-[#8899AA]">
                             <Sparkles size={11} />
-                            <span>Powered by agent_w v2.4 · Data updated Dec 9, 08:02 AM</span>
+                            <span>Powered by agent_fc v2.4 · Data updated Dec 9, 08:02 AM</span>
                         </div>
                         <span className="text-[10px] text-[#C0CBE0]">Enter ↵ to send</span>
                     </div>
