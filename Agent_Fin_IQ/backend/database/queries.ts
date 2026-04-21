@@ -18,7 +18,6 @@
  */
 
 import { query, pool } from './connection';
-import { sendInvoiceToTally } from '../sync/tally_posting';
 import { refreshPurchaseOrderOutstandingFromTally } from '../sync/po_outstanding';
 
 type InvoiceDateRangeConfig = {
@@ -1540,8 +1539,7 @@ export async function evaluateInvoiceStatus(
             // Evaluate the enabled auto-post gates without changing fallback routing.
             try {
                 if (await shouldAutoPostInvoice(grandTotal, invoiceDate, invoiceVendorGst, docType, lineItems, companyId)) {
-                    console.log(`[DB] Auto-post criteria passed for invoice date "${invoiceDate || 'missing'}". Status -> Auto-Posted.`);
-                    finalStatus = 'Auto-Posted';
+                    console.log(`[DB] Auto-post criteria passed for invoice date "${invoiceDate || 'missing'}". Status stays Ready to Post — posting requires explicit user approval.`);
                 }
             } catch (ruleErr) {
                 console.error('[DB] Error evaluating posting rules:', ruleErr);
@@ -1940,17 +1938,18 @@ export async function updateInvoiceRemarks(id: string, remarks: string) {
  * @param erpSyncStatus - 'processed' or 'failed'
  */
 export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed') {
+    const succeeded = erpSyncStatus !== 'failed';
     await query(
         `UPDATE ap_invoices SET
-          is_posted_to_tally = true,
-          processing_status = 'Auto-Posted',
+          is_posted_to_tally = $5,
+          processing_status = CASE WHEN $5 THEN 'Auto-Posted' ELSE 'Handoff' END,
           erp_sync_status = $4,
           erp_sync_id = COALESCE($3, erp_sync_id),
           posted_to_tally_json = COALESCE($2::jsonb, posted_to_tally_json),
           tally_id = COALESCE($3, tally_id),
           updated_at = NOW()
         WHERE id = $1`,
-        [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus]
+        [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus, succeeded]
     );
 
     let postedInvoiceCompanyId: string | null = null;
@@ -3318,15 +3317,6 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                 const result = await client.query(updateSql, [invoiceId, ...invParams]);
                 console.log(`[DB] ingestN8nData: successfully updated ap_invoices for ${invoiceId}. Rows affected: ${result.rowCount}`);
 
-                if (finalStatus === 'Auto-Posted') {
-                    setTimeout(async () => {
-                        try {
-                            const postResult = await sendInvoiceToTally(invoiceId, invData.ocr_raw_payload);
-                            const tallyIdStr = postResult.response?.tally_id || postResult.response?.masterid || null;
-                            await markPostedToTally(invoiceId, postResult.response, tallyIdStr, postResult.status);
-                        } catch (postErr) {}
-                    }, 100);
-                }
             }
         }
 

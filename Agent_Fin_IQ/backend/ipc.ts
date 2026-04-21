@@ -48,6 +48,9 @@ import * as ocr from './ocr/bridge';
 import { createBatchStructure } from './utils/filesystem';
 import { runFullPipeline } from './pre-ocr/engine';
 import { batchLogger } from './services/batchLogger';
+import { reloadFolderWatchers } from './services/folderWatcher';
+import { reloadEmailWatchers } from './services/emailWatcher';
+import { sendTodayApDigest } from './services/apDigestService';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -905,7 +908,7 @@ export function registerIpcHandlers() {
             } else {
                 // PRE_OCR=off — bypass pipeline, send original file directly to Google Document AI
                 const preOcrStartedAt = new Date();
-                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Skipped', 'Pre-OCR bypassed (PRE_OCR=off) — sending original file to OCR');
+                batchLogger.addLog(batchName, fileName, 'Pre-OCR', 'Info', 'Pre-OCR bypassed (PRE_OCR=off) — sending original file to OCR');
                 console.log(`[IPC] Pre-OCR BYPASSED for ${fileName} (PRE_OCR=off in config)`);
                 await queries.updatePreOcrStatus(invoiceId, 'BYPASSED');
                 const preOcrCompletedAt = new Date();
@@ -1386,6 +1389,53 @@ export function registerIpcHandlers() {
     ipcMain.handle('config:save-full', async (_event, { config, companyId }) => {
         if (!companyId) throw new Error('Missing companyId');
         await queries.setAppConfig('full_config', config, companyId);
+        reloadFolderWatchers();
+        reloadEmailWatchers();
+        return { success: true };
+    });
+
+    ipcMain.handle('config:get-source-config', async (_event, { companyId }) => {
+        if (!companyId) return null;
+        return await queries.getAppConfig('source_config', companyId, true);
+    });
+
+    ipcMain.handle('invoices:retry-tally-post', async (_event, { id }) => {
+        if (!id) throw new Error('Missing invoice id');
+        const invoice = await queries.getInvoiceById(id);
+        if (!invoice) throw new Error('Invoice not found');
+
+        try {
+            const result = await tallyPosting.sendInvoiceToTally(id, invoice.ocr_raw_payload);
+            const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
+            await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
+            await queries.createAuditLog({
+                invoice_id: id,
+                invoice_no: invoice.invoice_number,
+                vendor_name: invoice.vendor_name,
+                event_type: 'Edited',
+                user_name: _session?.userName || 'System',
+                changed_by_user_id: _session?.userId,
+                description: `Tally retry ${result.status === 'processed' ? 'succeeded' : 'failed'}.`,
+                before_data: { status: invoice.processing_status },
+                after_data: { status: result.status === 'processed' ? 'Auto-Posted' : 'Handoff' },
+            });
+            return { success: result.status === 'processed', status: result.status };
+        } catch (err: any) {
+            console.error('[IPC] Tally retry failed:', err.message);
+            await queries.updateInvoiceWithOCR(id, { erp_sync_status: 'failed' } as any);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('reports:send-email-digest', async (_event, { companyId, recipients, summaryConfig } = {}) => {
+        return await sendTodayApDigest({ companyId, recipients, summaryConfig, triggeredByUserId: null, triggeredByDisplayName: 'Manual' });
+    });
+
+    ipcMain.handle('config:save-source-config', async (_event, { config, companyId }) => {
+        if (!companyId) throw new Error('Missing companyId');
+        await queries.setAppConfig('source_config', config, companyId);
+        reloadFolderWatchers();
+        reloadEmailWatchers();
         return { success: true };
     });
 
