@@ -48,6 +48,10 @@ import * as ocr from './ocr/bridge';
 import { createBatchStructure } from './utils/filesystem';
 import { runFullPipeline } from './pre-ocr/engine';
 import { batchLogger } from './services/batchLogger';
+import { sendTodayApDigest } from './services/apDigestService';
+import { reloadFolderWatchers } from './services/folderWatcher';
+import { reloadEmailWatchers } from './services/emailWatcher';
+import { suggestLedger } from './services/ledgerSuggestionService';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -274,6 +278,19 @@ export function registerIpcHandlers() {
      */
     ipcMain.handle('invoices:save-all', async (_event, { id, data, items, userName }) => {
         return await queries.saveAllInvoiceData(id, data, items, userName);
+    });
+
+    /**
+     * Suggest a ledger (services) or stock item (goods) for a given line description.
+     * Input:  { description: string, lineType: 'goods' | 'services', companyId: string }
+     * Output: { itemId, glAccountId, source: 'history' | 'embedding' | null, score }
+     *
+     * Layer 1 — fuzzy match against confirmed history (fast, always runs)
+     * Layer 2 — embedding similarity against ledger_master / item_master (offline, ~5-15ms)
+     * Returns null fields when confidence is below threshold — never forces a wrong suggestion.
+     */
+    ipcMain.handle('invoices:suggest-ledger', async (_event, { description, lineType, companyId }) => {
+        return await suggestLedger(description, lineType, companyId);
     });
 
     /**
@@ -522,6 +539,23 @@ export function registerIpcHandlers() {
      */
     ipcMain.handle('invoices:update-status', async (_event, { id, status, userName }) => {
         const before = await queries.getInvoiceById(id);
+
+        // Backend posting gate: block if workspace line items haven't been confirmed by user.
+        // Prevents stale n8n-set status from bypassing confirmation requirement.
+        if (status === 'Auto-Posted' || status === 'Approved') {
+            const rawPayload = (() => {
+                try { return typeof before?.ocr_raw_payload === 'string' ? JSON.parse(before.ocr_raw_payload) : (before?.ocr_raw_payload || {}); } catch { return {}; }
+            })();
+            const n8nVal = (() => {
+                try { return typeof before?.n8n_val_json_data === 'string' ? JSON.parse(before.n8n_val_json_data) : (before?.n8n_val_json_data || {}); } catch { return {}; }
+            })();
+            const hasWorkspaceLines = Array.isArray(rawPayload?.line_items) && rawPayload.line_items.length > 0;
+            const workspaceConfirmed = n8nVal?.workspace_mappings_confirmed === true;
+            if (hasWorkspaceLines && !workspaceConfirmed) {
+                throw new Error('Line items must be confirmed before posting. Please select ledgers or stock items and save first.');
+            }
+        }
+
         const updated = await queries.updateInvoiceStatus(id, status);
 
         // Log audit event
@@ -758,6 +792,20 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('dashboard:recent-activity', async (_event, { companyId } = {}) => {
         return await queries.getRecentDashboardActivity(companyId);
+    });
+
+    /**
+     * Send a manual today-only AP digest to the recipients configured in Reports > Email.
+     * Scheduling is intentionally outside this handler so manual delivery can be verified first.
+     */
+    ipcMain.handle('reports:send-email-digest', async (_event, { companyId, recipients, summaryConfig } = {}) => {
+        return await sendTodayApDigest({
+            companyId,
+            recipients,
+            summaryConfig,
+            triggeredByUserId: _session?.userId || null,
+            triggeredByDisplayName: _session?.userName || 'System',
+        });
     });
 
     // ─── PROCESSING ────────────────────────────────────────
@@ -1386,6 +1434,8 @@ export function registerIpcHandlers() {
     ipcMain.handle('config:save-full', async (_event, { config, companyId }) => {
         if (!companyId) throw new Error('Missing companyId');
         await queries.setAppConfig('full_config', config, companyId);
+        reloadFolderWatchers();
+        reloadEmailWatchers();
         return { success: true };
     });
 
@@ -1399,6 +1449,16 @@ export function registerIpcHandlers() {
         }
 
         lastSyncTime = now;
+
+        // Pre-flight: downgrade workspace-only invoices that n8n prematurely pushed to 'Ready to Post'
+        // without the user confirming line item mappings. n8n reads the DB directly for batch sync,
+        // so this must run BEFORE the sync call to prevent unconfirmed invoices from being posted.
+        try {
+            await queries.downgradeUnconfirmedWorkspaceInvoices();
+        } catch (preflightErr: any) {
+            console.warn('[IPC] ERP sync pre-flight downgrade failed (non-critical):', preflightErr?.message);
+        }
+
         const syncRequestedAt = new Date(now).toISOString();
         try {
             const syncUrl = process.env.N8N_ERP_sync_URL;

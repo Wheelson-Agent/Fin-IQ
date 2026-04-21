@@ -20,6 +20,7 @@
 import { query, pool } from './connection';
 import { sendInvoiceToTally } from '../sync/tally_posting';
 import { refreshPurchaseOrderOutstandingFromTally } from '../sync/po_outstanding';
+import { recordConfirmedMapping } from '../services/ledgerSuggestionService';
 
 type InvoiceDateRangeConfig = {
     filter_invoice_date_enabled?: boolean;
@@ -1520,9 +1521,19 @@ export async function evaluateInvoiceStatus(
 
     // 2. Master Data / Input Validations
     const vendorPassed = getVal('vendor_verification') && !!vendorId;
-    
-    // Ledger validation: every line must have a ledger_id
-    const ledgerPassed = lineItems.length > 0 && lineItems.every(li => li.ledger_id || li.gl_account_id);
+
+    // Workspace-only invoices have no ap_invoice_lines records; ledger/stock-item confirmation
+    // is tracked via 'workspace_mappings_confirmed' — a field only our system writes (never n8n).
+    // This prevents n8n's stale line_item_match_status from bypassing user confirmation.
+    const workspaceConfirmed = validationData?.['workspace_mappings_confirmed'] === true;
+    const isWorkspaceOnly = lineItems.length === 0;
+
+    const ledgerPassed = isWorkspaceOnly
+        ? workspaceConfirmed
+        : (lineItems.length > 0 && lineItems.every(li => li.ledger_id || li.gl_account_id));
+
+    // For workspace-only invoices, gate on our confirmation rather than n8n's line_item_match_status.
+    const effectiveStockItemsMatch = isWorkspaceOnly ? workspaceConfirmed : stockItemsMatch;
 
     // 3. Status Decision
     // We treat buyer, gst, duplicate, and basic extraction as 'Major' technical checks.
@@ -1533,7 +1544,7 @@ export async function evaluateInvoiceStatus(
     if (n8nStatus === 'Failed') return 'Handoff';
 
     if (majorChecksPassed) {
-        if (vendorPassed && ledgerPassed && hasInvoiceNo && stockItemsMatch && poMatchPassed) {
+        if (vendorPassed && ledgerPassed && hasInvoiceNo && effectiveStockItemsMatch && poMatchPassed) {
             let finalStatus = 'Ready to Post';
 
             // --- POSTING RULES EVALUATION ---
@@ -1800,6 +1811,27 @@ export async function updateInvoiceStatus(id: string, status: string) {
         [id, status]
     );
     return result.rows[0];
+}
+
+/**
+ * Downgrade workspace-only invoices that reached 'Ready to Post' via n8n's stale
+ * line_item_match_status flag, without the user actually confirming line item mappings.
+ * Called as a pre-flight before erp:sync so n8n's batch pick-up never sees them.
+ */
+export async function downgradeUnconfirmedWorkspaceInvoices(): Promise<void> {
+    await query(
+        `UPDATE ap_invoices
+         SET processing_status = 'Awaiting Input', updated_at = NOW()
+         WHERE processing_status IN ('Ready to Post', 'Auto-Posted')
+           AND (is_posted_to_tally IS NULL OR is_posted_to_tally = false)
+           AND erp_sync_id IS NULL
+           AND ocr_raw_payload ? 'line_items'
+           AND jsonb_array_length(ocr_raw_payload->'line_items') > 0
+           AND (CASE WHEN n8n_val_json_data IS NOT NULL AND n8n_val_json_data <> ''
+                    THEN (n8n_val_json_data::jsonb->>'workspace_mappings_confirmed')
+                    ELSE NULL END) IS DISTINCT FROM 'true'`,
+        []
+    );
 }
 
 /**
@@ -2556,6 +2588,108 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             }
 
             await client.query('COMMIT');
+
+            // Recompute line_item_match_status from actual UI selections and update processing_status.
+            // n8n's pre-filled value is unreliable for both goods and services — our system is sole source.
+            try {
+                const savedLines: any[] = Array.isArray(patch?.line_items)
+                    ? patch.line_items
+                    : Array.isArray(patch?.__ap_workspace?.line_items)
+                        ? patch.__ap_workspace.line_items
+                        : [];
+                if (savedLines.length > 0) {
+                    const savedDocType = String(updatedInvoice?.doc_type || '').toLowerCase();
+                    const isGoodsInvoice = savedDocType.includes('goods');
+                    const linesWithDesc = savedLines.filter((ln: any) =>
+                        String(ln?.description ?? ln?.item_description ?? '').trim()
+                    );
+                    const GENERIC_MARKERS = new Set(['', 'services', 'goods']);
+                    const allMapped = linesWithDesc.length > 0 && linesWithDesc.every((ln: any) => {
+                        if (isGoodsInvoice) return String(ln?.matched_stock_item ?? '').trim();
+                        const ledger = String(ln?.ledger ?? ln?.gl_account_id ?? '').trim().toLowerCase();
+                        return ledger && !GENERIC_MARKERS.has(ledger);
+                    });
+
+                    let currentN8nVal: any = {};
+                    try { currentN8nVal = JSON.parse(String(updatedInvoice.n8n_val_json_data || '{}')); } catch {}
+                    // Write to our own field — never overwrite n8n's line_item_match_status.
+                    // evaluateInvoiceStatus reads workspace_mappings_confirmed when lineItems=[].
+                    const nextN8nVal = { ...currentN8nVal, workspace_mappings_confirmed: allMapped };
+
+                    const recomputedStatus = await evaluateInvoiceStatus(
+                        nextN8nVal,
+                        updatedInvoice.vendor_id || null,
+                        updatedInvoice.invoice_number || null,
+                        [],
+                        updatedInvoice.n8n_validation_status,
+                        updatedInvoice.company_id,
+                        updatedInvoice.grand_total,
+                        updatedInvoice.invoice_date,
+                        updatedInvoice.vendor_gst,
+                        updatedInvoice.doc_type,
+                        updatedInvoice.po_validation_json
+                    );
+
+                    await query(
+                        `UPDATE ap_invoices SET n8n_val_json_data = $2::jsonb, processing_status = $3, updated_at = NOW() WHERE id = $1`,
+                        [updatedInvoice.id, JSON.stringify(nextN8nVal), recomputedStatus]
+                    );
+                }
+            } catch (statusErr: any) {
+                console.warn('[DB] Line item status recompute failed (non-critical):', statusErr?.message);
+            }
+
+            // Record confirmed ledger/item mappings from workspace line items into suggestion history.
+            // The workspace-only path embeds line items inside ocr_raw_payload rather than ap_invoice_lines,
+            // so we read them from the incoming patch payload instead of the `items` argument.
+            // Runs after COMMIT; failures are logged but never surface to the caller.
+            const isUuidLike = (v: any) => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
+            const patchLineItems: any[] = Array.isArray(patch?.line_items)
+                ? patch.line_items
+                : Array.isArray(patch?.__ap_workspace?.line_items)
+                    ? patch.__ap_workspace.line_items
+                    : [];
+
+            if (patchLineItems.length > 0 && updatedInvoice?.company_id) {
+                const companyId: string = updatedInvoice.company_id;
+                // Fire-and-forget: resolve goods item UUIDs from matched_stock_item names, then record.
+                // matched_id is always cleared by applyGoodsStockItemSelection; names must be resolved via DB.
+                (async () => {
+                    const stockItemNames = [...new Set(
+                        patchLineItems.map(ln => String(ln?.matched_stock_item ?? '').trim()).filter(Boolean)
+                    )];
+                    const itemNameToId: Record<string, string> = {};
+                    if (stockItemNames.length > 0) {
+                        const { rows: itemRows } = await query(
+                            `SELECT id, item_name FROM item_master WHERE item_name = ANY($1) AND company_id = $2`,
+                            [stockItemNames, companyId]
+                        );
+                        itemRows.forEach((row: any) => { itemNameToId[row.item_name] = row.id; });
+                    }
+
+                    await Promise.all(
+                        patchLineItems
+                            .filter((ln: any) => {
+                                const desc = String(ln?.description ?? ln?.item_description ?? '').trim();
+                                const glId = isUuidLike(ln?.ledger) ? ln.ledger : (isUuidLike(ln?.gl_account_id) ? ln.gl_account_id : null);
+                                const stockName = String(ln?.matched_stock_item ?? '').trim();
+                                const itemId = isUuidLike(ln?.matched_id) ? ln.matched_id : (itemNameToId[stockName] ?? null);
+                                return desc && (glId || itemId);
+                            })
+                            .map((ln: any) => {
+                                const desc = String(ln.description ?? ln.item_description ?? '').trim();
+                                const glId = isUuidLike(ln?.ledger) ? ln.ledger : (isUuidLike(ln?.gl_account_id) ? ln.gl_account_id : null);
+                                const stockName = String(ln?.matched_stock_item ?? '').trim();
+                                const itemId = isUuidLike(ln?.matched_id) ? ln.matched_id : (itemNameToId[stockName] ?? null);
+                                const lineType: 'goods' | 'services' = itemId ? 'goods' : 'services';
+                                return recordConfirmedMapping(companyId, desc, lineType, itemId, glId);
+                            })
+                    );
+                })().catch((err: any) =>
+                    console.warn('[DB] workspace ledger suggestion history update failed (non-critical):', err?.message)
+                );
+            }
+
             return updatedInvoice;
         }
 
@@ -2645,6 +2779,31 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
         });
 
         await client.query('COMMIT');
+
+        // Record confirmed description→ledger/item mappings into suggestion history.
+        // Runs after COMMIT so a suggestion-history failure never rolls back the actual save.
+        // Fire-and-forget: errors are logged but not surfaced to the caller.
+        if (items && items.length > 0 && updatedInvoice?.company_id) {
+            const companyId: string = updatedInvoice.company_id;
+            Promise.all(
+                items
+                    .filter((item: any) => item.description?.trim() && (item.item || item.ledger))
+                    .map((item: any) => {
+                        // Infer line type: item_id present → goods, otherwise → services
+                        const lineType: 'goods' | 'services' = item.item ? 'goods' : 'services';
+                        return recordConfirmedMapping(
+                            companyId,
+                            item.description,
+                            lineType,
+                            item.item || null,
+                            item.ledger || null,
+                        );
+                    })
+            ).catch((err: any) =>
+                console.warn('[DB] ledger suggestion history update failed (non-critical):', err?.message)
+            );
+        }
+
         return updatedInvoice;
     } catch (err) {
         await client.query('ROLLBACK');

@@ -605,4 +605,27 @@ export async function getSyncLatestStatus(since?: string, companyId?: string): P
     return invoke<{ success: boolean; rows: SyncStatusRow[]; error?: string }>('sync:get-latest-status', { since, companyId });
 }
 
+// ─── LEDGER SUGGESTION ────────────────────────────────────
+
+export interface LedgerSuggestionResult {
+    itemId: string | null;
+    glAccountId: string | null;
+    source: 'history' | 'embedding' | null;
+    score: number;
+}
+
+/**
+ * Request a ledger or stock item suggestion for a single invoice line.
+ * Layer 1 — confirmed history fuzzy match (fast).
+ * Layer 2 — offline embedding similarity if history has no confident match.
+ * Returns null fields when confidence is below threshold.
+ */
+export async function suggestLedger(
+    description: string,
+    lineType: 'goods' | 'services',
+    companyId: string,
+): Promise<LedgerSuggestionResult> {
+    return invoke<LedgerSuggestionResult>('invoices:suggest-ledger', { description, lineType, companyId });
+}
+
 

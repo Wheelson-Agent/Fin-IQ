@@ -26,11 +26,16 @@
 
 import { testConnection, query } from './database/connection';
 import { registerIpcHandlers } from './ipc';
+import { downgradeUnconfirmedWorkspaceInvoices } from './database/queries';
 import fs from 'fs';
 import path from 'path';
 import { initBatchesDir } from './utils/filesystem';
 import { fileURLToPath } from 'url';
 import * as n8nWatcher from './sync/n8nStatusWatcher';
+import { startDigestScheduler } from './services/digestScheduler';
+import { startFolderWatchers } from './services/folderWatcher';
+import { startEmailWatchers } from './services/emailWatcher';
+import { warmupEmbeddingModel } from './services/ledgerSuggestionService';
 
 // ESM Compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -86,6 +91,18 @@ export async function initializeBackend(): Promise<boolean> {
 
     // Step 4: Start background watchers
     n8nWatcher.startWatching();
+    startDigestScheduler();
+    await startFolderWatchers();
+    await startEmailWatchers();
+
+    // Step 5: Fix stale statuses — downgrade 'Ready to Post' invoices that n8n pushed
+    // prematurely before the user confirmed line item mappings via our system.
+    downgradeUnconfirmedWorkspaceInvoices().catch((err: any) =>
+        console.warn('[STARTUP] Stale status cleanup failed (non-critical):', err?.message)
+    );
+
+    // Step 6: Warm up embedding model (downloads once on first run, then loads from cache)
+    warmupEmbeddingModel();
 
     // Create data directories
     const configPath = path.resolve(__dirname, '../config/app.config.json');

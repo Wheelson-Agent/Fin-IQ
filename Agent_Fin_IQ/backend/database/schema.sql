@@ -489,6 +489,28 @@ CREATE TABLE IF NOT EXISTS integration_queues (
 );
 
 -- ============================================================
+-- TABLE: outbound_delivery_logs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS outbound_delivery_logs (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID REFERENCES companies(id) ON DELETE SET NULL,
+    delivery_type         TEXT NOT NULL, -- e.g. ap_summary_digest
+    channel               TEXT NOT NULL, -- e.g. email, whatsapp, teams
+    provider              TEXT,
+    recipients            JSONB NOT NULL DEFAULT '[]'::jsonb,
+    subject               TEXT,
+    status                TEXT NOT NULL,
+    provider_message_id   TEXT,
+    request_payload       JSONB,
+    response_payload      JSONB,
+    error_message         TEXT,
+    triggered_by_user_id  UUID,
+    triggered_by_display_name TEXT,
+    sent_at               TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 -- TABLE: users
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
@@ -538,6 +560,22 @@ INSERT INTO tax_codes (tax_code, description, rate_percentage, tax_authority) VA
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
+-- TABLE: ledger_suggestion_history
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ledger_suggestion_history (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id      UUID REFERENCES companies(id) ON DELETE CASCADE,
+    description     TEXT NOT NULL,
+    line_type       TEXT NOT NULL CHECK (line_type IN ('goods', 'services')),
+    item_id         UUID REFERENCES item_master(id) ON DELETE SET NULL,
+    gl_account_id   UUID REFERENCES ledger_master(id) ON DELETE SET NULL,
+    confirmed_count INT DEFAULT 1,
+    last_confirmed  TIMESTAMPTZ DEFAULT NOW(),
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(company_id, description, line_type)
+);
+
+-- ============================================================
 -- INDEXES
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_status ON ap_invoices(processing_status);
@@ -562,6 +600,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user_visible_timestamp ON audit_logs(i
 CREATE INDEX IF NOT EXISTS idx_processing_jobs_invoice ON processing_jobs(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_integration_queues_entity ON integration_queues(entity_id);
 CREATE INDEX IF NOT EXISTS idx_batches_company ON batches(company_id);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_logs_company_created ON outbound_delivery_logs(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_logs_channel_created ON outbound_delivery_logs(channel, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_logs_status_created ON outbound_delivery_logs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ledger_suggestion_history_company ON ledger_suggestion_history(company_id, line_type);
+CREATE INDEX IF NOT EXISTS idx_ledger_suggestion_history_desc ON ledger_suggestion_history(company_id, description);
 
 -- Audit logs: event_type CHECK constraint (drop-and-recreate to stay in sync with new types)
 DO $$

@@ -47,8 +47,10 @@ import {
   revalidateInvoice,
   deleteInvoice,
   saveAllInvoiceData,
-  waiveInvoicePo
+  waiveInvoicePo,
+  suggestLedger,
 } from '../lib/api';
+import type { LedgerSuggestionResult } from '../lib/api';
 import { toast } from 'sonner';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
@@ -875,6 +877,8 @@ export default function DetailView() {
   const [itemMasterRecords, setItemMasterRecords] = useState<any[]>([]);
   const [supplierRecords, setSupplierRecords] = useState<any[]>([]);
   const [postingRules, setPostingRules] = useState<any>(null);
+  // Per-line suggestion results keyed by line index. Populated by the suggestion fetch effect.
+  const [lineSuggestions, setLineSuggestions] = useState<Record<number, LedgerSuggestionResult | null>>({});
 
   useEffect(() => {
     setPage(1);
@@ -1130,21 +1134,21 @@ export default function DetailView() {
             const safeDiscount = Number.isFinite(discount) ? discount : 0;
             const rawAmount = Number(item?.total_amount ?? item?.amount ?? item?.line_amount);
             const amount = Number.isFinite(rawAmount) && rawAmount !== 0 ? rawAmount : safeQty * safeRate * (1 - safeDiscount / 100);
-            const mappedLedgerLabel = String(item?.mapped_ledger ?? item?.gl_mapped ?? '').trim();
-            const rawLedgerValue = item?.ledger ?? item?.gl_account_id ?? item?.gl_mapped ?? item?.mapped_ledger ?? '';
-            const effectiveLedgerValue =
-              isServiceDocumentType(raw?.doc_type) && isGenericServiceMarker(rawLedgerValue) && mappedLedgerLabel
-                ? (resolveLedgerId(mappedLedgerLabel) || mappedLedgerLabel)
-                : rawLedgerValue;
+            // Only read confirmed ledger UUID — ignore n8n's mapped_ledger, gl_mapped.
+            // Our history/embedding system is the sole source for ledger and stock item mapping.
+            const confirmedLedger = item?.ledger ?? item?.gl_account_id ?? '';
+            // Trust matched_stock_item only when the user has saved at least once (__ap_workspace.last_saved_at).
+            // Before first save, n8n's Levenshtein-matched value is ignored so our system can suggest instead.
+            const isUserSaved = !!raw?.__ap_workspace?.last_saved_at;
             return {
               id: item?.id ?? `${Date.now()}_${idx}`,
               description: item?.description ?? item?.item_description ?? '',
-              ledger: effectiveLedgerValue,
-              matched_stock_item: item?.matched_stock_item ?? '',
-              matched_id: item?.matched_id ?? '',
-              mapped_ledger: mappedLedgerLabel,
-              possible_gl_names: normalizeSelectableNames(item?.possible_gl_names),
-              match_status: item?.match_status ?? '',
+              ledger: confirmedLedger,
+              matched_stock_item: isUserSaved ? (item?.matched_stock_item ?? '') : '',
+              matched_id: '',
+              mapped_ledger: '',
+              possible_gl_names: [],
+              match_status: '',
               hsn_sac: item?.hsn_sac ?? item?.hsn ?? '',
               tax: item?.tax ?? item?.tax_rate ?? '',
               qty: safeQty,
@@ -1269,6 +1273,61 @@ export default function DetailView() {
   }, [loadData, shouldAutoRefreshIncompleteDetail]);
 
   const isGoodsDocument = docFields.doc_type_label?.toLowerCase().includes('goods');
+
+  // For goods documents, derive match status from actual line state rather than n8n's Levenshtein result.
+  // This lets our suggestion system (history + embedding) drive the Stock Item badge without touching n8n.
+  // For service documents, n8n's value is used unchanged.
+  const effectiveLineItemMatchStatus = React.useMemo(() => {
+    const meaningfulLines = lineItems.filter(l => String(l?.description || '').trim());
+    // If no lines have descriptions yet, fall back to n8n's value rather than showing false
+    if (!meaningfulLines.length) return docFields.line_item_match_status;
+    if (isGoodsDocument) {
+      return meaningfulLines.every(l => !!String(l?.matched_stock_item || '').trim());
+    }
+    // Services: derive from actual ledger UI state — n8n's boolean is not reliable
+    return meaningfulLines.every(l => !isGenericServiceMarker(l?.ledger) && !!l?.ledger);
+  }, [isGoodsDocument, lineItems, docFields.line_item_match_status]);
+
+  // Stable key derived from line descriptions — used to trigger the suggestion fetch
+  // only when descriptions change, not on every ledger or amount edit.
+  const lineDescriptionKey = React.useMemo(
+    () => lineItems.map(i => String(i?.description || '').trim()).join('||'),
+    [lineItems]
+  );
+
+  useEffect(() => {
+    const companyId = invoice?.company_id;
+    if (!companyId || !lineItems.length) return;
+
+    const timer = setTimeout(async () => {
+      const next: Record<number, LedgerSuggestionResult | null> = {};
+
+      await Promise.all(
+        lineItems.map(async (item, index) => {
+          const desc = String(item?.description || '').trim();
+          if (!desc) return;
+
+          // Skip lines that already have a selection — no need to suggest
+          const hasLedger = !isGenericServiceMarker(item?.ledger) && !!item?.ledger;
+          const hasStockItem = !!String(item?.matched_stock_item || '').trim();
+          if (isGoodsDocument ? hasStockItem : hasLedger) return;
+
+          try {
+            const result = await suggestLedger(desc, isGoodsDocument ? 'goods' : 'services', companyId);
+            // Only store if the service returned a confident match
+            next[index] = result?.source ? result : null;
+          } catch {
+            // Non-critical: suggestion failures are silently ignored
+          }
+        })
+      );
+
+      setLineSuggestions(next);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineDescriptionKey, isGoodsDocument, invoice?.company_id]);
 
   const routingReasons = React.useMemo(() => {
     if (!invoice || invoice.is_posted_to_tally || !!invoice.erp_sync_id) return [];
@@ -1514,6 +1573,14 @@ export default function DetailView() {
 
   const handleApproveAndPost = async () => {
     if (!id || saving) return;
+    // Block posting when line items aren't confirmed — applies to both goods and services.
+    // effectiveLineItemMatchStatus is derived from actual UI state, not n8n's stale boolean.
+    if (!effectiveLineItemMatchStatus) {
+      toast.error(isGoodsDocument
+        ? 'Select stock items for all line items before posting.'
+        : 'Select ledgers for all line items before posting.');
+      return;
+    }
     try {
       setSaving(true);
       // Triggering 'Auto-Posted' in backend initiates the Tally sync
@@ -2138,7 +2205,11 @@ export default function DetailView() {
                     if (item.showIf === 'all') return true;
                     return true;
                   }).map(({ label, key }) => {
-                    const value = docFields[key];
+                    // For line_item_match_status on goods docs, use our derived value
+                    // instead of n8n's raw result so the badge reflects actual UI state
+                    const value = key === 'line_item_match_status'
+                      ? effectiveLineItemMatchStatus
+                      : docFields[key];
                     // null on po_match_status means not applicable (skipped by config rules)
                     const isNotApplicable = key === 'po_match_status' && (value === null || docFields.po_match_code === 'PO_NOT_APPLICABLE');
                     const isSuccess = !isNotApplicable && (value === true || (typeof value === 'string' && value.toLowerCase() === 'true'));
@@ -2366,15 +2437,6 @@ export default function DetailView() {
                       </div>
                       <h3 className="text-[17px] font-black text-slate-900 tracking-tight">Line Items</h3>
                       <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(203,213,225,0.15),rgba(191,219,254,0.8),rgba(203,213,225,0.15))]" />
-                      {!isGoodsDocument && lineItems.some((_item, idx) => String(rawPayload?.line_items?.[idx]?.mapped_ledger ?? '').trim()) && (
-                        <button
-                          type="button"
-                          onClick={applyAllMappedLedgers}
-                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-[11px] font-black text-blue-600 uppercase tracking-tight hover:bg-blue-100 transition-colors"
-                        >
-                          Use All Suggestions
-                        </button>
-                      )}
                     </div>
 
                     <div className="overflow-hidden rounded-[22px] border border-[#DCE7F5] bg-white shadow-[0_14px_30px_rgba(148,163,184,0.1)]">
@@ -2408,7 +2470,7 @@ export default function DetailView() {
                                 <td className="p-2 align-top min-w-0">
                                   <div
                                     className="min-h-[32px] py-1 text-[12px] font-bold leading-5 whitespace-normal break-words"
-                                    style={{ color: isGoodsDocument ? ((docFields.line_item_match_status === true || String(docFields.line_item_match_status).toLowerCase() === 'true') ? '#10b981' : '#ef4444') : 'inherit' }}
+                                    style={{ color: isGoodsDocument ? (effectiveLineItemMatchStatus === true ? '#10b981' : '#ef4444') : 'inherit' }}
                                     title={item.description}
                                   >
                                     {item.description}
@@ -2481,14 +2543,56 @@ export default function DetailView() {
                                       setShowLedgerSlideout(true);
                                     }}
                                   />
-                                  {(!isGoodsDocument && isGenericServiceMarker(item?.ledger) && String(rawPayload?.line_items?.[index]?.mapped_ledger ?? '').trim()) && (
-                                    <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
-                                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold mb-0">Suggested Ledger</span>
-                                      <span className="text-[11px] text-blue-600 font-semibold leading-4 whitespace-normal break-words" title={rawPayload.line_items[index].mapped_ledger}>
-                                        {rawPayload.line_items[index].mapped_ledger}
-                                      </span>
-                                    </div>
-                                  )}
+                                  {/* Suggestion hint — shown below the picker when the field is empty.
+                                      Source: history match (fast) or embedding similarity (semantic). */}
+                                  {(() => {
+                                    const suggestion = lineSuggestions[index];
+                                    const serviceEmpty = !isGoodsDocument && isGenericServiceMarker(item?.ledger);
+                                    const goodsEmpty = isGoodsDocument && !String(item?.matched_stock_item || '').trim();
+
+                                    if (suggestion && (serviceEmpty || goodsEmpty)) {
+                                      // Resolve the display name from the suggestion result
+                                      const displayName = isGoodsDocument
+                                        ? (itemMasterRecords.find((im: any) => im.id === suggestion.itemId)?.item_name
+                                            || ledgerIdToName[suggestion.glAccountId || ''] || '')
+                                        : (ledgerIdToName[suggestion.glAccountId || ''] || '');
+
+                                      if (displayName) {
+                                        const sourceLabel = suggestion.source === 'history' ? 'From history' : 'AI suggested';
+
+                                        const handleUseSuggestion = () => {
+                                          if (isGoodsDocument && suggestion.itemId) {
+                                            const itemName = itemMasterRecords.find((im: any) => im.id === suggestion.itemId)?.item_name || '';
+                                            if (itemName) applyGoodsStockItemSelection(index, itemName);
+                                          } else if (suggestion.glAccountId) {
+                                            const ledgerName = ledgerIdToName[suggestion.glAccountId] || '';
+                                            applyLedgerSelection(index, ledgerName, suggestion.glAccountId);
+                                          }
+                                        };
+
+                                        return (
+                                          <div className="mt-1.5 px-1 flex flex-col gap-0.5 animate-in fade-in duration-300">
+                                            <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">{sourceLabel}</span>
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="text-[11px] text-blue-600 font-semibold leading-4 whitespace-normal break-words" title={displayName}>
+                                                {displayName}
+                                              </span>
+                                              {!readOnly && (
+                                                <button
+                                                  onClick={handleUseSuggestion}
+                                                  className="text-[9px] font-black text-blue-500 hover:text-blue-700 border border-blue-200 rounded px-1 py-0.5 bg-blue-50 hover:bg-blue-100 transition-colors shrink-0 cursor-pointer"
+                                                >
+                                                  Use
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      }
+                                    }
+
+                                    return null;
+                                  })()}
                                 </td>
                                 <td className="p-2 align-top min-w-[80px]">
                                   <input

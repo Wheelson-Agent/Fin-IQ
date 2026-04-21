@@ -41,6 +41,7 @@ const ALLOWED_CHANNELS = [
     'invoices:delete',
     'invoices:revalidate',
     'invoices:waive-po',
+    'invoices:suggest-ledger',
     // Vendors
     'vendors:get-all',
     'vendors:get-by-id',
@@ -68,6 +69,7 @@ const ALLOWED_CHANNELS = [
     'dashboard:top-suppliers',
     'dashboard:pipeline',
     'dashboard:recent-activity',
+    'reports:send-email-digest',
     // Audit
     'audit:get-logs',
     'audit:delete-log',
@@ -92,6 +94,8 @@ const ALLOWED_CHANNELS = [
     'config:save-rules',
     'config:get-extended-criteria',
     'config:save-extended-criteria',
+    'config:get-full',
+    'config:save-full',
     'items:get-all',
     // Tally post status
     'invoices:get-tally-post-status',
