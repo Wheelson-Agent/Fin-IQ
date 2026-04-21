@@ -319,6 +319,67 @@ export function Topbar({
         };
     }, []);
 
+    // Listen for background syncs triggered by creation flows (vendor/ledger/stock item).
+    // Starts the same dot+polling behaviour as the manual button — spins yellow while
+    // workflows run, turns red/green when sync_status_log stabilises.
+    useEffect(() => {
+        const handleBackgroundSync = (e: Event) => {
+            const firedAt = (e as CustomEvent).detail?.firedAt ?? new Date().toISOString();
+
+            // Clear any previous poll
+            if (syncPollRef.current) {
+                clearInterval(syncPollRef.current);
+                syncPollRef.current = null;
+            }
+
+            setSyncDot('syncing');
+            setSyncTooltip('Syncing with ERP…');
+
+            let attempts = 0;
+            let lastRowCount = -1;
+            const MAX_ATTEMPTS = 12; // 12 × 5s = 60s hard cap
+
+            syncPollRef.current = setInterval(async () => {
+                attempts++;
+                try {
+                    const api = (window as any).api;
+                    const result = await api.invoke('sync:get-latest-status', { since: firedAt });
+                    const currentCount = result?.success ? (result.rows?.length ?? 0) : 0;
+
+                    if (currentCount > 0 && currentCount === lastRowCount) {
+                        clearInterval(syncPollRef.current!);
+                        syncPollRef.current = null;
+                        const { dot, tooltip } = deriveSyncDot(result.rows as SyncStatusRow[]);
+                        setSyncDot(dot);
+                        setSyncTooltip(`Just now · ${tooltip}`);
+                    } else if (attempts >= MAX_ATTEMPTS) {
+                        clearInterval(syncPollRef.current!);
+                        syncPollRef.current = null;
+                        if (currentCount > 0) {
+                            const { dot, tooltip } = deriveSyncDot(result.rows as SyncStatusRow[]);
+                            setSyncDot(dot);
+                            setSyncTooltip(`Just now · ${tooltip}`);
+                        } else {
+                            setSyncDot('timeout');
+                            setSyncTooltip('Sync result not yet available');
+                        }
+                    }
+                    lastRowCount = currentCount;
+                } catch {
+                    if (attempts >= MAX_ATTEMPTS) {
+                        clearInterval(syncPollRef.current!);
+                        syncPollRef.current = null;
+                        setSyncDot('timeout');
+                        setSyncTooltip('Sync result not yet available');
+                    }
+                }
+            }, 5_000);
+        };
+
+        window.addEventListener('app:background-sync', handleBackgroundSync);
+        return () => window.removeEventListener('app:background-sync', handleBackgroundSync);
+    }, []);
+
     const handleRefresh = async () => {
         if (isRefreshing) return;
         setIsRefreshing(true);

@@ -472,6 +472,7 @@ export default function APWorkspace() {
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchName, setBatchName] = useState('');
   const [pendingUploads, setPendingUploads] = useState<FileList | File[] | null>(null);
+  const [isSyncingBeforeUpload, setIsSyncingBeforeUpload] = useState(false);
 
   // Fetch real data on mount
   const fetchData = async (background = false) => {
@@ -885,6 +886,15 @@ export default function APWorkspace() {
       fileDataArrays.push(dataArray);
     }
 
+    // Sync Tally data before upload so vendors and POs are fresh.
+    // Waits until FC-ledger-vendor-sync + FC-PO-sync both complete (or 20s timeout).
+    setIsSyncingBeforeUpload(true);
+    try {
+      await syncAndWait();
+    } finally {
+      setIsSyncingBeforeUpload(false);
+    }
+
     startProcessing({
       fileNames,
       filePaths,
@@ -895,6 +905,52 @@ export default function APWorkspace() {
     setShowBatchDialog(false);
     setPendingUploads(null);
     setActiveTab('processing');
+  };
+
+  // Fire erp:sync and wait until vendor + PO sub-workflows complete.
+  // Hard cap: 20s — if n8n is slow, upload proceeds anyway with stale data.
+  const syncAndWait = (): Promise<void> => {
+    return new Promise((resolve) => {
+      const api = (window as any).api;
+      if (!api?.invoke) return resolve(); // No bridge — skip sync, proceed
+
+      const firedAt = new Date().toISOString();
+      const POLL_INTERVAL = 2000;  // Poll every 2s (faster than manual sync button's 5s)
+      const HARD_CAP_MS = 20000;   // Give up after 20s regardless
+      let elapsed = 0;
+      let timer: ReturnType<typeof setInterval> | null = null;
+
+      const finish = () => {
+        if (timer) clearInterval(timer);
+        resolve();
+      };
+
+      // Fire the sync webhook — non-blocking, result ignored here
+      api.invoke('erp:sync').catch(() => {/* webhook failure — proceed to upload anyway */});
+
+      // Poll sync_status_log for FC-PO-sync success (it runs after FC-ledger-vendor-sync)
+      // Once PO sync is done, both vendor and PO data are guaranteed fresh
+      timer = setInterval(async () => {
+        elapsed += POLL_INTERVAL;
+
+        try {
+          const result = await api.invoke('sync:get-latest-status', { since: firedAt });
+          const rows = result?.rows ?? [];
+
+          const vendorDone = rows.some((r: any) => r.workflow_name === 'FC-ledger-vendor-sync' && r.sync_status === 'success');
+          const poDone = rows.some((r: any) => r.workflow_name === 'FC-PO-sync' && r.sync_status === 'success');
+
+          if (vendorDone && poDone) {
+            finish(); // Both critical workflows done — proceed to upload
+            return;
+          }
+        } catch {
+          // Poll failure is non-fatal — keep trying until hard cap
+        }
+
+        if (elapsed >= HARD_CAP_MS) finish(); // Hard cap reached — upload anyway
+      }, POLL_INTERVAL);
+    });
   };
 
   const handleUploadFiles = (files: FileList | File[]) => {
@@ -2211,8 +2267,10 @@ export default function APWorkspace() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowBatchDialog(false); setPendingUploads(null); }}>Cancel</Button>
-            <Button onClick={confirmUpload} disabled={!batchName.trim()}>Start Processing</Button>
+            <Button variant="outline" onClick={() => { setShowBatchDialog(false); setPendingUploads(null); }} disabled={isSyncingBeforeUpload}>Cancel</Button>
+            <Button onClick={confirmUpload} disabled={!batchName.trim() || isSyncingBeforeUpload}>
+              {isSyncingBeforeUpload ? 'Syncing Tally data…' : 'Start Processing'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
