@@ -283,8 +283,7 @@ const buildStructuredAdditionalCharge = (baseCharge: any, uiCharge: any, index: 
     ? { ...baseCharge }
     : {};
 
-  const amount = Number(uiCharge?.amount ?? 0);
-  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const safeAmount = parseChargeAmount(uiCharge?.amount ?? 0);
   const chargeLedgerLabel = String(
     uiCharge?.mapped_ledger ??
     uiCharge?.ledger_label ??
@@ -304,18 +303,136 @@ const buildStructuredAdditionalCharge = (baseCharge: any, uiCharge: any, index: 
   return structured;
 };
 
-const buildFreightChargeFallback = (rawPayload: Record<string, any> | null | undefined) => {
-  const rawFreightValue = rawPayload?.['Freight Charges'];
-  const freightAmount = Number(rawFreightValue);
-  if (!Number.isFinite(freightAmount) || freightAmount === 0) return [];
+const parseJsonLike = (value: any): any => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+};
 
-  return [{
-    id: `charge_freight_${Date.now()}`,
-    description: 'Freight Charges',
-    ledger: '',
-    mapped_ledger: '',
-    amount: freightAmount,
-  }];
+const parseChargeAmount = (value: any): number => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (value === null || value === undefined) return 0;
+  const normalized = String(value)
+    .trim()
+    .replace(/[₹,\s]/g, '')
+    .replace(/[^\d.-]/g, '');
+  if (!normalized) return 0;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const getNumericChargeAmount = (charge: any): number => {
+  const value = typeof charge === 'object' && charge !== null
+    ? charge.amount ?? charge.total_amount ?? charge.line_amount ?? charge.value
+    : charge;
+  return parseChargeAmount(value);
+};
+
+const hasAdditionalChargeContent = (charge: any): boolean => {
+  if (!charge || typeof charge !== 'object' || Array.isArray(charge)) return false;
+  const description = String(charge.description ?? charge.charge_description ?? charge.name ?? '').trim();
+  const ledger = String(charge.mapped_ledger ?? charge.ledger_label ?? charge.ledger ?? '').trim();
+  return Boolean(description || ledger || getNumericChargeAmount(charge) !== 0);
+};
+
+const coerceAdditionalChargesArray = (value: any): any[] => {
+  const parsed = parseJsonLike(value);
+  if (Array.isArray(parsed)) {
+    return parsed.filter(hasAdditionalChargeContent);
+  }
+  if (!parsed || typeof parsed !== 'object') return [];
+
+  const directChargeKeys = ['description', 'charge_description', 'name', 'amount', 'total_amount', 'line_amount', 'ledger', 'mapped_ledger', 'ledger_label'];
+  if (directChargeKeys.some((key) => parsed[key] !== undefined)) {
+    return hasAdditionalChargeContent(parsed) ? [parsed] : [];
+  }
+
+  return Object.entries(parsed)
+    .map(([description, amount], index) => ({
+      id: `charge_${description.toLowerCase().replace(/[^a-z0-9]+/g, '_') || index}`,
+      description,
+      ledger: '',
+      mapped_ledger: '',
+      amount,
+    }))
+    .filter(hasAdditionalChargeContent);
+};
+
+const getRawPayloadValue = (rawPayload: Record<string, any>, keys: string[]) => {
+  const rawKeys = Object.keys(rawPayload || {});
+  for (const key of keys) {
+    if (rawPayload[key] !== undefined) return rawPayload[key];
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const match = rawKeys.find((rawKey) => rawKey.toLowerCase().replace(/[^a-z0-9]+/g, '_') === normalizedKey);
+    if (match) return rawPayload[match];
+  }
+  return undefined;
+};
+
+const buildAdditionalChargeFallbacks = (rawPayload: Record<string, any> | null | undefined) => {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return [];
+
+  const candidates = [
+    { description: 'Freight Charges', keys: ['Freight Charges', 'Freight'] },
+    { description: 'Packing and Forwarding Charges', keys: ['Packing and Forwarding Charges', 'Packing & Forwarding Charges', 'Packing Charges'] },
+    { description: 'Insurance Charges', keys: ['Insurance Charges', 'Insurance'] },
+    { description: 'Loading Charges', keys: ['Loading Charges'] },
+    { description: 'Unloading Charges', keys: ['Unloading Charges'] },
+    { description: 'Transport Charges', keys: ['Transport Charges', 'Transportation Charges'] },
+    { description: 'Other Charges', keys: ['Other Charges'] },
+  ];
+
+  return candidates
+    .map((candidate, index) => {
+      const value = getRawPayloadValue(rawPayload, candidate.keys);
+      const amount = parseChargeAmount(value);
+      if (amount === 0) return null;
+      return {
+        id: `charge_${candidate.description.toLowerCase().replace(/[^a-z0-9]+/g, '_') || index}`,
+        description: candidate.description,
+        ledger: '',
+        mapped_ledger: '',
+        amount,
+      };
+    })
+    .filter(Boolean) as any[];
+};
+
+const extractAdditionalChargesFromRawPayload = (rawPayload: Record<string, any> | null | undefined): any[] => {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return [];
+
+  const topLevelCharges = coerceAdditionalChargesArray(rawPayload.additional_charges);
+  if (topLevelCharges.length > 0) return topLevelCharges;
+
+  const workspaceCharges = coerceAdditionalChargesArray(rawPayload.__ap_workspace?.additional_charges);
+  if (workspaceCharges.length > 0) return workspaceCharges;
+
+  return buildAdditionalChargeFallbacks(rawPayload);
+};
+
+const buildAdditionalChargesForUi = (rawCharges: any[]): any[] => {
+  return (rawCharges || []).map((charge, idx) => {
+    const mappedLedgerLabel = String(charge?.mapped_ledger ?? charge?.ledger_label ?? charge?.ledger ?? '').trim();
+    const derivedDescription = String(charge?.description ?? charge?.charge_description ?? charge?.name ?? '').trim()
+      || (charge?.['Freight Charges'] !== undefined ? 'Freight Charges' : '');
+
+    return {
+      id: charge?.id ?? `charge_${Date.now()}_${idx}`,
+      description: derivedDescription,
+      ledger: mappedLedgerLabel,
+      mapped_ledger: mappedLedgerLabel,
+      amount: getNumericChargeAmount(charge),
+    };
+  }).filter((charge) =>
+    String(charge.description ?? '').trim() ||
+    String(charge.ledger ?? '').trim() ||
+    Number(charge.amount || 0) !== 0
+  );
 };
 
 const syncFreightChargeField = (payload: Record<string, any>, charges: any[]) => {
@@ -324,7 +441,7 @@ const syncFreightChargeField = (payload: Record<string, any>, charges: any[]) =>
   );
 
   if (freightCharge) {
-    payload['Freight Charges'] = String(Number.isFinite(Number(freightCharge.amount)) ? Number(freightCharge.amount).toFixed(2) : '0.00');
+    payload['Freight Charges'] = String(parseChargeAmount(freightCharge.amount).toFixed(2));
   } else if (payload['Freight Charges'] !== undefined) {
     delete payload['Freight Charges'];
   }
@@ -368,11 +485,10 @@ const buildSavePayloadPreservingStructure = (
     : sourceLineItems;
 
   const chargesChanged = JSON.stringify(additionalCharges) !== JSON.stringify(originalAdditionalCharges);
-  const sourceAdditionalCharges: any[] =
-    (Array.isArray(nextPayload.additional_charges) && nextPayload.additional_charges) ||
-    (Array.isArray(rawPayload?.additional_charges) && rawPayload?.additional_charges) ||
-    (Array.isArray(rawPayload?.__ap_workspace?.additional_charges) && rawPayload.__ap_workspace.additional_charges) ||
-    [];
+  const nextPayloadAdditionalCharges = extractAdditionalChargesFromRawPayload(nextPayload);
+  const sourceAdditionalCharges: any[] = nextPayloadAdditionalCharges.length > 0
+    ? nextPayloadAdditionalCharges
+    : extractAdditionalChargesFromRawPayload(rawPayload);
 
   const savedAdditionalCharges = chargesChanged
     ? (additionalCharges || []).map((charge, index) => buildStructuredAdditionalCharge(sourceAdditionalCharges[index], charge, index))
@@ -421,11 +537,10 @@ const buildWorkspaceRawPayloadSnapshot = (
   ).trim();
 
   const savedLineItems = (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index, effectiveDocType));
-  const sourceAdditionalCharges: any[] =
-    (Array.isArray(nextPayload.additional_charges) && nextPayload.additional_charges) ||
-    (Array.isArray(rawPayload?.additional_charges) && rawPayload?.additional_charges) ||
-    (Array.isArray(rawPayload?.__ap_workspace?.additional_charges) && rawPayload.__ap_workspace.additional_charges) ||
-    [];
+  const nextPayloadAdditionalCharges = extractAdditionalChargesFromRawPayload(nextPayload);
+  const sourceAdditionalCharges: any[] = nextPayloadAdditionalCharges.length > 0
+    ? nextPayloadAdditionalCharges
+    : extractAdditionalChargesFromRawPayload(rawPayload);
   const savedAdditionalCharges = (additionalCharges || []).map((charge, index) => buildStructuredAdditionalCharge(sourceAdditionalCharges[index], charge, index));
 
   nextPayload.line_items = savedLineItems;
@@ -1045,10 +1160,7 @@ export default function DetailView() {
           (Array.isArray(raw?.line_items) && raw.line_items) ||
           (Array.isArray(raw?.__ap_workspace?.line_items) && raw.__ap_workspace.line_items) ||
           [];
-        const rawAdditionalCharges: any[] =
-          (Array.isArray(raw?.additional_charges) && raw.additional_charges) ||
-          (Array.isArray(raw?.__ap_workspace?.additional_charges) && raw.__ap_workspace.additional_charges) ||
-          buildFreightChargeFallback(raw);
+        const rawAdditionalCharges: any[] = extractAdditionalChargesFromRawPayload(raw);
 
         if (rawLineItems.length > 0) {
           const mappedItems = rawLineItems.map((item, idx) => {
@@ -1107,19 +1219,7 @@ export default function DetailView() {
         }
 
         if (rawAdditionalCharges.length > 0) {
-          const mappedCharges = rawAdditionalCharges.map((charge, idx) => {
-            const mappedLedgerLabel = String(charge?.mapped_ledger ?? charge?.ledger_label ?? charge?.ledger ?? '').trim();
-            const derivedDescription = String(charge?.description ?? '').trim() || (charge?.['Freight Charges'] !== undefined ? 'Freight Charges' : '');
-            return {
-              id: charge?.id ?? `charge_${Date.now()}_${idx}`,
-              description: derivedDescription,
-              ledger: mappedLedgerLabel ? (resolveLedgerId(mappedLedgerLabel) || mappedLedgerLabel) : '',
-              mapped_ledger: mappedLedgerLabel,
-              amount: Number.isFinite(Number(charge?.amount ?? charge?.total_amount ?? charge?.line_amount))
-                ? Number(charge?.amount ?? charge?.total_amount ?? charge?.line_amount)
-                : 0,
-            };
-          });
+          const mappedCharges = buildAdditionalChargesForUi(rawAdditionalCharges);
           setAdditionalCharges(mappedCharges);
           setOriginalAdditionalCharges(JSON.parse(JSON.stringify(mappedCharges)));
         } else {
@@ -1148,6 +1248,16 @@ export default function DetailView() {
       setLoading(false);
     }
   }, [id, loadData]);
+
+  useEffect(() => {
+    if (additionalCharges.length > 0 || originalAdditionalCharges.length > 0) return;
+
+    const hydratedCharges = buildAdditionalChargesForUi(extractAdditionalChargesFromRawPayload(rawPayload));
+    if (hydratedCharges.length === 0) return;
+
+    setAdditionalCharges(hydratedCharges);
+    setOriginalAdditionalCharges(JSON.parse(JSON.stringify(hydratedCharges)));
+  }, [rawPayload, additionalCharges.length, originalAdditionalCharges.length]);
 
   const hasHydratedHeaderData =
     hasMeaningfulDisplayValue(invoice?.vendor_name) ||
@@ -2420,6 +2530,9 @@ export default function DetailView() {
                                         setCreationMode('LEDGER');
                                       }
                                       setNewLedger(prev => ({ ...prev, name: '', buyerName: suggestedBuyer }));
+                                      // Clear previous success/error so stale message never shows on a fresh open
+                                      setMasterSyncSuccess(null);
+                                      setMasterSyncError(null);
                                       setShowLedgerSlideout(true);
                                     }}
                                   />

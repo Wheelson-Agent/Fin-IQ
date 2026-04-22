@@ -1,7 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Edit2, Check, X, TrendingUp, TrendingDown, MessageCircle, ArrowUpRight } from 'lucide-react';
-import { getTallySyncStats, type TallySyncStats } from '../lib/api';
+import { Check, TrendingUp, TrendingDown, MessageCircle, ArrowUpRight } from 'lucide-react';
+import {
+  getDashboardMetrics,
+  getRecentDashboardActivity,
+  getTallySyncStats,
+  getTopSuppliers,
+  getPipelineStats,
+  type DashboardActivityData,
+  type DashboardActivityType,
+  type TallySyncStats,
+  type TopSuppliersData,
+  type PipelineStats,
+} from '../lib/api';
+import type { DashboardMetrics } from '../lib/types';
 import { useCompany } from '../context/CompanyContext';
 
 // ============================================================
@@ -53,10 +65,6 @@ function formatTime(isoStr: string): string {
 // ============================================================
 
 interface PulseData {
-  cash_position: {
-    balance:    number;
-    updated_at: string;
-  };
   due_today: {
     amount:    number;
     count:     number;
@@ -76,44 +84,19 @@ interface PulseData {
   };
 }
 
-// ============================================================
-// Accounts Payable  KPI DASHBOARD — TYPES (continued)
-// ============================================================
-
-interface PipelineData {
-  touchless: { count: number; amount: number };
-  hybrid:    { count: number; amount: number };
-  manual:    { count: number; amount: number };
-  touchless_rate:         number; // % this month
-  touchless_rate_prev:    number; // % last month
-  avg_time: {                     // KPI-11: avg processing time per lane
-    touchless_min:  number;
-    hybrid_hours:   number;
-    manual_days:    number;
-  };
-  oldest_unreviewed_days: number; // KPI-13: age of oldest unreviewed invoice
-}
+// PipelineData type — imported as PipelineStats from ../lib/api
 
 // ============================================================
 // Accounts Payable  KPI DASHBOARD — MOCK DATA (swap for IPC calls in backend phase)
 // ============================================================
 
 const MOCK_PULSE: PulseData = {
-  cash_position:  { balance: 820000,  updated_at: new Date().toISOString() },
   due_today:      { amount: 85000,    count: 2,  suppliers: 1, overdue: 45000 },
   due_this_week:  { amount: 310000,   count: 4,  suppliers: 2, coverage_ratio: 2.6 },
   net_this_month: { amount: 1840000,  count: 47, trend_pct: 12 },
 };
 
-const MOCK_PIPELINE: PipelineData = {
-  touchless:              { count: 31, amount: 1240000 },
-  hybrid:                 { count: 12, amount: 480000  },
-  manual:                 { count: 4,  amount: 120000  },
-  touchless_rate:         66.0,
-  touchless_rate_prev:    58.0,
-  avg_time:               { touchless_min: 1.8, hybrid_hours: 3.2, manual_days: 1.9 },
-  oldest_unreviewed_days: 2,
-};
+// MOCK_PIPELINE removed — replaced by live dashboard:pipeline IPC call
 
 interface AgingData {
   buckets: Array<{
@@ -127,55 +110,13 @@ interface AgingData {
 
 const AGING_BAR_COLORS = ['#1D9E75', '#BA7517', '#E24B4A', '#791F1F'] as const;
 
-interface SuppliersData {
-  top_suppliers: Array<{
-    rank:    number;
-    name:    string;
-    gstin:   string;
-    amount:  number;
-    bar_pct: number; // top supplier = 100
-  }>;
-  concentration_top3_pct: number;
-  new_this_month:         number; // KPI-19: new supplier GSTINs first seen this month
-}
-
-type ActivityEventType = 'sync_failed' | 'hybrid_flagged' | 'auto_posted' | 'ocr_processed' | 'blocked';
-
-interface ActivityData {
-  events: Array<{
-    type:   ActivityEventType;
-    text:   string; // entity name wrapped in **bold**
-    ts:     string;
-  }>;
-}
+// SuppliersData is imported as TopSuppliersData from lib/api.ts
 
 interface BriefingData {
   message:  string; // most urgent item wrapped in **bold**
   sent_at:  string;
 }
 
-const MOCK_SUPPLIER_ALERTS: SupplierAlertsData = {
-  alerts: [
-    { name: 'ABC Traders',      gstin: '07ABCTR1234F1Z5', risk_level: 'high_risk', note: 'GST lapsed · ITC risk',   score: 28 },
-    { name: 'Priya Logistics',  gstin: '07PQRST3456M4Z3', risk_level: 'review',    note: 'New supplier',             score: 52 },
-    { name: 'Rajan Traders',    gstin: '29ABCDE1234F1Z5', risk_level: 'good',      note: 'Score improved ↑',         score: 81 },
-  ],
-  price_variance: [
-    { name: 'Rajan Traders',    hsn: '7208', change_pct: +14.2 },
-    { name: 'Mehta Steel Works', hsn: '7306', change_pct: -11.8 },
-  ],
-  itc_risk_amount: 42500, // KPI-15: ₹42,500 at risk from GST-lapsed supplier (ABC Traders)
-};
-
-const MOCK_ACTIVITY: ActivityData = {
-  events: [
-    { type: 'sync_failed',    text: 'Tally sync failed — **Rajan Traders** INV-881. Reconnect Tally.',      ts: new Date(Date.now() - 10  * 60000).toISOString() },
-    { type: 'hybrid_flagged', text: 'Hybrid flagged — **Priya Logistics** ₹58K. New supplier rule.',         ts: new Date(Date.now() - 28  * 60000).toISOString() },
-    { type: 'auto_posted',    text: 'Auto-posted — **Sharma & Co** INV-441 ₹28.5K to Tally.',               ts: new Date(Date.now() - 55  * 60000).toISOString() },
-    { type: 'blocked',        text: 'Blocked — **ABC Traders** INV-209. Duplicate invoice detected.',        ts: new Date(Date.now() - 110 * 60000).toISOString() },
-    { type: 'ocr_processed',  text: 'OCR extracted — **Mehta Steel Works** INV-330. Awaiting validation.',  ts: new Date(Date.now() - 180 * 60000).toISOString() },
-  ],
-};
 
 const MOCK_BRIEFING: BriefingData = {
   message: '**₹85,000 is due today** from 2 invoices across 1 supplier. Cash coverage is healthy at 2.6x. 1 Tally sync failure needs attention — Rajan Traders INV-881. Touchless rate is 66% this month, up from 58% last month.',
@@ -211,6 +152,19 @@ interface SupplierAlertsData {
   itc_risk_amount: number; // KPI-15: total ₹ value of invoices from GST-lapsed suppliers
 }
 
+const MOCK_SUPPLIER_ALERTS: SupplierAlertsData = {
+  alerts: [
+    { name: 'ABC Traders', gstin: '07ABCTR1234F1Z5', risk_level: 'high_risk', note: 'GST lapsed / ITC risk', score: 28 },
+    { name: 'Priya Logistics', gstin: '07PQRST3456M4Z3', risk_level: 'review', note: 'New supplier', score: 52 },
+    { name: 'Rajan Traders', gstin: '29ABCDE1234F1Z5', risk_level: 'good', note: 'Score improved', score: 81 },
+  ],
+  price_variance: [
+    { name: 'Rajan Traders', hsn: '7208', change_pct: 14.2 },
+    { name: 'Mehta Steel Works', hsn: '7306', change_pct: -11.8 },
+  ],
+  itc_risk_amount: 42500,
+};
+
 interface TallySyncData {
   posted:  number;
   pending: number;
@@ -232,18 +186,6 @@ interface TallySyncData {
   };
   duplicate_rate_pct: number; // KPI-18: % of this month's invoices flagged as duplicate
 }
-
-const MOCK_SUPPLIERS: SuppliersData = {
-  top_suppliers: [
-    { rank: 1, name: 'Rajan Traders Pvt Ltd', gstin: '29ABCDE1234F1Z5', amount: 420000, bar_pct: 100  },
-    { rank: 2, name: 'Sharma & Co',           gstin: '27FGHIJ5678K2Z1', amount: 302000, bar_pct: 71.9 },
-    { rank: 3, name: 'Mehta Steel Works',     gstin: '24KLMNO9012L3Z8', amount: 231000, bar_pct: 55   },
-    { rank: 4, name: 'Priya Logistics',       gstin: '07PQRST3456M4Z3', amount: 158000, bar_pct: 37.6 },
-    { rank: 5, name: 'ABC Packaging',         gstin: '19UVWXY7890N5Z6', amount: 98000,  bar_pct: 23.3 },
-  ],
-  concentration_top3_pct: 61.2,
-  new_this_month:         3,
-};
 
 // ============================================================
 // Accounts Payable  KPI DASHBOARD — PULSE CARD WRAPPER
@@ -308,15 +250,19 @@ function renderBold(text: string, baseColor: string) {
 // Accounts Payable  KPI DASHBOARD — ACTIVITY FEED WIDGET
 // ============================================================
 
-const ACTIVITY_DOT: Record<ActivityEventType, string> = {
+const ACTIVITY_DOT: Record<DashboardActivityType, string> = {
   sync_failed:    C.redMid,
+  sync_success:   C.tealMid,
   blocked:        C.redMid,
-  hybrid_flagged: C.amberMid,
+  awaiting_input: C.amberMid,
   auto_posted:    C.tealMid,
+  revalidated:    C.amberMid,
   ocr_processed:  C.navy,
+  created:        C.navy,
+  deleted:        C.redMid,
 };
 
-function ActivityWidget({ data }: { data: ActivityData }) {
+function ActivityWidget({ data }: { data: DashboardActivityData | null }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -336,6 +282,25 @@ function ActivityWidget({ data }: { data: ActivityData }) {
         </span>
       </div>
 
+      {data === null && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: C.inkGhost, opacity: 0.5 }} />
+              <div style={{ flex: 1, height: '10px', borderRadius: '4px', background: C.inkGhost, opacity: 0.22 }} />
+              <div style={{ width: '48px', height: '10px', borderRadius: '4px', background: C.inkGhost, opacity: 0.16 }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data !== null && data.events.length === 0 && (
+        <div style={{ padding: '24px 0', textAlign: 'center', fontSize: '13px', color: C.inkGhost, fontFamily: 'inherit' }}>
+          No recent activity available
+        </div>
+      )}
+
+      {data !== null && data.events.length > 0 && (
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {data.events.map((ev, i) => (
           <div key={i} style={{
@@ -373,6 +338,7 @@ function ActivityWidget({ data }: { data: ActivityData }) {
           </div>
         ))}
       </div>
+      )}
     </motion.div>
   );
 }
@@ -1037,7 +1003,13 @@ function TallySyncWidgetV2({ data }: { data: TallySyncData }) {
 // Accounts Payable  KPI DASHBOARD — TOP SUPPLIERS WIDGET
 // ============================================================
 
-function SuppliersWidget({ data }: { data: SuppliersData }) {
+/**
+ * Renders top-5 suppliers by spend in the last 30 days.
+ * data = null  → loading skeleton
+ * data with empty top_suppliers → empty state (no 30-day invoices)
+ * data with rows → live ranked list with bars + footer KPIs
+ */
+function SuppliersWidget({ data }: { data: TopSuppliersData | null }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -1065,116 +1037,124 @@ function SuppliersWidget({ data }: { data: SuppliersData }) {
         </span>
       </div>
 
-      {/* Supplier rows */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {data.top_suppliers.map((s, i) => (
-          <div
-            key={s.gstin}
-            onClick={() => { /* TODO: navigate to Supplier360 profile — gstin: s.gstin */ }}
-            style={{
-              display:       'flex',
-              alignItems:    'center',
-              gap:           '10px',
-              padding:       '10px 0',
-              borderBottom:  i < data.top_suppliers.length - 1 ? `0.5px solid ${C.inkGhost}` : 'none',
-              cursor:        'pointer',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
-            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-          >
-            {/* Rank */}
-            <span style={{
-              width:      '16px',
-              flexShrink: 0,
-              fontSize:   '11px',
-              color:      C.inkGhost,
-              fontFamily: 'inherit',
-              textAlign:  'right',
-            }}>
-              {s.rank}
-            </span>
-
-            {/* Name */}
-            <span style={{
-              flex:         1,
-              fontSize:     '13px',
-              color:        C.ink,
-              fontFamily:   'inherit',
-              overflow:     'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace:   'nowrap',
-              minWidth:     0,
-            }}>
-              {s.name}
-            </span>
-
-            {/* Mini bar */}
-            <div style={{
-              width:        '80px',
-              height:       '5px',
-              borderRadius: '3px',
-              background:   C.paper,
-              flexShrink:   0,
-              overflow:     'hidden',
-            }}>
-              <div style={{
-                height:     '100%',
-                borderRadius: '3px',
-                background:  C.navy,
-                width:       mounted ? `${s.bar_pct}%` : '0%',
-                transition:  `width 350ms ease-out ${i * 60}ms`,
-              }} />
+      {/* ── Loading skeleton: data not yet fetched ─────────────────── */}
+      {data === null && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '4px' }}>
+          {[100, 72, 55, 38, 24].map((w, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ width: 16, height: 10, borderRadius: 3, background: C.inkGhost, opacity: 0.4 }} />
+              <div style={{ flex: 1, height: 10, borderRadius: 3, background: C.inkGhost, opacity: 0.25 }} />
+              <div style={{ width: 80, height: 5, borderRadius: 3, background: C.inkGhost, opacity: 0.2 }} />
+              <div style={{ width: `${w * 0.8}px`, height: 10, borderRadius: 3, background: C.inkGhost, opacity: 0.3 }} />
             </div>
+          ))}
+        </div>
+      )}
 
-            {/* Amount */}
-            <span style={{
-              width:      '80px',
-              flexShrink: 0,
-              fontSize:   '12px',
-              color:      C.inkMuted,
-              fontFamily: '"JetBrains Mono", monospace',
-              textAlign:  'right',
-            }}>
-              {formatINR(s.amount)}
+      {/* ── Empty state: fetch succeeded but no invoices in last 30 days ── */}
+      {data !== null && data.top_suppliers.length === 0 && (
+        <div style={{
+          display:        'flex',
+          flexDirection:  'column',
+          alignItems:     'center',
+          justifyContent: 'center',
+          padding:        '28px 0',
+          gap:            '6px',
+        }}>
+          <span style={{ fontSize: '13px', color: C.inkGhost, fontFamily: 'inherit' }}>
+            No invoice data in last 30 days
+          </span>
+        </div>
+      )}
+
+      {/* ── Live supplier rows ───────────────────────────────────────── */}
+      {data !== null && data.top_suppliers.length > 0 && (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {data.top_suppliers.map((s, i) => (
+              <div
+                key={s.gstin || s.name}
+                onClick={() => { /* TODO: navigate to Supplier360 profile — gstin: s.gstin */ }}
+                style={{
+                  display:       'flex',
+                  alignItems:    'center',
+                  gap:           '10px',
+                  padding:       '10px 0',
+                  borderBottom:  i < data.top_suppliers.length - 1 ? `0.5px solid ${C.inkGhost}` : 'none',
+                  cursor:        'pointer',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+              >
+                {/* Rank number */}
+                <span style={{
+                  width: '16px', flexShrink: 0, fontSize: '11px',
+                  color: C.inkGhost, fontFamily: 'inherit', textAlign: 'right',
+                }}>
+                  {s.rank}
+                </span>
+
+                {/* Supplier name — truncated if long */}
+                <span style={{
+                  flex: 1, fontSize: '13px', color: C.ink, fontFamily: 'inherit',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+                }}>
+                  {s.name}
+                </span>
+
+                {/* Proportional spend bar — animates in after mount */}
+                <div style={{
+                  width: '80px', height: '5px', borderRadius: '3px',
+                  background: C.paper, flexShrink: 0, overflow: 'hidden',
+                }}>
+                  <div style={{
+                    height: '100%', borderRadius: '3px', background: C.navy,
+                    width: mounted ? `${s.bar_pct}%` : '0%',
+                    transition: `width 350ms ease-out ${i * 60}ms`,
+                  }} />
+                </div>
+
+                {/* INR spend amount */}
+                <span style={{
+                  width: '80px', flexShrink: 0, fontSize: '12px',
+                  color: C.inkMuted, fontFamily: '"JetBrains Mono", monospace', textAlign: 'right',
+                }}>
+                  {formatINR(s.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Footer KPIs: new-supplier count (KPI-19) + spend concentration (KPI-20) */}
+          <div style={{
+            marginTop: '12px', paddingTop: '12px', borderTop: `0.5px solid ${C.inkGhost}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            {/* KPI-19: vendor GSTINs first seen this calendar month */}
+            <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
+              <span style={{
+                fontFamily: '"JetBrains Mono", monospace', fontWeight: 600,
+                color: data.new_this_month > 0 ? C.navy : C.inkMuted,
+              }}>
+                {data.new_this_month}
+              </span>
+              &nbsp;new this month
+            </span>
+
+            {/* KPI-20: top-3 share of total top-5 spend; red when >60% (concentration risk) */}
+            <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
+              Top 3&nbsp;=&nbsp;
+              <span style={{
+                fontFamily: '"JetBrains Mono", monospace', fontWeight: 500,
+                color: data.concentration_top3_pct > 60 ? C.redMid : C.inkMuted,
+              }}>
+                {data.concentration_top3_pct.toFixed(1)}%
+              </span>
+              &nbsp;of spend
             </span>
           </div>
-        ))}
-      </div>
-
-      {/* Footer — spend concentration + KPI-19 new suppliers */}
-      <div style={{
-        marginTop:   '12px',
-        paddingTop:  '12px',
-        borderTop:   `0.5px solid ${C.inkGhost}`,
-        display:     'flex',
-        justifyContent: 'space-between',
-        alignItems:  'center',
-      }}>
-        {/* KPI-19: new suppliers this month */}
-        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
-          <span style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontWeight: 600,
-            color:      data.new_this_month > 0 ? C.navy : C.inkMuted,
-          }}>
-            {data.new_this_month}
-          </span>
-          &nbsp;new this month
-        </span>
-
-        {/* KPI-20: spend concentration */}
-        <span style={{ fontSize: '12px', color: C.inkMuted, fontFamily: 'inherit' }}>
-          Top 3&nbsp;=&nbsp;
-          <span style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            color:      data.concentration_top3_pct > 60 ? C.redMid : C.inkMuted,
-            fontWeight: 500,
-          }}>
-            {data.concentration_top3_pct.toFixed(1)}%
-          </span>
-          &nbsp;of spend
-        </span>
-      </div>
+        </>
+      )}
     </motion.div>
   );
 }
@@ -1293,7 +1273,7 @@ const PIPELINE_SEGMENTS = [
   {
     key:       'touchless' as const,
     label:     'TOUCHLESS',
-    sublabel:  'Auto-posted',
+    sublabel:  'Auto-posted this month',
     bg:        '#E1F5EE',
     border:    '#1D9E75',
     textDeep:  '#0F6E56',
@@ -1302,7 +1282,7 @@ const PIPELINE_SEGMENTS = [
   {
     key:       'hybrid' as const,
     label:     'HYBRID',
-    sublabel:  'Rules flagged',
+    sublabel:  'Human-reviewed this month',
     bg:        '#FAEEDA',
     border:    '#BA7517',
     textDeep:  '#854F0B',
@@ -1311,7 +1291,7 @@ const PIPELINE_SEGMENTS = [
   {
     key:       'manual' as const,
     label:     'MANUAL',
-    sublabel:  'OCR failed',
+    sublabel:  'Manual entry this month',
     bg:        '#FCEBEB',
     border:    '#E24B4A',
     textDeep:  '#791F1F',
@@ -1319,7 +1299,29 @@ const PIPELINE_SEGMENTS = [
   },
 ] as const;
 
-function PipelineWidget({ data }: { data: PipelineData }) {
+function PipelineWidget({ data }: { data: PipelineStats | null }) {
+  // Loading skeleton — shown until backend responds
+  if (data === null) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: 'easeOut', delay: 0.16 }}
+        style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '12px', padding: '20px 24px' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' }}>
+          <div style={{ width: '3px', height: '16px', background: C.navy, borderRadius: '2px', flexShrink: 0 }} />
+          <div style={{ width: 120, height: 13, borderRadius: 4, background: C.inkGhost, opacity: 0.35 }} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{ borderRadius: '12px', padding: '16px', background: C.inkGhost, opacity: 0.12, height: 100 }} />
+          ))}
+        </div>
+      </motion.div>
+    );
+  }
+
   const rateDelta = data.touchless_rate - data.touchless_rate_prev;
 
   return (
@@ -1493,8 +1495,32 @@ export default function Dashboard() {
     document.head.appendChild(link);
   }, []);
 
-  // — Pulse row state (MOCK — replace with window.api.invoke('dashboard:ap-pulse') in backend phase)
-  const [pulse] = useState<PulseData>(MOCK_PULSE);
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDashboardMetrics() {
+      try {
+        if (!cancelled) setDashboardMetrics(null);
+        const companyId = selectedCompany && selectedCompany !== 'ALL' ? selectedCompany : undefined;
+        const data = await getDashboardMetrics(companyId);
+        if (!cancelled) setDashboardMetrics(data);
+      } catch (err) {
+        console.error('[Dashboard] dashboard:get-metrics failed:', err);
+      }
+    }
+    loadDashboardMetrics();
+    return () => { cancelled = true; };
+  }, [selectedCompany]);
+  // Keep the existing mock pulse row for cards that are still design placeholders.
+  // Only the monthly posted-value card is live in this change.
+  const pulse: PulseData = {
+    ...MOCK_PULSE,
+    net_this_month: {
+      amount: dashboardMetrics?.netThisMonth.amount ?? 0,
+      count: dashboardMetrics?.netThisMonth.count ?? 0,
+      trend_pct: dashboardMetrics?.netThisMonth.trendPct ?? 0,
+    },
+  };
 
   // — Tally sync live state (connected to backend via dashboard:tally-sync IPC)
   const [tallySync, setTallySync] = useState<TallySyncStats | null>(null);
@@ -1514,24 +1540,74 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(interval); };
   }, [selectedCompany]);
 
-  // — Cash position inline edit
-  const [cashEditing,   setCashEditing]   = useState(false);
-  const [cashBalance,   setCashBalance]   = useState(MOCK_PULSE.cash_position.balance);
-  const [cashInput,     setCashInput]     = useState('');
-  const [cashUpdatedAt, setCashUpdatedAt] = useState(MOCK_PULSE.cash_position.updated_at);
-  const [cashJustSaved, setCashJustSaved] = useState(false);
-
-  function handleCashSave() {
-    const parsed = parseFloat(cashInput.replace(/[^0-9.]/g, ''));
-    if (!isNaN(parsed) && parsed >= 0) {
-      setCashBalance(parsed);
-      setCashUpdatedAt(new Date().toISOString());
-      setCashJustSaved(true);
-      setTimeout(() => setCashJustSaved(false), 2000);
+  // — Invoice Pipeline live state (dashboard:pipeline IPC)
+  // null = still loading (widget shows skeleton); populated after first fetch
+  const [pipelineData, setPipelineData] = useState<PipelineStats | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPipeline() {
+      try {
+        const companyId = selectedCompany && selectedCompany !== 'ALL' ? selectedCompany : undefined;
+        const data = await getPipelineStats(companyId);
+        if (!cancelled) setPipelineData(data);
+      } catch (err) {
+        console.error('[Dashboard] dashboard:pipeline failed:', err);
+        // On error fall back to zeroed data so the widget renders rather than spinning forever
+        if (!cancelled) setPipelineData({
+          touchless: { count: 0, amount: 0 },
+          hybrid:    { count: 0, amount: 0 },
+          manual:    { count: 0, amount: 0 },
+          touchless_rate: 0, touchless_rate_prev: 0,
+          avg_time: { touchless_min: 0, hybrid_hours: 0, manual_days: 0 },
+          oldest_unreviewed_days: 0,
+        });
+      }
     }
-    setCashEditing(false);
-    setCashInput('');
-  }
+    loadPipeline();
+    return () => { cancelled = true; };
+  }, [selectedCompany]); // re-fetch whenever company filter changes
+
+  // — Top suppliers live state (dashboard:top-suppliers IPC)
+  // null = still loading; empty top_suppliers = no data in last 30 days (widget shows empty state)
+  const [suppliersData, setSuppliersData] = useState<TopSuppliersData | null>(null);
+  useEffect(() => {
+    console.log('[Dashboard] top-suppliers useEffect fired, selectedCompany=', selectedCompany);
+    let cancelled = false;
+    async function loadTopSuppliers() {
+      try {
+        // Pass companyId only when a specific company is selected; omit for ALL
+        const companyId = selectedCompany && selectedCompany !== 'ALL' ? selectedCompany : undefined;
+        console.log('[Dashboard] top-suppliers: calling with companyId=', companyId);
+        const data = await getTopSuppliers(companyId);
+        console.log('[Dashboard] top-suppliers: received rows=', data?.top_suppliers?.length);
+        if (!cancelled) setSuppliersData(data);
+      } catch (err) {
+        console.error('[Dashboard] dashboard:top-suppliers failed:', err);
+        // On error, set empty result so widget shows empty state instead of infinite spinner
+        if (!cancelled) setSuppliersData({ top_suppliers: [], concentration_top3_pct: 0, new_this_month: 0 });
+      }
+    }
+    loadTopSuppliers();
+    return () => { cancelled = true; };
+  }, [selectedCompany]); // re-fetch whenever company filter changes
+
+  // — Recent activity live state (dashboard:recent-activity IPC)
+  const [activityData, setActivityData] = useState<DashboardActivityData | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRecentActivity() {
+      try {
+        const companyId = selectedCompany && selectedCompany !== 'ALL' ? selectedCompany : undefined;
+        const data = await getRecentDashboardActivity(companyId);
+        if (!cancelled) setActivityData(data);
+      } catch (err) {
+        console.error('[Dashboard] dashboard:recent-activity failed:', err);
+        if (!cancelled) setActivityData({ events: [] });
+      }
+    }
+    loadRecentActivity();
+    return () => { cancelled = true; };
+  }, [selectedCompany]);
 
   // — Coverage ratio colour logic
   const ratio      = pulse.due_this_week.coverage_ratio;
@@ -1585,74 +1661,14 @@ export default function Dashboard() {
       {/* ── CFO PULSE ROW ──────────────────────────────────────── */}
       <div style={{
         display:             'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(3, 1fr)',
         gap:                 '16px',
         marginBottom:        '28px',
       }}>
 
         {/* Card 1 — Cash Position */}
-        <PulseCard label="Cash position" delay={0} accentColor={C.navy}>
-          {cashEditing ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <input
-                autoFocus
-                value={cashInput}
-                onChange={e => setCashInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter')  handleCashSave();
-                  if (e.key === 'Escape') { setCashEditing(false); setCashInput(''); }
-                }}
-                placeholder={formatINR(cashBalance)}
-                style={{
-                  fontFamily:   '"JetBrains Mono", monospace',
-                  fontSize:     '26px',
-                  fontWeight:   500,
-                  color:        C.ink,
-                  border:       'none',
-                  borderBottom: `1.5px solid ${C.navy}`,
-                  outline:      'none',
-                  background:   'transparent',
-                  width:        '100%',
-                  textAlign:    'right',
-                  padding:      '2px 0',
-                }}
-              />
-              <button
-                onClick={handleCashSave}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.tealMid, padding: '2px', flexShrink: 0 }}
-              >
-                <Check size={14} />
-              </button>
-              <button
-                onClick={() => { setCashEditing(false); setCashInput(''); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.inkGhost, padding: '2px', flexShrink: 0 }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ) : (
-            <div
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}
-              onClick={() => { setCashEditing(true); setCashInput(''); }}
-            >
-              <span style={{
-                fontFamily: '"JetBrains Mono", monospace',
-                fontSize:   '22px',
-                fontWeight: 500,
-                color:      C.ink,
-              }}>
-                {formatINR(cashBalance)}
-              </span>
-              <Edit2 size={13} color={C.inkGhost} style={{ flexShrink: 0 }} />
-            </div>
-          )}
-          <div style={{ fontSize: '12px', color: C.inkMuted, marginTop: '6px' }}>
-            {cashJustSaved ? 'Updated just now' : `Updated today ${formatTime(cashUpdatedAt)}`}
-          </div>
-        </PulseCard>
-
         {/* Card 2 — Due Today */}
-        <PulseCard label="Due today" delay={0.04} accentColor={pulse.due_today.amount > 0 ? C.redMid : C.tealMid}>
+        <PulseCard label="Due today" delay={0} accentColor={pulse.due_today.amount > 0 ? C.redMid : C.tealMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
             fontSize:   '26px',
@@ -1709,7 +1725,7 @@ export default function Dashboard() {
         </PulseCard>
 
         {/* Card 3 — Due This Week */}
-        <PulseCard label="Due this week" delay={0.08} accentColor={C.amberMid}>
+        <PulseCard label="Due this week" delay={0.04} accentColor={C.amberMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
             fontSize:   '26px',
@@ -1764,8 +1780,8 @@ export default function Dashboard() {
           </div>
         </PulseCard>
 
-        {/* Card 4 — Net This Month */}
-        <PulseCard label="Net this month" delay={0.12} accentColor={C.tealMid}>
+        {/* Card 4 — invoice processed */}
+        <PulseCard label="Invoice processed" delay={0.08} accentColor={C.tealMid}>
           <div style={{
             fontFamily: '"JetBrains Mono", monospace',
             fontSize:   '26px',
@@ -1787,7 +1803,7 @@ export default function Dashboard() {
               fontWeight: 500,
               fontFamily: 'inherit',
             }}>
-              {pulse.net_this_month.count} invoice{pulse.net_this_month.count !== 1 ? 's' : ''} processed
+              {pulse.net_this_month.count} invoice{pulse.net_this_month.count !== 1 ? 's' : ''} posted
             </span>
           </div>
           <div style={{
@@ -1839,13 +1855,13 @@ export default function Dashboard() {
 
         {/* LEFT COLUMN — Pipeline + Aging */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <PipelineWidget data={MOCK_PIPELINE} />
+          <PipelineWidget data={pipelineData} />
           <AgingWidget    data={MOCK_AGING}    />
         </div>
 
         {/* RIGHT COLUMN — Top Suppliers + Supplier360 Alerts */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <SuppliersWidget      data={MOCK_SUPPLIERS}       />
+          <SuppliersWidget      data={suppliersData}         />
           <SupplierAlertsWidget data={MOCK_SUPPLIER_ALERTS} />
         </div>
 
@@ -1871,7 +1887,7 @@ export default function Dashboard() {
           ? <TallySyncWidgetV2 data={tallySync} />
           : <div style={{ background: C.surface, border: `0.5px solid ${C.inkGhost}`, borderRadius: '12px', padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkGhost, fontSize: '13px', fontFamily: 'inherit' }}>Loading Tally sync…</div>
         }
-        <ActivityWidget  data={MOCK_ACTIVITY}   />
+        <ActivityWidget  data={activityData}    />
         <BriefingWidget  data={MOCK_BRIEFING}   />
       </div>
       {/* ── END BOTTOM ROW ─────────────────────────────────────── */}

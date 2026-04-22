@@ -282,7 +282,6 @@ export function Topbar({
     const [syncTooltip, setSyncTooltip] = useState<string>('Sync ERP');
     const companyDropRef = useRef<HTMLDivElement>(null);
     const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
     const currentCompany = selectedCompany || 'All Companies';
 
     // On mount: show last known sync status from DB
@@ -406,7 +405,8 @@ export function Topbar({
     };
 
     useEffect(() => {
-        function handleClick(e: MouseEvent) {            if (companyDropRef.current && !companyDropRef.current.contains(e.target as Node)) setCompanyOpen(false);
+        function handleClick(e: MouseEvent) {
+            if (companyDropRef.current && !companyDropRef.current.contains(e.target as Node)) setCompanyOpen(false);
         }
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
