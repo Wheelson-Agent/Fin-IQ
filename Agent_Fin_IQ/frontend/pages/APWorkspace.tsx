@@ -68,6 +68,14 @@ interface APRecord {
   uploadedAt: string;
   docTypeLabel: string;
   isHighAmount: boolean;
+  /** PO number extracted from the invoice, if present. Shown in Supplier Reference column (not on For Review tab). */
+  poNumber?: string;
+  poIssue?: {
+    code: string;
+    label: string;
+    detail: string;
+    tone: 'amber' | 'rose' | 'emerald';
+  };
   taxBreakdown: {
     igst: number | null;
     cgst: number | null;
@@ -83,6 +91,7 @@ interface APRecord {
     supplier: boolean;
     duplication: boolean;
     ledger: boolean;
+    poMatch: boolean | null;
   };
 }
 
@@ -129,6 +138,32 @@ const getStatusSupportText = (record: APRecord) => {
     case 'received':
     default:        return 'Freshly captured and queued';
   }
+};
+
+const getPoIssueDisplay = (poValidation: any): APRecord['poIssue'] | undefined => {
+  const code = String(poValidation?.code || '').trim();
+  if (!code || code === 'PO_FOUND') return undefined;
+
+  const detail = String(poValidation?.message || '').trim() || 'Purchase order review required';
+  if (code === 'PO_WAIVED') {
+    return { code, label: 'PO Waived', detail, tone: 'emerald' };
+  }
+  if (code === 'PO_OVERBILLED') {
+    return { code, label: 'PO Overbilled', detail, tone: 'rose' };
+  }
+  if (code === 'PO_MISSING') {
+    return { code, label: 'PO Missing', detail, tone: 'amber' };
+  }
+  if (code === 'PO_NOT_FOUND') {
+    return { code, label: 'PO Not Found', detail, tone: 'amber' };
+  }
+  if (code === 'PO_CLOSED') {
+    return { code, label: 'PO Closed', detail, tone: 'rose' };
+  }
+  if (code === 'PO_HEADER_MISMATCH') {
+    return { code, label: 'PO Mismatch', detail, tone: 'rose' };
+  }
+  return { code, label: 'PO Review', detail, tone: 'amber' };
 };
 
 const formatDateRangeLabel = (value: string) => {
@@ -488,6 +523,12 @@ export default function APWorkspace() {
             valData[key] = n8nData[key];
             valData[normalized] = n8nData[key];
           });
+          const poValidation = parseJSON(inv.po_validation_json);
+          // null = not applicable (skipped by config rules); true = matched/waived; false = failed
+          const poMatch: boolean | null = poValidation.status === 'not_applicable'
+            ? null
+            : (poValidation.status === 'matched' || poValidation.status === 'waived');
+          const poIssue = getPoIssueDisplay(poValidation);
 
           const getVal = (key: string, oldKey?: string) => {
             const val = valData[key] ??
@@ -513,7 +554,9 @@ export default function APWorkspace() {
 
           // ─── CANONICAL READY-TO-POST RULE ───
           // Must pass all required checks AND NOT be a duplicate
-          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && lMatch;
+          // poMatch === null means PO check was skipped (not applicable) — treat as passing
+          const poMatchGate = poMatch !== false;
+          const mandatoryChecksPassed = bVerif && gValid && dValid && vVerif && lMatch && poMatchGate;
           const n8nAllPassed = mandatoryChecksPassed && isDupPassed;
 
           if (inv.erp_sync_id) {
@@ -526,13 +569,13 @@ export default function APWorkspace() {
             // Duplicates always go to Handoff (Awaiting Input / Review) 
             // as per "Duplicate Check = false means failed"
             status = 'handoff';
-          } else if (n8nAllPassed || bStatus === 'ready to post') {
+          } else if (n8nAllPassed || (bStatus === 'ready to post' && poMatchGate)) {
             // Ready to Post only if all mandatory checks pass AND it is NOT a duplicate
-            // bStatus === 'ready to post' is the backend's canonical decision
+            // Ready backend status still requires the locally visible mandatory PO gate.
             status = 'ready';
           } else if (!bVerif || !gValid || !dValid || isUnknownFile || isUnknownInv) {
             status = 'handoff';
-          } else if (!vVerif || !lMatch) {
+          } else if (!vVerif || !lMatch || !poMatchGate) {
             status = 'input';
           } else if (bStatus === 'processing') {
             // Processing only if not already failed/passed via other rules
@@ -571,6 +614,7 @@ export default function APWorkspace() {
           if (!isDupPassed) reasons.push('Duplicate Found');
           if (!vVerif) reasons.push('Vendor setup required');
           if (!lMatch) reasons.push(isGoods ? 'Stock item mapping required' : 'Ledger mapping required');
+          if (poMatch === false) reasons.push(String(poValidation.message || '').trim() || 'Purchase order match required');
 
           const docTypeLabel = isUnknownInv ? 'Unknown' : (inv.doc_type_label || (inv.doc_type || 'Invoice (Service)'));
 
@@ -599,6 +643,9 @@ export default function APWorkspace() {
             uploadedAt: inv.uploaded_date ? new Date(inv.uploaded_date).toISOString() : 'Unknown',
             docTypeLabel: docTypeLabel,
             isHighAmount: !!inv.is_high_amount,
+            // Carry po_number from the DB row so tabs can display it in Supplier Reference
+            poNumber: inv.po_number ? String(inv.po_number).trim() : undefined,
+            poIssue,
             taxBreakdown: {
               igst: raw.igst ?? raw.IGST ?? null,
               cgst: raw.cgst ?? raw.CGST ?? null,
@@ -614,6 +661,7 @@ export default function APWorkspace() {
               supplier: vVerif,
               duplication: isDupPassed,
               ledger: lMatch,
+              poMatch,
             }
           };
         });
@@ -768,6 +816,8 @@ export default function APWorkspace() {
   const hasRemarks = (record: APRecord) => normalizeText(record.remarks).length > 0;
   const isRoutedRecord = (record: APRecord) => Boolean(record.isHighAmount && valueLimitConfig?.enabled);
   const getInputRequirementLabel = (record: APRecord) => {
+    if (record.poIssue) return record.poIssue.label;
+
     const normalizeReason = (value?: string | null) => {
       const text = normalizeText(value);
       if (!text) return '';
@@ -1648,18 +1698,36 @@ export default function APWorkspace() {
   };
 
   const renderApprovalSnapshot = (record: APRecord) => {
-    const checks = [
+    const checks: { label: string; passed: boolean | null; show: boolean }[] = [
       { label: 'Company', passed: record.validations.company, show: true },
       { label: 'GST', passed: record.validations.gst, show: true },
       { label: 'Particulars', passed: record.validations.particulars, show: true },
       { label: 'Supplier', passed: record.validations.supplier, show: true },
       { label: 'Duplication', passed: record.validations.duplication, show: true },
       { label: 'Ledger', passed: record.validations.ledger, show: record.docTypeLabel?.toLowerCase().includes('goods') },
+      { label: 'PO Match', passed: record.validations.poMatch, show: true },
     ].filter(check => check.show);
 
-    const passedCount = checks.filter(check => check.passed).length;
-    const totalCount = checks.length;
+    // null = not applicable (skipped); excluded from pass/fail counts
+    const activeChecks = checks.filter(c => c.passed !== null);
+    const passedCount = activeChecks.filter(c => c.passed === true).length;
+    const totalCount = activeChecks.length;
     const failedCount = totalCount - passedCount;
+
+    const badgeColor = (passed: boolean | null) => {
+      if (passed === null) return 'bg-slate-300';
+      return passed ? 'bg-[#6BAF93]' : 'bg-rose-400';
+    };
+    const tooltipBorderBg = (passed: boolean | null) => {
+      if (passed === null) return 'border-slate-400/20 bg-slate-400/10';
+      return passed ? 'border-[#6BAF93]/20 bg-[#6BAF93]/10' : 'border-rose-400/20 bg-rose-400/10';
+    };
+    const tooltipIcon = (passed: boolean | null) => {
+      if (passed === null) return <span className="text-[9px] font-bold text-slate-400">N/A</span>;
+      return passed
+        ? <Check className="h-3 w-3 shrink-0 text-[#7DCAAA] stroke-[3]" />
+        : <X className="h-3 w-3 shrink-0 text-rose-300 stroke-[3]" />;
+    };
 
     return (
       <Tooltip>
@@ -1679,9 +1747,7 @@ export default function APWorkspace() {
               {checks.map(check => (
                 <span
                   key={check.label}
-                  className={`h-2.5 w-2.5 rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.12)] ${
-                    check.passed ? 'bg-[#6BAF93]' : 'bg-rose-400'
-                  }`}
+                  className={`h-2.5 w-2.5 rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.12)] ${badgeColor(check.passed)}`}
                 />
               ))}
             </div>
@@ -1703,16 +1769,10 @@ export default function APWorkspace() {
             {checks.map(check => (
               <div
                 key={check.label}
-                className={`flex items-center justify-between gap-1 rounded-[10px] border px-2 py-1.5 ${
-                  check.passed
-                    ? 'border-[#6BAF93]/20 bg-[#6BAF93]/10'
-                    : 'border-rose-400/20 bg-rose-400/10'
-                }`}
+                className={`flex items-center justify-between gap-1 rounded-[10px] border px-2 py-1.5 ${tooltipBorderBg(check.passed)}`}
               >
                 <span className="min-w-0 truncate text-[9px] font-bold uppercase tracking-[0.06em] text-white/80">{check.label}</span>
-                {check.passed
-                  ? <Check className="h-3 w-3 shrink-0 text-[#7DCAAA] stroke-[3]" />
-                  : <X className="h-3 w-3 shrink-0 text-rose-300 stroke-[3]" />}
+                {tooltipIcon(check.passed)}
               </div>
             ))}
           </div>
@@ -1766,6 +1826,45 @@ export default function APWorkspace() {
           <div className="mt-3 text-[11px] font-semibold leading-[1.4] text-white">
             {resolvedReason}
           </div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  const renderInputRequirement = (record: APRecord) => {
+    if (!record.poIssue) {
+      return (
+        <div className="inline-flex max-w-[220px] items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
+          <span className="truncate">{getInputRequirementLabel(record)}</span>
+        </div>
+      );
+    }
+
+    const toneClass = record.poIssue.tone === 'rose'
+      ? 'border-rose-200 bg-rose-50 text-rose-700'
+      : record.poIssue.tone === 'emerald'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-amber-200 bg-amber-50 text-amber-700';
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={`inline-flex max-w-[160px] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-black uppercase tracking-[0.05em] leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)] ${toneClass}`}
+          >
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{record.poIssue.label}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="center"
+          sideOffset={10}
+          className="max-w-[300px] rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))] px-4 py-3 text-white shadow-[0_22px_50px_rgba(15,23,42,0.35)]"
+        >
+          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/60">PO Review</div>
+          <div className="mt-2 text-[11px] font-semibold leading-[1.4] text-white">{record.poIssue.detail}</div>
         </TooltipContent>
       </Tooltip>
     );
@@ -2299,6 +2398,10 @@ export default function APWorkspace() {
                               {record.invoiceNo}
                             </span>
                             <span className="text-[11px] text-slate-400 font-medium truncate max-w-[200px]" title={record.fileName}>{record.fileName || '—'}</span>
+                            {/* PO number shown when present on the invoice */}
+                            {record.poNumber && (
+                              <span className="text-[10px] text-sky-500 font-semibold truncate max-w-[200px]" title={`PO: ${record.poNumber}`}>PO: {record.poNumber}</span>
+                            )}
                             <span className="text-[10px] text-slate-400">{record.uploadedAt !== 'Unknown' ? formatDetailedDate(record.uploadedAt) : '—'}</span>
                           </div>
                         </TableCell>
@@ -2444,6 +2547,10 @@ export default function APWorkspace() {
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
                             </div>
+                            {/* PO number shown when present on the invoice */}
+                            {record.poNumber && (
+                              <span className="text-[10px] text-sky-500 font-semibold truncate max-w-[200px]" title={`PO: ${record.poNumber}`}>PO: {record.poNumber}</span>
+                            )}
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
                         </TableCell>
@@ -2552,15 +2659,17 @@ export default function APWorkspace() {
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
                             </div>
+                            {/* PO number shown when present on the invoice */}
+                            {record.poNumber && (
+                              <span className="text-[10px] text-sky-500 font-semibold truncate max-w-[200px]" title={`PO: ${record.poNumber}`}>PO: {record.poNumber}</span>
+                            )}
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
                         </TableCell>
                         <TableCell className="font-medium text-slate-800">{record.supplier}</TableCell>
                         <TableCell className="text-right pr-6 font-extrabold text-slate-900 text-[15px] tracking-[-0.01em]">{formatCurrency(record.amount)}</TableCell>
                         <TableCell className="text-center">
-                          <div className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700 leading-tight shadow-[0_4px_10px_rgba(15,23,42,0.04)]">
-                            {getInputRequirementLabel(record)}
-                          </div>
+                          {renderInputRequirement(record)}
                         </TableCell>
                         <TableCell className="pl-6">
                           <RoutingRuleBadges record={record} postingMode={postingMode} valueLimitConfig={valueLimitConfig} invoiceDateRangeConfig={invoiceDateRangeConfig} supplierFilterConfig={supplierFilterConfig} itemFilterConfig={itemFilterConfig} />
@@ -2651,6 +2760,10 @@ export default function APWorkspace() {
                               <span className="text-slate-300">|</span>
                               <span>{record.items} Items</span>
                             </div>
+                            {/* PO number shown when present on the invoice */}
+                            {record.poNumber && (
+                              <span className="text-[10px] text-sky-500 font-semibold truncate max-w-[200px]" title={`PO: ${record.poNumber}`}>PO: {record.poNumber}</span>
+                            )}
                             <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider">{formatDetailedDate(record.date)}</div>
                           </div>
                         </TableCell>
@@ -2735,6 +2848,10 @@ export default function APWorkspace() {
                               <span className="text-slate-300">|</span>
                               <span className="font-extrabold text-slate-900 tracking-[-0.01em]">{formatCurrency(record.amount)}</span>
                             </div>
+                            {/* PO number shown when present on the invoice */}
+                            {record.poNumber && (
+                              <span className="text-[10px] text-sky-500 font-semibold truncate max-w-[260px]" title={`PO: ${record.poNumber}`}>PO: {record.poNumber}</span>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>

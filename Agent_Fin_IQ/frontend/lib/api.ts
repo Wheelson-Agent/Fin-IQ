@@ -353,6 +353,14 @@ export const revalidateInvoice = async (id: string) => {
   return await window.api.invoke('invoices:revalidate', { id });
 };
 
+/**
+ * Mark the invoice as not requiring a PO. Backend stores the decision in
+ * po_validation_json and writes an audit entry with the supplied reason.
+ */
+export const waiveInvoicePo = async (id: string, reason: string): Promise<Invoice> => {
+  return await window.api.invoke('invoices:waive-po', { id, reason });
+};
+
 export async function getBatchLogs(batchName: string) {
     return invoke<any[]>('processing:get-batch-logs', { batchName });
 }
@@ -395,6 +403,45 @@ export async function getServiceEntrySheets(companyId?: string): Promise<Service
  */
 export async function getDashboardMetrics(companyId?: string): Promise<DashboardMetrics> {
     return invoke<DashboardMetrics>('dashboard:get-metrics', { companyId });
+}
+
+export interface PoHealthStats {
+    total_po_value: number;
+    outstanding_amount: number;
+    consumed_amount: number;
+    consumed_pct: number;
+    counts: {
+        open: number;
+        partial: number;
+        closed: number;
+    };
+    exceptions: {
+        blocked_invoices: number;
+        closed_po: number;
+        overbilled: number;
+        header_mismatch: number;
+        missing_po: number;
+    };
+    top_outstanding: Array<{
+        po_no: string;
+        vendor_name: string;
+        status: string;
+        total_amount: number;
+        outstanding_amount: number;
+        consumed_amount: number;
+        consumed_pct: number;
+        line_count: number;
+        last_synced_at: string | null;
+    }>;
+    last_refreshed_at: string | null;
+}
+
+/**
+ * Fetch live PO health for the dashboard.
+ * Values are read-only rollups from purchase_orders and purchase_order_outstandings.
+ */
+export async function getPoHealthStats(companyId?: string): Promise<PoHealthStats> {
+    return invoke<PoHealthStats>('dashboard:po-health', { companyId });
 }
 
 // ─── DASHBOARD: INVOICE PIPELINE ────────────────────────────

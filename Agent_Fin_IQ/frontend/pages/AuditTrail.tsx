@@ -110,6 +110,29 @@ function formatTimestamp(ts: string) {
 }
 
 // ─── Skeleton row ─────────────────────────────────────────────
+function formatAuditValue(value: any): string {
+  if (value === null || value === undefined || value === '') return 'Empty';
+  if (Array.isArray(value)) return value.map(formatAuditValue).join(', ');
+  if (typeof value === 'object') {
+    // PO waiver audit stores structured JSON; show the business meaning, not raw object text.
+    const parts = [
+      value.status ? `Status: ${value.status}` : '',
+      value.code ? `Code: ${value.code}` : '',
+      value.message ? String(value.message) : '',
+      value.waiver_reason ? `Reason: ${value.waiver_reason}` : '',
+      value.po_ref ? `PO: ${value.po_ref}` : '',
+    ].filter(Boolean);
+
+    if (parts.length > 0) return parts.join(' | ');
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function auditValuesDiffer(before: any, after: any): boolean {
+  return formatAuditValue(before) !== formatAuditValue(after);
+}
+
 function SkeletonRow({ delay = 0 }: { delay?: number }) {
   return (
     <div className="flex gap-4" style={{ animationDelay: `${delay}ms` }}>
@@ -544,11 +567,11 @@ export default function AuditTrail() {
                                     </div>
                                     <div className="p-3 space-y-1">
                                       {Object.entries(event.before_data!).map(([k, v]) => {
-                                        const changed = event.after_data && String(event.after_data[k]) !== String(v);
+                                        const changed = event.after_data && auditValuesDiffer(v, event.after_data[k]);
                                         return (
                                           <div key={k} className={`flex justify-between items-start gap-3 py-1 border-b border-slate-50 last:border-0 rounded px-1 ${changed ? 'bg-red-50/60' : ''}`}>
                                             <span className="text-[10px] font-semibold text-slate-500 capitalize shrink-0">{k.replace(/([A-Z_])/g, ' $1').replace(/_/g, ' ').trim()}</span>
-                                            <span className="text-[11px] font-bold text-red-600 font-mono px-1 rounded line-through text-right">{Array.isArray(v) ? v.join(', ') : String(v)}</span>
+                                            <span className="text-[11px] font-bold text-red-600 font-mono px-1 rounded line-through text-right">{formatAuditValue(v)}</span>
                                           </div>
                                         );
                                       })}
@@ -561,11 +584,11 @@ export default function AuditTrail() {
                                     </div>
                                     <div className="p-3 space-y-1">
                                       {Object.entries(event.after_data!).map(([k, v]) => {
-                                        const changed = event.before_data && String(event.before_data[k]) !== String(v);
+                                        const changed = event.before_data && auditValuesDiffer(event.before_data[k], v);
                                         return (
                                           <div key={k} className={`flex justify-between items-start gap-3 py-1 border-b border-slate-50 last:border-0 rounded px-1 ${changed ? 'bg-emerald-50/60' : ''}`}>
                                             <span className="text-[10px] font-semibold text-slate-500 capitalize shrink-0">{k.replace(/([A-Z_])/g, ' $1').replace(/_/g, ' ').trim()}</span>
-                                            <span className="text-[11px] font-bold text-emerald-700 font-mono px-1 rounded text-right">{Array.isArray(v) ? v.join(', ') : String(v)}</span>
+                                            <span className="text-[11px] font-bold text-emerald-700 font-mono px-1 rounded text-right">{formatAuditValue(v)}</span>
                                           </div>
                                         );
                                       })}

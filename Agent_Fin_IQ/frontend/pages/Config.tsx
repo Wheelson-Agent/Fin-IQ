@@ -358,11 +358,12 @@ export default function Config() {
         destination: 'tally',
         reports: { email: true, teams: true, sharepoint: false, whatsapp: false },
         criteria: {
-            knownVendor: true,
             valueLimit: '100000',
             poMatch: true,
-            twoWayMatch: true,
             enableValueLimit: false,
+            enablePoMatchAmountLimit: false,
+            poMatchAmountLimit: '0',
+            excludeServiceInvoices: true,
             filter_invoice_date_enabled: false,
             filter_invoice_date_from: '',
             filter_invoice_date_to: '',
@@ -374,7 +375,7 @@ export default function Config() {
         sourceConfigs: {
             email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
             sharepoint: { tenantId: '8a91-4c...', siteUrl: 'https://sigma.sharepoint.com', secret: '' },
-            drive: { folderId: '1B_xyz89k...', serviceAccount: 'agent-w@gcp-project.iam', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
+            drive: { folderId: '1B_xyz89k...', serviceAccount: 'agent-fc@gcp-project.iam', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
             onedrive: { tenantId: 'bf9a-4c...', folderPath: '/Finance/Invoices', secret: '' },
             whatsapp: { phoneNumber: '', secret: '' },
             local_folder: { folderPath: '' }
@@ -400,7 +401,6 @@ export default function Config() {
         criteriaExtended: {
             fc_exceeded_supplier_avg_enabled: false,
             fc_exceeded_supplier_avg_threshold: 110, // 110%
-            fc_new_ledger_for_supplier_enabled: false
         }
     };
 
@@ -923,6 +923,13 @@ export default function Config() {
             return "Maximum invoice value limit is required when enabled.";
         }
 
+        if (postingMode !== 'manual' && (criteria as any).poMatch && (criteria as any).enablePoMatchAmountLimit) {
+            const poLimit = Number((criteria as any).poMatchAmountLimit);
+            if (!String((criteria as any).poMatchAmountLimit ?? '').trim() || !Number.isFinite(poLimit) || poLimit <= 0) {
+                return "PO match threshold must be a valid amount greater than zero.";
+            }
+        }
+
         if ((criteria as any).filter_invoice_date_enabled && (!(criteria as any).filter_invoice_date_from || !(criteria as any).filter_invoice_date_to)) {
             return "Invoice date range requires both From and To dates.";
         }
@@ -1071,7 +1078,7 @@ export default function Config() {
                         <Settings size={28} className="text-white" />
                     </div>
                     <div>
-                        <div className="text-[8px] font-black text-white/30 uppercase tracking-[3px] mb-[3px]">agent_w</div>
+                        <div className="text-[8px] font-black text-white/30 uppercase tracking-[3px] mb-[3px]">agent_fc</div>
                         <h1 className="text-[26px] font-black text-white m-0 leading-tight">Control Hub</h1>
                     </div>
                 </div>
@@ -1433,20 +1440,6 @@ export default function Config() {
                                                 })}
                                             </div>
 
-                                            {/* Quick Info Banner */}
-                                            <div className="bg-gradient-to-r from-[#F0FDFA] to-[#F0F9FF] border border-[#99F6E4] rounded-[10px] p-[12px_14px] mt-[4px]">
-                                                <div className="text-[11px] font-bold text-[#0F766E] mb-[4px] flex items-center gap-[6px]">
-                                                    <Shield size={12} /> Compliance Notes
-                                                </div>
-                                                <div className="grid grid-cols-3 gap-[4px]">
-                                                    {['GSTIN format auto-validated', 'PAN auto-linked to ITR', 'Multi-company ERP posting', 'FY-wise book closure support', 'State-wise GST returns', 'Company-level audit trail'].map(item => (
-                                                        <div key={item} className="flex items-center gap-[5px] text-[11px] text-[#115E59] font-medium">
-                                                            <Check size={10} className="text-[#0F766E]" strokeWidth={3} />
-                                                            {item}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
                                         </ConfigCard>
                                     </div>
                                 )}
@@ -1872,7 +1865,7 @@ export default function Config() {
                                             >
                                                 <div className="flex flex-col gap-[4px] pr-[20px]">
                                                     <h3 className={`m-0 text-[15px] font-bold ${postingMode === 'manual' ? 'text-[#0F766E]' : 'text-[#1A2640]'}`}>Manual post</h3>
-                                                    <p className="m-0 text-[12px] text-[#64748B]">All invoices require manual approval before posting to ERP.</p>
+                                                    <p className="m-0 text-[12px] text-[#64748B]">All invoices requiring manual approval before posting to ERP.</p>
                                                 </div>
                                                 <div className={`w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 mt-[2px] transition-colors ${postingMode === 'manual' ? 'border-[#0F766E]' : 'border-[#CBD5E1]'}`}>
                                                     {postingMode === 'manual' && <div className="w-[10px] h-[10px] rounded-full bg-[#0F766E]" />}
@@ -1889,7 +1882,7 @@ export default function Config() {
                                                 >
                                                     <div className="flex flex-col gap-[4px] pr-[20px]">
                                                         <h3 className={`m-0 text-[15px] font-bold ${postingMode === 'auto' ? 'text-[#16A34A]' : 'text-[#1A2640]'}`}>Hybrid</h3>
-                                                        <p className="m-0 text-[12px] text-[#64748B]">Post invoices automatically when selected criteria are satisfied.</p>
+                                                        <p className="m-0 text-[12px] text-[#64748B]">Post invoices automatically when selected criteria are fulfilled.</p>
                                                     </div>
                                                     <div className={`w-[20px] h-[20px] rounded-full border-2 flex items-center justify-center shrink-0 mt-[2px] transition-colors ${postingMode === 'auto' ? 'border-[#16A34A]' : 'border-[#CBD5E1]'}`}>
                                                         {postingMode === 'auto' && <div className="w-[10px] h-[10px] rounded-full bg-[#16A34A]" />}
@@ -1934,27 +1927,11 @@ export default function Config() {
                                             </span>
                                         </div>
 
-                                         <ConfigCard icon={<FileCheck size={22} />} title="Auto-Post Criteria" subtitle="Define the quality checks required for automatic posting." accentColor="#16A34A">
+                                         {/* Rule Engine — single card containing all posting rules, intelligence flags, and filter criteria */}
+                                         <ConfigCard icon={<Zap size={22} />} title="Rule Engine" subtitle="Configure all auto-posting rules, intelligence flags and document filters." accentColor="#16A34A">
                                              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-[16px]">
                                                  <div className="flex flex-col gap-[10px]">
-                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex items-center justify-between">
-                                                         <div className="flex items-center gap-[12px]">
-                                                             <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#8B5CF6]"><UserCheck size={16} /></div>
-                                                             <div className="text-[13px] font-bold text-[#1A2640]">Auto supplier creation on mismatch</div>
-                                                         </div>
-                                                         <Toggle checked={criteria.knownVendor} onChange={() => setCriteria({ ...criteria, knownVendor: !criteria.knownVendor })} />
-                                                     </div>
-                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex items-center justify-between">
-                                                         <div className="flex items-center gap-[12px]">
-                                                             <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#10B981]"><FileCheck size={16} /></div>
-                                                             <div>
-                                                                 <div className="text-[13px] font-bold text-[#1A2640]">Two-way Match (PO & Invoice)</div>
-                                                                 <div className="text-[11px] text-[#94A3B8]">Ensure invoice values match purchase order line items</div>
-                                                             </div>
-                                                         </div>
-                                                         <Toggle checked={criteria.twoWayMatch} onChange={() => setCriteria({ ...criteria, twoWayMatch: !criteria.twoWayMatch })} />
-                                                     </div>
-                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px]">
+                                                      <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px]">
                                                          <div className="flex items-center justify-between">
                                                              <div className="flex items-center gap-[12px]">
                                                                  <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#F59E0B]"><Receipt size={16} /></div>
@@ -1983,21 +1960,68 @@ export default function Config() {
                                                              </div>
                                                          )}
                                                      </div>
-                                                 </div>
-                                             </motion.div>
-                                         </ConfigCard>
 
-                                        <ConfigCard icon={<Brain size={22} />} title="FC Intelligence" subtitle="AI-driven intelligence flags for enhanced risk assessment." accentColor="#8B5CF6">
-                                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-[16px]">
-                                                <div className="flex flex-col gap-[10px]">
+                                                     {/* PO Match Rule — hybrid mode only */}
+                                                     <div className={`bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px] transition-opacity ${postingMode === 'manual' ? 'opacity-50 pointer-events-none' : ''}`}>
+                                                         <div className="flex items-center justify-between">
+                                                             <div className="flex items-center gap-[12px]">
+                                                                 <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#0EA5E9]"><FileCheck size={16} /></div>
+                                                                 <div>
+                                                                     <div className="text-[13px] font-bold text-[#1A2640]">PO Match Check</div>
+                                                                     <div className="text-[11px] text-[#94A3B8]">
+                                                                         {postingMode === 'manual' ? 'Not applicable in manual mode' : 'Require matching PO before auto-posting'}
+                                                                     </div>
+                                                                 </div>
+                                                             </div>
+                                                             <Toggle checked={criteria.poMatch} onChange={() => setCriteria({ ...criteria, poMatch: !criteria.poMatch, ...(!criteria.poMatch ? {} : { enablePoMatchAmountLimit: false }) })} />
+                                                         </div>
+                                                         {criteria.poMatch && (
+                                                             <div className="pl-[44px] flex flex-col gap-[10px] animate-in fade-in slide-in-from-top-2 duration-300">
+                                                                 {/* Exclude service invoices from PO check */}
+                                                                 <div className="bg-white border border-[#E2E8F0] rounded-[10px] p-[10px_14px] flex items-center justify-between">
+                                                                     <div>
+                                                                         <div className="text-[12px] font-bold text-[#1A2640]">Exclude Service Invoices</div>
+                                                                         <div className="text-[11px] text-[#94A3B8]">PO check is not required for service invoices</div>
+                                                                     </div>
+                                                                     <Toggle checked={(criteria as any).excludeServiceInvoices} onChange={() => setCriteria({ ...criteria, excludeServiceInvoices: !(criteria as any).excludeServiceInvoices } as any)} />
+                                                                 </div>
+                                                                 {/* Minimum amount threshold: PO check only fires above this value */}
+                                                                 <div className="bg-white border border-[#E2E8F0] rounded-[10px] p-[10px_14px] flex flex-col gap-[10px]">
+                                                                     <div className="flex items-center justify-between">
+                                                                         <div>
+                                                                             <div className="text-[12px] font-bold text-[#1A2640]">Minimum Amount Threshold</div>
+                                                                             <div className="text-[11px] text-[#94A3B8]">Skip PO check when grand total is at or below this amount</div>
+                                                                         </div>
+                                                                         <Toggle checked={(criteria as any).enablePoMatchAmountLimit} onChange={() => setCriteria({ ...criteria, enablePoMatchAmountLimit: !(criteria as any).enablePoMatchAmountLimit })} />
+                                                                     </div>
+                                                                     {(criteria as any).enablePoMatchAmountLimit && (
+                                                                         <div className="flex items-center gap-[8px]">
+                                                                             <div className="relative flex-1">
+                                                                                 <span className="absolute left-[14px] top-1/2 -translate-y-[45%] text-[#64748B] font-bold text-[14px]">{"\u20B9"}</span>
+                                                                                 <input
+                                                                                     type="number"
+                                                                                     value={(criteria as any).poMatchAmountLimit}
+                                                                                     onChange={(e) => setCriteria({ ...criteria, poMatchAmountLimit: e.target.value } as any)}
+                                                                                     className={`w-full bg-white border ${(!String((criteria as any).poMatchAmountLimit ?? '').trim() || Number((criteria as any).poMatchAmountLimit) <= 0) ? 'border-[#EF4444] focus:ring-[#FEF2F2]' : 'border-[#CBD5E1] focus:border-[#1E6FD9] focus:ring-[rgba(30,111,217,0.1)]'} rounded-[8px] text-[13px] font-bold text-[#1A2640] pl-[40px] pr-[12px] py-[8px] outline-none shadow-sm transition-all focus:ring-2`}
+                                                                                     placeholder="e.g. 50000"
+                                                                                 />
+                                                                                 {(!String((criteria as any).poMatchAmountLimit ?? '').trim() || Number((criteria as any).poMatchAmountLimit) <= 0) && <div className="text-[11px] text-[#EF4444] mt-[6px] font-bold flex items-center gap-[4px]"><AlertCircle size={10} /> PO threshold must be greater than zero</div>}
+                                                                             </div>
+                                                                         </div>
+                                                                     )}
+                                                                 </div>
+                                                             </div>
+                                                         )}
+                                                     </div>
+                                                    {/* FC Intelligence rules */}
                                                     {/* Exceeded Supplier Avg */}
                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px]">
                                                         <div className="flex items-center justify-between">
                                                             <div className="flex items-center gap-[12px]">
                                                                 <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#8B5CF6]"><TrendingUp size={16} /></div>
                                                                 <div>
-                                                                    <div className="text-[13px] font-bold text-[#1A2640]">Exceeded Supplier Average Invoice Value</div>
-                                                                    <div className="text-[11px] text-[#94A3B8]">Flags invoices significantly higher than vendor history</div>
+                                                                    <div className="text-[13px] font-bold text-[#1A2640]">Purchase Price Variation</div>
+                                                                    <div className="text-[11px] text-[#94A3B8]">Blocks auto-posting when a product's unit price spikes beyond the supplier's historical average</div>
                                                                 </div>
                                                             </div>
                                                             <Toggle 
@@ -2026,27 +2050,7 @@ export default function Config() {
                                                         </AnimatePresence>
                                                     </div>
 
-                                                    {/* New Ledger */}
-                                                    <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex items-center justify-between">
-                                                        <div className="flex items-center gap-[12px]">
-                                                            <div className="w-[32px] h-[32px] bg-white rounded-[8px] flex items-center justify-center shadow-sm text-[#F59E0B]"><Sparkles size={16} /></div>
-                                                            <div>
-                                                                <div className="text-[13px] font-bold text-[#1A2640]">New Ledger for Supplier</div>
-                                                                <div className="text-[11px] text-[#94A3B8]">Flags if a never-before-used ledger is being mapped</div>
-                                                            </div>
-                                                        </div>
-                                                        <Toggle 
-                                                            checked={criteriaExtended.fc_new_ledger_for_supplier_enabled} 
-                                                            onChange={() => setCriteriaExtended({ ...criteriaExtended, fc_new_ledger_for_supplier_enabled: !criteriaExtended.fc_new_ledger_for_supplier_enabled })} 
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </motion.div>
-                                        </ConfigCard>
-
-                                        <ConfigCard icon={<Filter size={22} />} title="Filter Criteria" subtitle="Limit the scope of automatic posting based on document filters." accentColor="#1E6FD9">
-                                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-[16px]">
-                                                <div className="flex flex-col gap-[10px]">
+                                                    {/* Filter Criteria rules */}
                                                     {/* Invoice Date Range */}
                                                     <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] flex flex-col gap-[12px]">
                                                         <div className="flex items-center justify-between">

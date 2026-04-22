@@ -19,6 +19,7 @@
 
 import { query, pool } from './connection';
 import { sendInvoiceToTally } from '../sync/tally_posting';
+import { refreshPurchaseOrderOutstandingFromTally } from '../sync/po_outstanding';
 
 type InvoiceDateRangeConfig = {
     filter_invoice_date_enabled?: boolean;
@@ -61,6 +62,7 @@ function getCanonicalKey(key: string): string {
     if (normalized === 'igst_pct' || normalized === 'igst_%' || normalized === 'igst_percentage') return 'igst_pct';
     if (normalized === 'buyer_name' || normalized === 'buyer') return 'buyer_name';
     if (normalized === 'buyer_gst' || normalized === 'customer_gst') return 'buyer_gst';
+    if (normalized === 'po_number' || normalized === 'order_no' || normalized === 'buyers_order_no' || normalized === 'purchase_order_no') return 'po_number';
     if (normalized === 'round_off') return 'round_off';
     return normalized;
 }
@@ -124,6 +126,727 @@ function getPayloadValueByCanonicalKey(payload: any, canonicalKey: string) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
     const matchingKey = Object.keys(payload).find((key) => getCanonicalKey(key) === canonicalKey);
     return matchingKey ? payload[matchingKey] : undefined;
+}
+
+function backfillInvoiceIdentityFields(invData: any) {
+    if (!invData || typeof invData !== 'object') return;
+
+    const sourcePayloads = [
+        invData,
+        invData.ocr_raw_payload,
+        invData.all_data_invoice,
+    ].filter((payload) => payload && typeof payload === 'object' && !Array.isArray(payload));
+
+    const identityFields = ['buyer_name', 'buyer_gst', 'supplier_address'];
+    for (const field of identityFields) {
+        if (invData[field] !== undefined && invData[field] !== null && invData[field] !== '') continue;
+
+        const value = sourcePayloads
+            .map((payload) => getPayloadValueByCanonicalKey(payload, field))
+            .find((candidate) => candidate !== undefined && candidate !== null && candidate !== '');
+
+        if (value !== undefined) {
+            invData[field] = value;
+        }
+    }
+}
+
+type QueryRunner = (text: string, params?: any[]) => Promise<{ rows: any[] }>;
+
+type PoMatchResult = {
+    passed: boolean | null;
+    code: 'PO_FOUND' | 'PO_MISSING' | 'PO_NOT_FOUND' | 'PO_HEADER_MISMATCH' | 'PO_OVERBILLED' | 'PO_CLOSED' | 'PO_WAIVED' | 'PO_NOT_APPLICABLE';
+    message: string;
+    poRef: string | null;
+    purchaseOrderId: string | null;
+    checks?: Record<string, any>;
+    waiverType?: string | null;
+    waiverReason?: string | null;
+    waivedBy?: string | null;
+    waivedAt?: string | null;
+    previousCode?: string | null;
+    previousMessage?: string | null;
+};
+
+function parseObjectValue(value: any): Record<string, any> {
+    if (!value) return {};
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function collectInvoicePoRefs(invoicePoNumber: any, lineItems: any[] = []): string[] {
+    const refs = new Set<string>();
+    const addRef = (value: any) => {
+        const normalized = String(value ?? '').trim();
+        if (normalized) refs.add(normalized);
+    };
+
+    addRef(invoicePoNumber);
+    for (const line of lineItems || []) {
+        addRef(line?.order_no);
+    }
+
+    return Array.from(refs);
+}
+
+function normalizeComparableText(value: any): string {
+    return String(value ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function normalizePoGstin(value: any): string {
+    return normalizeComparableText(value).replace(/[^A-Z0-9]/g, '');
+}
+
+function numericOrNull(value: any): number | null {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizePoLineText(value: any): string {
+    return String(value ?? '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+const PO_LINE_STOP_WORDS = new Set([
+    'a', 'an', 'and', 'as', 'by', 'for', 'from', 'in', 'nos', 'of', 'pcs', 'per', 'the', 'to', 'with',
+]);
+
+function getPoLineTokens(value: any): string[] {
+    const normalized = normalizePoLineText(value);
+    if (!normalized) return [];
+    return normalized
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length > 1 && !PO_LINE_STOP_WORDS.has(token));
+}
+
+function scorePoDescriptionMatch(invoiceDescription: any, poDescription: any) {
+    const invoiceText = normalizePoLineText(invoiceDescription);
+    const poText = normalizePoLineText(poDescription);
+    if (!invoiceText || !poText) {
+        return { score: 0, mode: 'no_description' };
+    }
+    if (invoiceText === poText) {
+        return { score: 100, mode: 'exact_description' };
+    }
+    if (invoiceText.includes(poText) || poText.includes(invoiceText)) {
+        return { score: 82, mode: 'partial_description' };
+    }
+
+    const invoiceTokens = new Set(getPoLineTokens(invoiceText));
+    const poTokens = new Set(getPoLineTokens(poText));
+    if (invoiceTokens.size === 0 || poTokens.size === 0) {
+        return { score: 0, mode: 'no_description' };
+    }
+
+    const overlap = Array.from(invoiceTokens).filter((token) => poTokens.has(token)).length;
+    const coverage = Math.max(overlap / invoiceTokens.size, overlap / poTokens.size);
+    const score = Math.round(coverage * 100);
+    return { score, mode: score >= 50 ? 'fuzzy_description' : 'weak_description' };
+}
+
+function getLineQuantity(line: any): number | null {
+    return numericOrNull(line?.quantity ?? line?.qty);
+}
+
+function getLineUnitPrice(line: any): number | null {
+    return numericOrNull(line?.unit_price ?? line?.rate);
+}
+
+function getLineAmount(line: any): number | null {
+    return numericOrNull(line?.line_amount ?? line?.amount ?? line?.total_amount);
+}
+
+function valuesClose(left: number | null, right: number | null, tolerance = 1): boolean | null {
+    if (left === null || right === null) return null;
+    return Math.abs(left - right) <= tolerance;
+}
+
+function buildPoLineMatchCheck(invoiceLines: any[], poLines: any[], matchedPoNo: string, docType?: any) {
+    const activePoLines = (poLines || []).filter((line) => line && line.deleted_at === null && line.is_active !== false);
+    const comparableInvoiceLines = (invoiceLines || []).filter((line) => line && (
+        line.description || line.item_description || line.item_id || line.order_no || getLineAmount(line) !== null
+    ));
+
+    const matchedPoRef = normalizeComparableText(matchedPoNo);
+    const serviceDocument = String(docType || '').trim().toLowerCase().includes('service');
+    const invoiceAmountTotal = comparableInvoiceLines.reduce((sum, line) => sum + (getLineAmount(line) || 0), 0);
+    const matchedPoLineIds = new Set<string>();
+    const matchedLines: any[] = [];
+    const reviewLines: any[] = [];
+    const unmatchedLines: any[] = [];
+    const groups: any[] = [];
+
+    // 1:1 service match: single invoice line against single PO service line.
+    // For service invoices, description text variation between PO and invoice is normal and expected
+    // (e.g. "IT Consulting Services" vs "Professional IT Services - April 2026").
+    // Amount match within ₹1 is sufficient proof — skip description scoring entirely.
+    if (serviceDocument && activePoLines.length === 1 && comparableInvoiceLines.length === 1) {
+        const poLine = activePoLines[0];
+        const invoiceLine = comparableInvoiceLines[0];
+        const invoiceAmount = getLineAmount(invoiceLine);
+        const poAmount = numericOrNull(poLine.total_amount);
+        // Service line amounts are net (pre-GST); PO total_amount is gross.
+        // 30% tolerance covers all Indian GST slabs (max gross-net gap is ~22% at 28% GST).
+        const serviceTolerance = Math.max(1, (poAmount ?? 0) * 0.30);
+        const amountMatch = valuesClose(invoiceAmount, poAmount, serviceTolerance);
+        const groupStatus = amountMatch === true ? 'matched' : 'review';
+        const lineCheck = {
+            invoice_line_number: invoiceLine.line_number || null,
+            po_line_number: poLine.line_number || null,
+            status: groupStatus,
+            match_mode: 'service_1to1_match',
+            confidence: groupStatus === 'matched' ? 88 : 50,
+            reason: groupStatus === 'matched'
+                ? 'Service invoice line matches PO service line by amount'
+                : 'Service invoice line amount does not match PO line — review required',
+            invoice_amount: invoiceAmount,
+            po_amount: poAmount,
+            amount_match: amountMatch,
+        };
+        return {
+            status: groupStatus,
+            enforced: false,
+            matched_lines: groupStatus === 'matched' ? 1 : 0,
+            total_invoice_lines: 1,
+            total_po_lines: 1,
+            unmatched_lines: [],
+            matched_line_checks: groupStatus === 'matched' ? [lineCheck] : [],
+            review_lines: groupStatus === 'matched' ? [] : [lineCheck],
+            groups: [],
+            summary: {
+                matched: groupStatus === 'matched' ? 1 : 0,
+                review: groupStatus === 'matched' ? 0 : 1,
+                unmatched: 0,
+                service_grouped: 0,
+            },
+        };
+    }
+
+    if (activePoLines.length === 1 && comparableInvoiceLines.length > 1) {
+        const poLine = activePoLines[0];
+        const poAmount = numericOrNull(poLine.total_amount);
+        // For service invoices: line amounts are net, PO total is gross — use 30% tolerance.
+        // For goods invoices: amounts should match exactly, keep ₹1 tolerance.
+        const amountTolerance = serviceDocument ? Math.max(1, (poAmount ?? 0) * 0.30) : 1;
+        const amountMatch = valuesClose(invoiceAmountTotal, poAmount, amountTolerance);
+        const groupStatus = serviceDocument && amountMatch === true ? 'matched' : 'review';
+        const groupReason = serviceDocument
+            ? 'Service invoice lines grouped against one PO service line'
+            : 'Multiple invoice lines may belong to one PO line; review grouping before relying on it';
+
+        const group = {
+            status: groupStatus,
+            match_mode: serviceDocument ? 'service_group_match' : 'single_po_line_group_review',
+            confidence: groupStatus === 'matched' ? 86 : 58,
+            po_line_number: poLine.line_number || null,
+            po_description: poLine.item_description || null,
+            invoice_line_numbers: comparableInvoiceLines.map((line) => line.line_number || null),
+            invoice_amount: invoiceAmountTotal,
+            po_amount: poAmount,
+            amount_match: amountMatch,
+            reason: groupReason,
+        };
+
+        groups.push(group);
+        if (groupStatus === 'matched') {
+            matchedLines.push(group);
+        } else {
+            reviewLines.push(group);
+        }
+
+        return {
+            status: groupStatus === 'matched' ? 'matched' : 'review',
+            enforced: false,
+            matched_lines: groupStatus === 'matched' ? comparableInvoiceLines.length : 0,
+            total_invoice_lines: comparableInvoiceLines.length,
+            total_po_lines: activePoLines.length,
+            unmatched_lines: [],
+            matched_line_checks: matchedLines,
+            review_lines: reviewLines,
+            groups,
+            summary: {
+                matched: groupStatus === 'matched' ? comparableInvoiceLines.length : 0,
+                review: groupStatus === 'matched' ? 0 : comparableInvoiceLines.length,
+                unmatched: 0,
+                service_grouped: serviceDocument ? comparableInvoiceLines.length : 0,
+            },
+        };
+    }
+
+    for (const invoiceLine of comparableInvoiceLines) {
+        const lineRef = normalizeComparableText(invoiceLine.order_no);
+        if (lineRef && lineRef !== matchedPoRef) {
+            unmatchedLines.push({
+                line_number: invoiceLine.line_number || null,
+                description: invoiceLine.description || invoiceLine.item_description || null,
+                order_no: invoiceLine.order_no || null,
+                reason: 'Invoice line PO reference does not match matched PO',
+            });
+            continue;
+        }
+
+        const invoiceDescription = normalizePoLineText(invoiceLine.description || invoiceLine.item_description);
+        const invoiceQty = getLineQuantity(invoiceLine);
+        const invoiceRate = getLineUnitPrice(invoiceLine);
+        const invoiceAmount = getLineAmount(invoiceLine);
+
+        const candidates = activePoLines
+            .filter((poLine) => !matchedPoLineIds.has(poLine.id))
+            .map((poLine) => {
+                const descriptionScore = scorePoDescriptionMatch(invoiceDescription, poLine.item_description);
+                const quantityMatch = valuesClose(invoiceQty, numericOrNull(poLine.quantity), 0.001);
+                const rateMatch = valuesClose(invoiceRate, numericOrNull(poLine.unit_price), 1);
+                const amountMatch = valuesClose(invoiceAmount, numericOrNull(poLine.total_amount), 1);
+                let confidence = Math.round(descriptionScore.score * 0.55);
+                let matchMode = descriptionScore.mode;
+
+                if (invoiceLine.item_id && poLine.item_id && invoiceLine.item_id === poLine.item_id) {
+                    confidence = Math.max(confidence, 92);
+                    matchMode = 'item_id';
+                }
+                if (quantityMatch === true) confidence += 8;
+                if (rateMatch === true) confidence += 7;
+                if (amountMatch === true) confidence += 15;
+                if (lineRef && lineRef === matchedPoRef) confidence += 5;
+
+                return {
+                    poLine,
+                    confidence: Math.min(confidence, 100),
+                    matchMode,
+                    descriptionScore: descriptionScore.score,
+                    quantityMatch,
+                    rateMatch,
+                    amountMatch,
+                };
+            })
+            .sort((left, right) => right.confidence - left.confidence);
+
+        const bestCandidate = candidates[0];
+        if (!bestCandidate || bestCandidate.confidence < 50) {
+            unmatchedLines.push({
+                line_number: invoiceLine.line_number || null,
+                description: invoiceLine.description || invoiceLine.item_description || null,
+                order_no: invoiceLine.order_no || null,
+                reason: 'No matching PO line item',
+            });
+            continue;
+        }
+
+        const matchedLine = bestCandidate.poLine;
+        matchedPoLineIds.add(matchedLine.id);
+
+        // When qty + rate + amount all match exactly, description text is secondary.
+        // This handles OCR/Tally formatting artifacts (e.g. "Pretu ned" vs "Preturned")
+        // where the numbers are unambiguous proof of the correct line.
+        const allValuesMatch = bestCandidate.quantityMatch === true &&
+            bestCandidate.rateMatch === true &&
+            bestCandidate.amountMatch === true;
+
+        const lineStatus = (bestCandidate.confidence >= 80 || allValuesMatch) &&
+            bestCandidate.quantityMatch !== false &&
+            bestCandidate.rateMatch !== false &&
+            bestCandidate.amountMatch !== false
+            ? 'matched'
+            : 'review';
+        const lineCheck = {
+            invoice_line_number: invoiceLine.line_number || null,
+            po_line_number: matchedLine.line_number || null,
+            status: lineStatus,
+            match_mode: bestCandidate.matchMode,
+            confidence: bestCandidate.confidence,
+            reason: lineStatus === 'matched' ? 'Invoice line matches PO line' : 'Potential PO line match needs review',
+            description_match: bestCandidate.descriptionScore >= 50,
+            description_score: bestCandidate.descriptionScore,
+            quantity_match: bestCandidate.quantityMatch,
+            rate_match: bestCandidate.rateMatch,
+            amount_match: bestCandidate.amountMatch,
+            invoice_quantity: invoiceQty,
+            po_quantity: numericOrNull(matchedLine.quantity),
+            invoice_rate: invoiceRate,
+            po_rate: numericOrNull(matchedLine.unit_price),
+            invoice_amount: invoiceAmount,
+            po_amount: numericOrNull(matchedLine.total_amount),
+        };
+
+        if (lineStatus === 'matched') {
+            matchedLines.push(lineCheck);
+        } else {
+            reviewLines.push(lineCheck);
+        }
+    }
+
+    const status = unmatchedLines.length === 0 && reviewLines.length === 0 ? 'matched' : 'review';
+
+    return {
+        status,
+        enforced: false,
+        matched_lines: matchedLines.length,
+        total_invoice_lines: comparableInvoiceLines.length,
+        total_po_lines: activePoLines.length,
+        unmatched_lines: unmatchedLines,
+        matched_line_checks: [...matchedLines, ...reviewLines],
+        review_lines: reviewLines,
+        groups,
+        summary: {
+            matched: matchedLines.length,
+            review: reviewLines.length,
+            unmatched: unmatchedLines.length,
+            service_grouped: groups
+                .filter((group) => group.match_mode === 'service_group_match')
+                .reduce((sum, group) => sum + (group.invoice_line_numbers || []).length, 0),
+        },
+    };
+}
+
+async function buildPoConsumptionCheck(args: {
+    invoiceId?: string;
+    companyId: string;
+    matchedPoNo: string;
+    poTotal: number | null;
+    invoiceTotal: number | null;
+}, runQuery: QueryRunner = query) {
+    const consumptionResult = await runQuery(
+        `SELECT COUNT(*)::int AS other_invoice_count,
+                COALESCE(SUM(COALESCE(ai.sub_total, 0)), 0)::numeric AS already_invoiced_total
+         FROM ap_invoices ai
+         WHERE ai.company_id = $1::uuid
+           AND ($3::uuid IS NULL OR ai.id <> $3::uuid)
+           AND (
+             UPPER(TRIM(COALESCE(ai.po_number, ''))) = UPPER(TRIM($2::text))
+             OR EXISTS (
+               SELECT 1
+               FROM ap_invoice_lines ail
+               WHERE ail.ap_invoice_id = ai.id
+                 AND UPPER(TRIM(COALESCE(ail.order_no, ''))) = UPPER(TRIM($2::text))
+             )
+           )`,
+        [args.companyId, args.matchedPoNo, args.invoiceId || null]
+    );
+
+    const alreadyInvoicedTotal = numericOrNull(consumptionResult.rows[0]?.already_invoiced_total) || 0;
+    const otherInvoiceCount = Number(consumptionResult.rows[0]?.other_invoice_count || 0);
+    const projectedInvoicedTotal = alreadyInvoicedTotal + (args.invoiceTotal || 0);
+    const remainingBeforeCurrent = args.poTotal !== null ? args.poTotal - alreadyInvoicedTotal : null;
+    const remainingAfterCurrent = args.poTotal !== null ? args.poTotal - projectedInvoicedTotal : null;
+    const toleranceAmount = args.poTotal !== null ? args.poTotal * 0.05 : null;
+    const allowedTotal = args.poTotal !== null && toleranceAmount !== null ? args.poTotal + toleranceAmount : null;
+    const overbilledAmount = allowedTotal !== null ? Math.max(0, projectedInvoicedTotal - allowedTotal) : null;
+
+    // Consumption is enforced only after a 5% PO-level tolerance; line-level checks remain review-only.
+    return {
+        status: args.poTotal === null || args.invoiceTotal === null
+            ? 'not_comparable'
+            : (overbilledAmount !== null && overbilledAmount > 1 ? 'overbilled' : 'within_limit'),
+        enforced: true,
+        tolerance_percent: 5,
+        tolerance_amount: toleranceAmount,
+        allowed_total: allowedTotal,
+        po_total: args.poTotal,
+        current_invoice_total: args.invoiceTotal,
+        already_invoiced_total: alreadyInvoicedTotal,
+        projected_invoiced_total: projectedInvoicedTotal,
+        remaining_before_current: remainingBeforeCurrent,
+        remaining_after_current: remainingAfterCurrent,
+        overbilled_amount: overbilledAmount,
+        invoice_count_against_po: otherInvoiceCount + 1,
+    };
+}
+
+async function evaluatePoMatchStatus(args: {
+    invoiceId?: string;
+    companyId?: string | null;
+    invoicePoNumber?: any;
+    invoiceVendorGst?: any;
+    invoiceVendorName?: any;
+    invoiceBuyerGst?: any;
+    invoiceGrandTotal?: any;
+    // Tally PO total_amount is net (pre-GST). Pass sub_total so the consumption check
+    // compares like-for-like (net vs net). Falls back to grand_total if not provided.
+    invoiceSubTotal?: any;
+    invoiceDocType?: any;
+    lineItems?: any[];
+}, runQuery: QueryRunner = query): Promise<PoMatchResult> {
+    let refs = collectInvoicePoRefs(args.invoicePoNumber, args.lineItems || []);
+
+    if (refs.length === 0 && args.invoiceId) {
+        const lineRefResult = await runQuery(
+            `SELECT DISTINCT order_no
+             FROM ap_invoice_lines
+             WHERE ap_invoice_id = $1
+               AND order_no IS NOT NULL
+               AND LENGTH(TRIM(order_no)) > 0`,
+            [args.invoiceId]
+        );
+        refs = collectInvoicePoRefs(args.invoicePoNumber, lineRefResult.rows || []);
+    }
+
+    if (refs.length === 0) {
+        return {
+            passed: false,
+            code: 'PO_MISSING',
+            message: 'Purchase order number is required',
+            poRef: null,
+            purchaseOrderId: null,
+        };
+    }
+
+    if (!args.companyId) {
+        return {
+            passed: false,
+            code: 'PO_NOT_FOUND',
+            message: `Purchase order ${refs[0]} not found in Tally`,
+            poRef: refs[0],
+            purchaseOrderId: null,
+        };
+    }
+
+    // PO match intentionally uses business PO number only. Tally voucher_number is not a PO number.
+    const matchResult = await runQuery(
+        `SELECT id, po_no, company_id, vendor_name, vendor_gstn, buyer_gstn, total_amount, status
+         FROM purchase_orders
+         WHERE company_id = $1::uuid
+           AND is_active = true
+           AND deleted_at IS NULL
+           AND UPPER(TRIM(COALESCE(po_no, ''))) = ANY($2::text[])
+         ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+         LIMIT 1`,
+        [args.companyId, refs.map((ref) => ref.trim().toUpperCase())]
+    );
+
+    const matchedPo = matchResult.rows[0];
+    if (!matchedPo) {
+        return {
+            passed: false,
+            code: 'PO_NOT_FOUND',
+            message: `Purchase order ${refs[0]} not found in Tally`,
+            poRef: refs[0],
+            purchaseOrderId: null,
+        };
+    }
+
+    const invoiceVendorGst = normalizePoGstin(args.invoiceVendorGst);
+    const poVendorGst = normalizePoGstin(matchedPo.vendor_gstn);
+    const invoiceVendorName = normalizeComparableText(args.invoiceVendorName);
+    const poVendorName = normalizeComparableText(matchedPo.vendor_name);
+    const invoiceBuyerGst = normalizePoGstin(args.invoiceBuyerGst);
+    const poBuyerGst = normalizePoGstin(matchedPo.buyer_gstn);
+    const invoiceTotal = numericOrNull(args.invoiceGrandTotal);
+    // Tally PO total_amount is net (pre-GST). Use invoice sub_total for consumption so units match.
+    // Falls back to grand_total when sub_total is not available.
+    const invoiceNetTotal = numericOrNull(args.invoiceSubTotal) ?? invoiceTotal;
+    const poTotal = numericOrNull(matchedPo.total_amount);
+    const amountDifference = invoiceTotal !== null && poTotal !== null
+        ? Math.abs(invoiceTotal - poTotal)
+        : null;
+    const poStatus = normalizeComparableText(matchedPo.status || 'Open');
+    const poLineResult = await runQuery(
+        `SELECT id, po_id, line_number, item_description, quantity, unit_price, total_amount,
+                gl_account_id, item_id, is_active, deleted_at, company_id
+         FROM purchase_order_lines
+         WHERE po_id = $1::uuid
+           AND company_id = $2::uuid
+           AND is_active = true
+           AND deleted_at IS NULL
+         ORDER BY line_number NULLS LAST`,
+        [matchedPo.id, args.companyId]
+    );
+    const lineMatch = buildPoLineMatchCheck(args.lineItems || [], poLineResult.rows || [], matchedPo.po_no, args.invoiceDocType);
+    const consumption = await buildPoConsumptionCheck({
+        invoiceId: args.invoiceId,
+        companyId: args.companyId,
+        matchedPoNo: matchedPo.po_no,
+        poTotal,
+        invoiceTotal: invoiceNetTotal,
+    }, runQuery);
+
+    const supplierMatch = invoiceVendorGst && poVendorGst
+        ? invoiceVendorGst === poVendorGst
+        : Boolean(invoiceVendorName && poVendorName && invoiceVendorName === poVendorName);
+    const buyerMatch = invoiceBuyerGst && poBuyerGst
+        ? invoiceBuyerGst === poBuyerGst
+        : true;
+    // Amount is recorded for review but not enforced yet because current PO totals can represent partial Tally data.
+    const amountWithinPoTotal = amountDifference !== null ? amountDifference <= 1 : null;
+    const checks = {
+        po_exists: true,
+        supplier_match: supplierMatch,
+        supplier_match_basis: invoiceVendorGst && poVendorGst ? 'gst' : 'name',
+        buyer_match: buyerMatch,
+        buyer_match_basis: invoiceBuyerGst && poBuyerGst ? 'gst' : 'not_comparable',
+        company_match: true,
+        amount_within_po_total: amountWithinPoTotal,
+        amount_enforced: false,
+        invoice_total: invoiceTotal,
+        po_total: poTotal,
+        po_status: matchedPo.status || null,
+        amount_difference: amountDifference,
+        line_match: lineMatch,
+        consumption,
+    };
+
+    const mismatchReasons: string[] = [];
+    if (!supplierMatch) mismatchReasons.push('supplier does not match PO');
+    if (!buyerMatch) mismatchReasons.push('buyer GST does not match PO');
+
+    if (poStatus === 'CLOSED') {
+        return {
+            passed: false,
+            code: 'PO_CLOSED',
+            message: `Purchase order ${matchedPo.po_no} is closed in Tally outstanding. Reopen or select another PO before posting.`,
+            poRef: matchedPo.po_no,
+            purchaseOrderId: matchedPo.id,
+            checks,
+        };
+    }
+
+    if (mismatchReasons.length > 0) {
+        return {
+            passed: false,
+            code: 'PO_HEADER_MISMATCH',
+            message: `Purchase order ${matchedPo.po_no} found, but ${mismatchReasons.join(' and ')}`,
+            poRef: matchedPo.po_no,
+            purchaseOrderId: matchedPo.id,
+            checks,
+        };
+    }
+
+    if (consumption.status === 'overbilled') {
+        return {
+            passed: false,
+            code: 'PO_OVERBILLED',
+            message: `Purchase order ${matchedPo.po_no} exceeds the 5% tolerance by ₹${Math.round(Number(consumption.overbilled_amount || 0)).toLocaleString('en-IN')}. Review before posting.`,
+            poRef: matchedPo.po_no,
+            purchaseOrderId: matchedPo.id,
+            checks,
+        };
+    }
+
+    return {
+        passed: true,
+        code: 'PO_FOUND',
+        message: `Purchase order ${matchedPo.po_no} found and header checks passed`,
+        poRef: matchedPo.po_no,
+        purchaseOrderId: matchedPo.id,
+        checks,
+    };
+}
+
+function buildPoValidationJson(poMatch: PoMatchResult) {
+    const status = poMatch.code === 'PO_WAIVED'
+        ? 'waived'
+        : poMatch.code === 'PO_NOT_APPLICABLE'
+            ? 'not_applicable'
+            : poMatch.passed
+                ? 'matched'
+                : 'failed';
+
+    const payload: Record<string, any> = {
+        status,
+        code: poMatch.code,
+        po_ref: poMatch.poRef,
+        purchase_order_id: poMatch.purchaseOrderId,
+        message: poMatch.message,
+        checks: poMatch.checks || {},
+        checked_at: new Date().toISOString(),
+    };
+
+    if (poMatch.code === 'PO_WAIVED') {
+        payload.waiver_type = poMatch.waiverType || null;
+        payload.waiver_reason = poMatch.waiverReason || null;
+        payload.waived_by = poMatch.waivedBy || null;
+        payload.waived_at = poMatch.waivedAt || null;
+        payload.previous_code = poMatch.previousCode || null;
+        payload.previous_message = poMatch.previousMessage || null;
+    }
+
+    return payload;
+}
+
+function getExistingPoWaiver(poValidationJson: any): PoMatchResult | null {
+    const poValidation = parseObjectValue(poValidationJson);
+    if (poValidation.code !== 'PO_WAIVED' && poValidation.status !== 'waived') return null;
+
+    const reason = String(poValidation.waiver_reason || '').trim();
+    return {
+        passed: true,
+        code: 'PO_WAIVED',
+        message: poValidation.message || (reason ? `PO not required: ${reason}` : 'PO not required'),
+        poRef: poValidation.po_ref || null,
+        purchaseOrderId: null,
+        waiverType: poValidation.waiver_type || null,
+        waiverReason: reason || null,
+        waivedBy: poValidation.waived_by || null,
+        waivedAt: poValidation.waived_at || null,
+        previousCode: poValidation.previous_code || null,
+        previousMessage: poValidation.previous_message || null,
+    };
+}
+
+/** Returns a not-applicable result when PO check is skipped by config rules. */
+function buildPoNotApplicableResult(reason: string): PoMatchResult {
+    return {
+        passed: null,
+        code: 'PO_NOT_APPLICABLE',
+        message: reason,
+        poRef: null,
+        purchaseOrderId: null,
+    };
+}
+
+/**
+ * Determines whether the PO match check should be skipped based on posting mode and config rules.
+ * Returns a PoMatchResult to use directly if skipped, or null if the check should proceed.
+ *
+ * Rules:
+ *  1. Manual posting mode → always skip (PO check is not applicable)
+ *  2. poMatch rule disabled in config → skip
+ *  3. excludeServiceInvoices active and doc_type contains 'service' → skip
+ *  4. enablePoMatchAmountLimit active and grand_total <= limit → skip
+ */
+function shouldSkipPoCheck(
+    postingMode: string | null | undefined,
+    postingRules: any,
+    grandTotal: any,
+    docType?: string | null
+): PoMatchResult | null {
+    if (String(postingMode || '').toLowerCase() === 'manual') {
+        return buildPoNotApplicableResult('PO check is not applicable in manual posting mode');
+    }
+    if (postingRules?.criteria?.poMatch === false) {
+        return buildPoNotApplicableResult('PO check is disabled in posting rules');
+    }
+    // Service invoice exclusion: POs are not applicable to service invoices when this rule is enabled
+    if (postingRules?.criteria?.excludeServiceInvoices) {
+        const isServiceInvoice = String(docType || '').toLowerCase().includes('service');
+        if (isServiceInvoice) {
+            return buildPoNotApplicableResult('PO check is not applicable for service invoices');
+        }
+    }
+    if (postingRules?.criteria?.enablePoMatchAmountLimit) {
+        const limit = Number(postingRules.criteria.poMatchAmountLimit || 0);
+        const total = Number(grandTotal || 0);
+        if (total <= limit) {
+            return buildPoNotApplicableResult(`Invoice amount does not meet PO check threshold (limit: ${limit})`);
+        }
+    }
+    return null;
+}
+
+function isPoValidationPassed(poValidationJson: any): boolean {
+    const poValidation = parseObjectValue(poValidationJson);
+    // not_applicable = PO check was skipped by config rules; treat as passing the gate
+    return poValidation.status === 'matched' || poValidation.status === 'waived' || poValidation.status === 'not_applicable';
 }
 
 function normalizeWorkspaceAuditValue(value: any): any {
@@ -313,6 +1036,23 @@ function buildRevalidationAuditDiff(beforeValidation: any, afterValidation: any,
     }
 
     return { beforeData, afterData, changedFieldLabels };
+}
+
+function normalizePoValidationAuditValue(poValidationJson: any) {
+    const poValidation = parseObjectValue(poValidationJson);
+    if (Object.keys(poValidation).length === 0) return null;
+
+    return {
+        status: poValidation.status || null,
+        code: poValidation.code || null,
+        po_ref: poValidation.po_ref || null,
+        purchase_order_id: poValidation.purchase_order_id || null,
+        message: poValidation.message || null,
+        waiver_type: poValidation.waiver_type || null,
+        waiver_reason: poValidation.waiver_reason || null,
+        previous_code: poValidation.previous_code || null,
+        previous_message: poValidation.previous_message || null,
+    };
 }
 
 const APP_CONFIG_LABELS: Record<string, string> = {
@@ -760,7 +1500,8 @@ export async function evaluateInvoiceStatus(
     grandTotal?: number,
     invoiceDate?: string | null,
     invoiceVendorGst?: string | null,
-    docType?: string | null
+    docType?: string | null,
+    poValidationJson?: any
 ): Promise<string> {
     const getVal = (key: string) => {
         if (!validationData) return false;
@@ -774,6 +1515,8 @@ export async function evaluateInvoiceStatus(
     const dataPassed = getVal('invoice_ocr_data_validation') || getVal('invoice_ocr_data_valdiation');
     const duplicatePassed = getVal('duplicate_check');
     const stockItemsMatch = getVal('line_item_match_status');
+    // Mandatory 2-way gate: invoice must have a matched PO or an audited PO waiver.
+    const poMatchPassed = isPoValidationPassed(poValidationJson);
 
     // 2. Master Data / Input Validations
     const vendorPassed = getVal('vendor_verification') && !!vendorId;
@@ -790,7 +1533,7 @@ export async function evaluateInvoiceStatus(
     if (n8nStatus === 'Failed') return 'Handoff';
 
     if (majorChecksPassed) {
-        if (vendorPassed && ledgerPassed && hasInvoiceNo && stockItemsMatch) {
+        if (vendorPassed && ledgerPassed && hasInvoiceNo && stockItemsMatch && poMatchPassed) {
             let finalStatus = 'Ready to Post';
 
             // --- POSTING RULES EVALUATION ---
@@ -944,7 +1687,7 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
         "irn", "ack_no", "ack_date", "eway_bill_no", "failure_reason",
         "supplier_pan", "supplier_address", "round_off",
         "cgst", "sgst", "igst", "cgst_pct", "sgst_pct", "igst_pct",
-        "company_id", "ledger_id" // [FIX] Added these to allowed columns
+        "company_id", "ledger_id", "po_validation_json" // [FIX] Added these to allowed columns
     ];
 
     // 4. Update primary columns and merge others into rawPayload
@@ -981,8 +1724,34 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
     const vGst = updateValues.vendor_gst || current.vendor_gst;
     const currentDocType = updateValues.doc_type || current.doc_type;
 
+    // Keep PO match in its dedicated JSONB column; this path does not write to PO tables.
+    // Preserve an audited waiver unless the user explicitly changes the invoice-level PO reference.
+    const poNumberChanged = updateValues.po_number !== undefined
+        && String(updateValues.po_number ?? '').trim() !== String(current.po_number ?? '').trim();
+
+    let postingRulesForPoCheck: any = null;
+    try { postingRulesForPoCheck = await getAppConfig('posting_rules', compId || undefined); } catch (_) {}
+    const poSkipResult = shouldSkipPoCheck(current.posting_mode, postingRulesForPoCheck, gTotal, currentDocType);
+
+    const poMatch = (!poNumberChanged && getExistingPoWaiver(current.po_validation_json))
+        || poSkipResult
+        || await evaluatePoMatchStatus({
+            invoiceId: id,
+            companyId: compId,
+            invoicePoNumber: updateValues.po_number || current.po_number,
+            invoiceVendorGst: vGst,
+            invoiceVendorName: updateValues.vendor_name || current.vendor_name,
+            invoiceBuyerGst: updateValues.buyer_gst || current.buyer_gst,
+            invoiceGrandTotal: gTotal,
+            invoiceSubTotal: updateValues.sub_total || current.sub_total,
+            invoiceDocType: currentDocType,
+            lineItems: items,
+        });
+    const poValidationJson = buildPoValidationJson(poMatch);
+    updateValues.po_validation_json = JSON.stringify(poValidationJson);
+
     // Always re-calculate status on save to ensure correct tab movement
-    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal, invDate, vGst, currentDocType);
+    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal, invDate, vGst, currentDocType, poValidationJson);
     updateValues.processing_status = finalStatus;
 
     // Special handling for date strings to ensure PostgreSQL compatibility
@@ -998,6 +1767,9 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
                 WHEN $${i + 2}::text ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date($${i + 2}::text, 'DD/MM/YYYY')
                 ELSE ${k}
             END`;
+        }
+        if (k === 'po_validation_json') {
+            return `${k} = COALESCE($${i + 2}::jsonb, ${k})`;
         }
         return `${k} = COALESCE($${i + 2}, ${k})`;
     });
@@ -1181,13 +1953,16 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
         [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus]
     );
 
+    let postedInvoiceCompanyId: string | null = null;
+
     // Audit the Tally posting — best-effort, never throws to caller
     try {
         const invRes = await query(
-            'SELECT invoice_number, vendor_name FROM ap_invoices WHERE id = $1',
+            'SELECT invoice_number, vendor_name, company_id FROM ap_invoices WHERE id = $1',
             [id]
         );
         const inv = invRes.rows[0];
+        postedInvoiceCompanyId = inv?.company_id || null;
         const isSuccess = erpSyncStatus === 'processed';
         await createAuditLog({
             invoice_id: id,
@@ -1203,6 +1978,15 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
         });
     } catch (auditErr) {
         console.error('[DB] Audit failed for markPostedToTally:', auditErr);
+    }
+
+    if (erpSyncStatus === 'processed' && postedInvoiceCompanyId) {
+        try {
+            // Refresh PO status from Tally's actual purchase voucher allocations after posting.
+            await refreshPurchaseOrderOutstandingFromTally(postedInvoiceCompanyId);
+        } catch (refreshErr) {
+            console.error('[DB] PO outstanding refresh failed after Tally posting:', refreshErr);
+        }
     }
 }
 
@@ -1704,7 +2488,8 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             );
 
             // SYNC TOP-LEVEL DATA: manual edits should update main indexed columns
-            const syncCols = ["invoice_number", "invoice_date", "vendor_name", "vendor_gst", "sub_total", "tax_total", "grand_total"];
+            // Keep manually edited document identity fields aligned with the indexed columns used by validation.
+            const syncCols = ["invoice_number", "invoice_date", "vendor_name", "vendor_gst", "buyer_name", "buyer_gst", "po_number", "sub_total", "tax_total", "grand_total"];
             const updateValues: Record<string, any> = {};
             Object.keys(patch).forEach(key => {
                 const dbKey = getCanonicalKey(key);
@@ -1940,9 +2725,37 @@ export async function applyRevalidationOutcome(
         );
 
         const lineItemsRes = await client.query(
-            'SELECT ledger_id, gl_account_id, description FROM ap_invoice_lines WHERE ap_invoice_id = $1',
+            `SELECT line_number, ledger_id, gl_account_id, item_id, description,
+                    quantity, unit_price, line_amount, order_no
+             FROM ap_invoice_lines
+             WHERE ap_invoice_id = $1
+             ORDER BY line_number NULLS LAST`,
             [id]
         );
+
+        // Revalidation refreshes dedicated PO state without mutating OCR payload or n8n flags.
+        // A deliberate PO waiver remains valid until a user changes it; n8n should not erase it silently.
+        const previousPoValidation = normalizePoValidationAuditValue(current.po_validation_json);
+
+        let revalPostingRules: any = null;
+        try { revalPostingRules = await getAppConfig('posting_rules', current.company_id || undefined); } catch (_) {}
+        const revalPoSkipResult = shouldSkipPoCheck(current.posting_mode, revalPostingRules, current.grand_total, current.doc_type);
+
+        const poMatch = getExistingPoWaiver(current.po_validation_json)
+            || revalPoSkipResult
+            || await evaluatePoMatchStatus({
+                invoiceId: id,
+                companyId: current.company_id,
+                invoicePoNumber: current.po_number,
+                invoiceVendorGst: current.vendor_gst,
+                invoiceVendorName: current.vendor_name,
+                invoiceBuyerGst: current.buyer_gst,
+                invoiceGrandTotal: current.grand_total,
+                invoiceSubTotal: current.sub_total,
+                invoiceDocType: current.doc_type,
+                lineItems: lineItemsRes.rows || [],
+            }, client.query.bind(client));
+        const poValidationJson = buildPoValidationJson(poMatch);
 
         const finalStatus = await evaluateInvoiceStatus(
             mergedN8nVal,
@@ -1954,7 +2767,8 @@ export async function applyRevalidationOutcome(
             current.grand_total,
             current.invoice_date,
             current.vendor_gst,
-            current.doc_type
+            current.doc_type,
+            poValidationJson
         );
 
         const updateRes = await client.query(
@@ -1962,11 +2776,12 @@ export async function applyRevalidationOutcome(
              SET ocr_raw_payload = $2::jsonb,
                  n8n_val_json_data = $3,
                  processing_status = $4,
+                 po_validation_json = $5::jsonb,
                  validation_time = NOW(),
                  updated_at = NOW()
              WHERE id = $1
              RETURNING *`,
-            [id, JSON.stringify(mergedRawPayload), JSON.stringify(mergedN8nVal), finalStatus]
+            [id, JSON.stringify(mergedRawPayload), JSON.stringify(mergedN8nVal), finalStatus, JSON.stringify(poValidationJson)]
         );
         const updatedInvoice = updateRes.rows[0];
 
@@ -1976,6 +2791,12 @@ export async function applyRevalidationOutcome(
             current.processing_status,
             updatedInvoice?.processing_status
         );
+        const nextPoValidation = normalizePoValidationAuditValue(poValidationJson);
+        if (JSON.stringify(previousPoValidation) !== JSON.stringify(nextPoValidation)) {
+            revalidationAuditDiff.beforeData.po_validation = previousPoValidation;
+            revalidationAuditDiff.afterData.po_validation = nextPoValidation;
+            revalidationAuditDiff.changedFieldLabels.push('PO match');
+        }
 
         if (revalidationAuditDiff.changedFieldLabels.length > 0) {
             const summary =
@@ -2004,6 +2825,128 @@ export async function applyRevalidationOutcome(
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('[DB] applyRevalidationOutcome failed:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Waive mandatory PO requirement for a single invoice.
+ * This intentionally writes only app-owned PO state, never OCR or n8n payloads.
+ */
+export async function waiveInvoicePoRequirement(
+    id: string,
+    reason: string,
+    userName: string = 'System',
+    userId?: string | null
+) {
+    const cleanReason = String(reason || '').trim();
+    if (!cleanReason) {
+        throw new Error('PO waiver reason is required');
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        const current = currentRes.rows[0];
+        if (!current) throw new Error('Invoice not found');
+
+        const n8nVal = parseObjectValue(current.n8n_val_json_data);
+        const previousPoValidation = parseObjectValue(current.po_validation_json);
+        const previousCode = previousPoValidation.code || null;
+        const previousMessage = previousPoValidation.message || null;
+        const waiverType = previousCode === 'PO_OVERBILLED'
+            ? 'po_overbilling_exception'
+            : 'po_not_required';
+        const waiverSummary = waiverType === 'po_overbilling_exception'
+            ? 'PO overbilling exception approved'
+            : 'PO requirement waived';
+        const waiverMessage = waiverType === 'po_overbilling_exception'
+            ? `PO overbilling exception approved: ${cleanReason}`
+            : `PO not required: ${cleanReason}`;
+        const waivedAt = new Date().toISOString();
+        const poValidationJson = buildPoValidationJson({
+            passed: true,
+            code: 'PO_WAIVED',
+            message: waiverMessage,
+            poRef: previousPoValidation.po_ref || current.po_number || null,
+            purchaseOrderId: null,
+            checks: previousPoValidation.checks || {},
+            waiverType,
+            waiverReason: cleanReason,
+            waivedBy: userName,
+            waivedAt,
+            previousCode,
+            previousMessage,
+        });
+
+        const lineItemsRes = await client.query(
+            'SELECT ledger_id, gl_account_id, description, order_no FROM ap_invoice_lines WHERE ap_invoice_id = $1',
+            [id]
+        );
+
+        const evaluatedStatus = await evaluateInvoiceStatus(
+            n8nVal,
+            current.vendor_id || null,
+            current.invoice_number || null,
+            lineItemsRes.rows || [],
+            current.n8n_validation_status,
+            current.company_id,
+            current.grand_total,
+            current.invoice_date,
+            current.vendor_gst,
+            current.doc_type,
+            poValidationJson
+        );
+        // A PO waiver is a human exception only; it must not silently perform or imply Tally posting.
+        const finalStatus = evaluatedStatus === 'Auto-Posted' ? 'Ready to Post' : evaluatedStatus;
+
+        const updateRes = await client.query(
+            `UPDATE ap_invoices
+             SET po_validation_json = $2::jsonb,
+                 processing_status = $3,
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING *`,
+            [id, JSON.stringify(poValidationJson), finalStatus]
+        );
+        const updatedInvoice = updateRes.rows[0];
+
+        await insertAuditLog(client.query.bind(client), {
+            invoice_id: id,
+            invoice_no: current.invoice_number,
+            vendor_name: current.vendor_name,
+            event_type: 'Edited',
+            event_code: 'PO_WAIVED',
+            user_name: userName,
+            changed_by_user_id: userId || null,
+            description: `${waiverSummary} for invoice "${current.invoice_number || id}". Reason: ${cleanReason}`,
+            summary: `${waiverSummary}: ${cleanReason}`,
+            before_data: { po_validation: previousPoValidation },
+            after_data: { po_validation: poValidationJson },
+            old_values: { po_validation: previousPoValidation },
+            new_values: { po_validation: poValidationJson },
+            status_from: current.processing_status || null,
+            status_to: finalStatus,
+            details: {
+                waiver_type: waiverType,
+                reason: cleanReason,
+                previous_code: previousCode,
+                previous_message: previousMessage,
+                overbilled_amount: previousPoValidation.checks?.consumption?.overbilled_amount ?? null,
+                waived_at: waivedAt,
+            },
+            company_id: current.company_id || null,
+        });
+
+        await client.query('COMMIT');
+        return updatedInvoice;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[DB] waiveInvoicePoRequirement failed:', err);
         throw err;
     } finally {
         client.release();
@@ -2043,6 +2986,10 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         } else {
             console.warn(`[DB] ingestN8nData: Canonical ocr_raw_payload missing in payload.ap_invoices[0]. File: ${invData.file_name || 'unknown'}`);
         }
+
+        // Persist invoice identity fields that n8n sends as title-case OCR keys.
+        // Keep this limited to fields already present in ap_invoices; raw JSON remains untouched.
+        backfillInvoiceIdentityFields(invData);
 
         // --- DERIVE doc_type FROM line_items[0].ledger (source of truth) ---
         // n8n's invoice-level doc_type field can be inconsistent.
@@ -2247,12 +3194,51 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         }
 
         const tempLineItems = (payload.ap_invoice_lines || []).map((line: any) => ({
-            ledger_id: (line.mapped_ledger || line.gl_account_id || line.ledger) ? 'exists' : null
+            ledger_id: (line.mapped_ledger || line.gl_account_id || line.ledger) ? 'exists' : null,
+            line_number: line.line_number || line.line_no || null,
+            description: line.description || line.item_description || line.particulars || null,
+            quantity: line.quantity || line.qty || null,
+            unit_price: line.unit_price || line.rate || null,
+            line_amount: line.line_amount || line.amount || line.total_amount || null,
+            item_id: line.item_id || null,
+            order_no: line.order_no || line['Order No'] || line.purchase_order_no || null,
         }));
 
+        // Load posting rules once; used for both PO skip logic and is_high_amount/posting_mode stamping.
+        let ingestPostingRules: any = null;
+        try { ingestPostingRules = await getAppConfig('posting_rules', invData.company_id || undefined); } catch (_) {}
+
+        const existingPoValidationRes = await client.query(
+            'SELECT po_validation_json FROM ap_invoices WHERE id = $1::uuid',
+            [invoiceId]
+        );
+        const existingPoValidation = existingPoValidationRes.rows[0]?.po_validation_json || null;
+
+        // postingMode is not yet stamped on the row at ingest time; read it from rules config directly.
+        const ingestPostingMode = ingestPostingRules?.postingMode || null;
+        const ingestPoSkipResult = shouldSkipPoCheck(ingestPostingMode, ingestPostingRules, invData.grand_total, invData.doc_type);
+
+        // Mandatory 2-way PO existence check. This reads active Tally POs only; it does not mutate PO records.
+        const poMatch = getExistingPoWaiver(existingPoValidation)
+            || ingestPoSkipResult
+            || await evaluatePoMatchStatus({
+                invoiceId,
+                companyId: invData.company_id,
+                invoicePoNumber: invData.po_number,
+                invoiceVendorGst: invData.vendor_gst,
+                invoiceVendorName: invData.vendor_name,
+                invoiceBuyerGst: invData.buyer_gst,
+                invoiceGrandTotal: invData.grand_total,
+                invoiceSubTotal: invData.sub_total,
+                invoiceDocType: invData.doc_type,
+                lineItems: tempLineItems,
+            }, client.query.bind(client));
+        const poValidationJson = buildPoValidationJson(poMatch);
+        invData.po_validation_json = JSON.stringify(poValidationJson);
+
         const finalStatus = await evaluateInvoiceStatus(
-            n8nVal, 
-            vendorId, 
+            n8nVal,
+            vendorId,
             rtInvoiceNo,
             tempLineItems,
             invData.n8n_validation_status,
@@ -2260,23 +3246,23 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             invData.grand_total,
             invData.invoice_date,
             invData.vendor_gst,
-            invData.doc_type
+            invData.doc_type,
+            poValidationJson
         );
 
         let isHighAmount = false;
         try {
-            const postingRules = await getAppConfig('posting_rules', invData.company_id || undefined);
-            if (postingRules?.criteria?.enableValueLimit) {
-                const limit = Number(postingRules.criteria.valueLimit || 0);
+            // ingestPostingRules already loaded above — no extra DB call.
+            if (ingestPostingRules?.criteria?.enableValueLimit) {
+                const limit = Number(ingestPostingRules.criteria.valueLimit || 0);
                 const total = Number(invData.grand_total || 0);
                 isHighAmount = total > 0 && total > limit;
             }
 
             // Stamp the active posting mode onto the invoice at OCR-complete time.
-            // postingRules is already fetched above — no extra DB call.
             // Valid values: 'manual' | 'hybrid' | 'touchless' | null (no config saved).
             // The Pipeline widget reads this column to group invoices by mode.
-            invData.posting_mode = postingRules?.postingMode || null;
+            invData.posting_mode = ingestPostingMode;
         } catch (flagErr) {}
         invData.is_high_amount = isHighAmount;
 
@@ -2289,6 +3275,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             "invoice_number", "tally_id", "pre_ocr_status", "vendor_gst", "n8n_validation_status", "irn",
             "doc_type", "processing_status", "ack_no", "erp_sync_id", "erp_sync_status", "eway_bill_no",
             "file_name", "file_path", "file_location", "batch_id", "vendor_name", "po_number", "gl_account",
+            "buyer_name", "buyer_gst", "supplier_address", // Persist n8n OCR identity fields needed by validation.
+            "po_validation_json", // Dedicated app-owned PO validation state; OCR/n8n payloads stay untouched.
             "posting_mode" // Pipeline widget: which config mode was active when OCR completed
         ];
 
@@ -2320,6 +3308,7 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                 const uuidCols = ['id', 'vendor_id', 'company_id', 'ledger_id', 'tally_id'];
                 const setClause = invKeys.map((k, i) => {
                     const placeholder = `$${i + 2}`;
+                    if (k === 'po_validation_json') return `${k} = ${placeholder}::jsonb`;
                     return uuidCols.includes(k) ? `${k} = ${placeholder}::uuid` : `${k} = ${placeholder}`;
                 }).join(', ');
 
@@ -3524,6 +4513,146 @@ export async function getRecentDashboardActivity(companyId?: string) {
     });
 
     return { events };
+}
+
+export async function getPoHealthStats(companyId?: string) {
+    const hasCompany = companyId && companyId !== 'ALL';
+    const params = hasCompany ? [companyId] : [];
+    const poCompanyFilter = hasCompany ? 'AND p.company_id = $1::uuid' : '';
+    const invoiceCompanyFilter = hasCompany ? 'AND ai.company_id = $1::uuid' : '';
+
+    // Aggregate outstanding at PO level before joining line counts; otherwise line joins duplicate exposure.
+    const summaryRes = await query(
+        `WITH active_po AS (
+             SELECT p.*
+             FROM purchase_orders p
+             WHERE p.is_active = true
+               AND p.deleted_at IS NULL
+               ${poCompanyFilter}
+         ),
+         outstanding AS (
+             SELECT po_id,
+                    SUM(COALESCE(outstanding_amount, 0)) AS outstanding_amount,
+                    MAX(last_synced_at) AS last_refreshed_at
+             FROM purchase_order_outstandings
+             WHERE is_active = true
+               AND deleted_at IS NULL
+             GROUP BY po_id
+         )
+         SELECT
+             COUNT(*)::int AS total_pos,
+             COUNT(*) FILTER (WHERE LOWER(COALESCE(p.status, '')) = 'open')::int AS open_pos,
+             COUNT(*) FILTER (WHERE LOWER(COALESCE(p.status, '')) = 'partial')::int AS partial_pos,
+             COUNT(*) FILTER (WHERE LOWER(COALESCE(p.status, '')) = 'closed')::int AS closed_pos,
+             COALESCE(SUM(COALESCE(p.total_amount, 0)), 0) AS total_po_value,
+             COALESCE(SUM(COALESCE(o.outstanding_amount, 0)), 0) AS outstanding_amount,
+             GREATEST(
+                 COALESCE(SUM(COALESCE(p.total_amount, 0)), 0) -
+                 COALESCE(SUM(COALESCE(o.outstanding_amount, 0)), 0),
+                 0
+             ) AS consumed_amount,
+             MAX(o.last_refreshed_at) AS last_refreshed_at
+         FROM active_po p
+         LEFT JOIN outstanding o ON o.po_id = p.id`,
+        params
+    );
+
+    const topRes = await query(
+        `WITH active_po AS (
+             SELECT p.*
+             FROM purchase_orders p
+             WHERE p.is_active = true
+               AND p.deleted_at IS NULL
+               ${poCompanyFilter}
+         ),
+         outstanding AS (
+             SELECT po_id,
+                    SUM(COALESCE(outstanding_amount, 0)) AS outstanding_amount,
+                    MAX(last_synced_at) AS last_synced_at
+             FROM purchase_order_outstandings
+             WHERE is_active = true
+               AND deleted_at IS NULL
+             GROUP BY po_id
+         ),
+         lines AS (
+             SELECT po_id, COUNT(*)::int AS line_count
+             FROM purchase_order_lines
+             WHERE is_active = true
+               AND deleted_at IS NULL
+             GROUP BY po_id
+         )
+         SELECT
+             COALESCE(p.po_no, p.voucher_number) AS po_no,
+             COALESCE(p.vendor_name, 'Unknown vendor') AS vendor_name,
+             COALESCE(p.status, 'Open') AS status,
+             COALESCE(p.total_amount, 0) AS total_amount,
+             COALESCE(o.outstanding_amount, 0) AS outstanding_amount,
+             GREATEST(COALESCE(p.total_amount, 0) - COALESCE(o.outstanding_amount, 0), 0) AS consumed_amount,
+             CASE
+               WHEN COALESCE(p.total_amount, 0) > 0
+               THEN ROUND((GREATEST(COALESCE(p.total_amount, 0) - COALESCE(o.outstanding_amount, 0), 0) / p.total_amount) * 100, 1)
+               ELSE 0
+             END AS consumed_pct,
+             COALESCE(l.line_count, 0)::int AS line_count,
+             o.last_synced_at
+         FROM active_po p
+         LEFT JOIN outstanding o ON o.po_id = p.id
+         LEFT JOIN lines l ON l.po_id = p.id
+         WHERE COALESCE(o.outstanding_amount, 0) > 0
+         ORDER BY COALESCE(o.outstanding_amount, 0) DESC, COALESCE(p.total_amount, 0) DESC
+         LIMIT 3`,
+        params
+    );
+
+    const exceptionsRes = await query(
+        `SELECT
+             COUNT(*) FILTER (WHERE ai.po_validation_json->>'code' IN ('PO_NOT_FOUND', 'PO_MISSING'))::int AS missing_po,
+             COUNT(*) FILTER (WHERE ai.po_validation_json->>'code' = 'PO_HEADER_MISMATCH')::int AS header_mismatch,
+             COUNT(*) FILTER (WHERE ai.po_validation_json->>'code' = 'PO_OVERBILLED')::int AS overbilled,
+             COUNT(*) FILTER (WHERE ai.po_validation_json->>'code' = 'PO_CLOSED')::int AS closed_po,
+             COUNT(*) FILTER (
+               WHERE ai.po_validation_json->>'code' IN ('PO_NOT_FOUND', 'PO_MISSING', 'PO_HEADER_MISMATCH', 'PO_OVERBILLED', 'PO_CLOSED')
+             )::int AS blocked_invoices
+         FROM ap_invoices ai
+         WHERE ai.po_validation_json IS NOT NULL
+           ${invoiceCompanyFilter}`,
+        params
+    );
+
+    const summary = summaryRes.rows[0] || {};
+    const totalPoValue = Number(summary.total_po_value || 0);
+    const consumedAmount = Number(summary.consumed_amount || 0);
+
+    return {
+        total_po_value: totalPoValue,
+        outstanding_amount: Number(summary.outstanding_amount || 0),
+        consumed_amount: consumedAmount,
+        consumed_pct: totalPoValue > 0 ? Number(((consumedAmount / totalPoValue) * 100).toFixed(1)) : 0,
+        counts: {
+            open: Number(summary.open_pos || 0),
+            partial: Number(summary.partial_pos || 0),
+            closed: Number(summary.closed_pos || 0),
+        },
+        exceptions: {
+            blocked_invoices: Number(exceptionsRes.rows[0]?.blocked_invoices || 0),
+            closed_po: Number(exceptionsRes.rows[0]?.closed_po || 0),
+            overbilled: Number(exceptionsRes.rows[0]?.overbilled || 0),
+            header_mismatch: Number(exceptionsRes.rows[0]?.header_mismatch || 0),
+            missing_po: Number(exceptionsRes.rows[0]?.missing_po || 0),
+        },
+        top_outstanding: topRes.rows.map(row => ({
+            po_no: row.po_no || 'Unnumbered PO',
+            vendor_name: row.vendor_name || 'Unknown vendor',
+            status: row.status || 'Open',
+            total_amount: Number(row.total_amount || 0),
+            outstanding_amount: Number(row.outstanding_amount || 0),
+            consumed_amount: Number(row.consumed_amount || 0),
+            consumed_pct: Number(row.consumed_pct || 0),
+            line_count: Number(row.line_count || 0),
+            last_synced_at: row.last_synced_at || null,
+        })),
+        last_refreshed_at: summary.last_refreshed_at || null,
+    };
 }
 
 export async function getTallySyncStats(companyId?: string) {

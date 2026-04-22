@@ -30,8 +30,8 @@ const features = [
     },
     {
         icon: <Zap size={20} />,
-        title: 'agent_w Ledger Drill-down',
-        desc: 'Directly navigate from any report line item into the matching agent_w ledger entry.',
+        title: 'agent_fc Ledger Drill-down',
+        desc: 'Directly navigate from any report line item into the matching agent_fc ledger entry.',
     },
 ];
 
@@ -47,7 +47,7 @@ export default function Reports() {
     return (
         <LockedFeaturePage
             featureName="Reports & Analytics"
-            tagline="Unlock powerful financial reporting, spending insights, and automated delivery — tailored for your agent_w-powered Accounts Payable  workflow."
+            tagline="Unlock powerful financial reporting, spending insights, and automated delivery — tailored for your agent_fc-powered Accounts Payable  workflow."
             features={features}
             previewRows={previewRows}
             accentColor="#1E6FD9"

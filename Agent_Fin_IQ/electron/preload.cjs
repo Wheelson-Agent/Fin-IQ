@@ -40,6 +40,7 @@ const ALLOWED_CHANNELS = [
     'invoices:update-remarks',
     'invoices:delete',
     'invoices:revalidate',
+    'invoices:waive-po',
     // Vendors
     'vendors:get-all',
     'vendors:get-by-id',
@@ -63,6 +64,7 @@ const ALLOWED_CHANNELS = [
     'api/companies',
     'dashboard:get-metrics',
     'dashboard:tally-sync',
+    'dashboard:po-health',
     'dashboard:top-suppliers',
     'dashboard:pipeline',
     'dashboard:recent-activity',

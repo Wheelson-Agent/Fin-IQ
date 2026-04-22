@@ -310,7 +310,7 @@ export function ProcessingPipeline({
     const STAGES_INIT: PipelineStage[] = [
         { id: 'uploading', label: 'Uploaded', sublabel: isBatch ? `Transferring ${fileNames.length} files...` : 'File secured', icon: <Upload size={28} />, status: 'active' },
         { id: 'analyzing', label: 'Pre-ocr document analysis', sublabel: 'Data extraction & validation', icon: <FileSearch size={28} />, status: 'idle' },
-        { id: 'processing', label: 'validation process agent_w processing', sublabel: 'AI analysis & categorization', icon: <Cpu size={28} />, status: 'idle' },
+        { id: 'processing', label: 'validation process agent_fc processing', sublabel: 'AI analysis & categorization', icon: <Cpu size={28} />, status: 'idle' },
         { id: 'done', label: 'Success', sublabel: 'Processing complete', icon: <Zap size={28} />, status: 'idle' },
     ];
 
@@ -601,7 +601,7 @@ export function ProcessingPipeline({
                         : '100% confidence extracted' 
                 });
 
-                // Step 3: agent_w Processing
+                // Step 3: agent_fc Processing
                 updateStage('processing', 'active');
                 await new Promise(r => setTimeout(r, 1000));
                 updateStage('processing', 'done', undefined, { sublabel: 'Processing finalized' });
