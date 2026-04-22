@@ -29,7 +29,7 @@ import { useDateFilter } from '../context/DateContext';
 import { useProcessing } from '../context/ProcessingContext';
 import { useCompany } from '../context/CompanyContext';
 
-import { getInvoices, deleteInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, getTallyPostStatus, type TallyPostOutcome } from '../lib/api';
+import { getInvoices, deleteInvoice, restoreInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, getTallyPostStatus, type TallyPostOutcome } from '../lib/api';
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
@@ -889,10 +889,15 @@ export default function APWorkspace() {
     // Sync Tally data before upload so vendors and POs are fresh.
     // Waits until FC-ledger-vendor-sync + FC-PO-sync both complete (or 20s timeout).
     setIsSyncingBeforeUpload(true);
+    let syncResult: { ok: boolean; errorMessage: string | null } = { ok: false, errorMessage: null };
     try {
-      await syncAndWait();
+      syncResult = await syncAndWait();
     } finally {
       setIsSyncingBeforeUpload(false);
+    }
+
+    if (!syncResult.ok) {
+      toast.warning(syncResult.errorMessage ?? 'ERP sync timed out — uploading with last known data.', { duration: 6000 });
     }
 
     startProcessing({
@@ -908,47 +913,46 @@ export default function APWorkspace() {
   };
 
   // Fire erp:sync and wait until vendor + PO sub-workflows complete.
-  // Hard cap: 20s — if n8n is slow, upload proceeds anyway with stale data.
-  const syncAndWait = (): Promise<void> => {
+  // Returns { ok: true } on success, { ok: false, errorMessage } on failure or timeout.
+  const syncAndWait = (): Promise<{ ok: boolean; errorMessage: string | null }> => {
     return new Promise((resolve) => {
       const api = (window as any).api;
-      if (!api?.invoke) return resolve(); // No bridge — skip sync, proceed
+      if (!api?.invoke) return resolve({ ok: true, errorMessage: null });
 
       const firedAt = new Date().toISOString();
-      const POLL_INTERVAL = 2000;  // Poll every 2s (faster than manual sync button's 5s)
-      const HARD_CAP_MS = 20000;   // Give up after 20s regardless
+      const POLL_INTERVAL = 2000;
+      const HARD_CAP_MS = 20000;
       let elapsed = 0;
       let timer: ReturnType<typeof setInterval> | null = null;
 
-      const finish = () => {
+      const finish = (ok: boolean, errorMessage: string | null = null) => {
         if (timer) clearInterval(timer);
-        resolve();
+        resolve({ ok, errorMessage });
       };
 
-      // Fire the sync webhook — non-blocking, result ignored here
-      api.invoke('erp:sync').catch(() => {/* webhook failure — proceed to upload anyway */});
+      api.invoke('erp:sync').catch(() => {});
 
-      // Poll sync_status_log for FC-PO-sync success (it runs after FC-ledger-vendor-sync)
-      // Once PO sync is done, both vendor and PO data are guaranteed fresh
       timer = setInterval(async () => {
         elapsed += POLL_INTERVAL;
 
         try {
           const result = await api.invoke('sync:get-latest-status', { since: firedAt });
-          const rows = result?.rows ?? [];
+          const rows: any[] = result?.rows ?? [];
 
-          const vendorDone = rows.some((r: any) => r.workflow_name === 'FC-ledger-vendor-sync' && r.sync_status === 'success');
-          const poDone = rows.some((r: any) => r.workflow_name === 'FC-PO-sync' && r.sync_status === 'success');
+          // Detect failure rows early — n8n writes these within seconds of a Tally error.
+          // Check any workflow (matches Topbar's deriveSyncDot logic).
+          const failRow = rows.find((r) => r.sync_status === 'failure');
+          if (failRow) { finish(false, failRow.user_message || 'ERP sync failed'); return; }
 
-          if (vendorDone && poDone) {
-            finish(); // Both critical workflows done — proceed to upload
-            return;
-          }
+          const vendorDone = rows.some((r) => r.workflow_name === 'FC-ledger-vendor-sync' && r.sync_status === 'success');
+          const poDone = rows.some((r) => r.workflow_name === 'FC-PO-sync' && r.sync_status === 'success');
+
+          if (vendorDone && poDone) { finish(true); return; }
         } catch {
           // Poll failure is non-fatal — keep trying until hard cap
         }
 
-        if (elapsed >= HARD_CAP_MS) finish(); // Hard cap reached — upload anyway
+        if (elapsed >= HARD_CAP_MS) finish(false, 'ERP sync timed out — uploading with last known data.');
       }, POLL_INTERVAL);
     });
   };
@@ -1024,23 +1028,45 @@ export default function APWorkspace() {
     e.stopPropagation();
     setConfirmDialog({
       title: 'Delete this invoice?',
-      description: 'This invoice will be removed from the workspace along with its associated line items, tax breakdown, and review context.',
+      description: 'This invoice will be hidden from the workspace. It can be restored using the Undo option immediately after deletion.',
       confirmLabel: 'Delete Invoice',
       tone: 'danger',
       bullets: [
-        'The invoice will no longer appear in Accounts Payable  Workspace.',
-        'Linked line-item and tax review data for this record will be removed.',
+        'The invoice will no longer appear in Accounts Payable Workspace.',
+        'A record of this deletion will be visible in the Audit Trail.',
       ],
-      note: 'Use this only when the document should be permanently removed from the current workflow.',
+      note: 'Use this only when the document should be removed from the current workflow.',
       onConfirm: async () => {
         try {
           const res = await deleteInvoice(id);
           if (res.success) {
+            // Capture the deleted record before removing from state — needed for undo
+            const deletedRecord = records.find(r => r.id === id);
+            const previousStatus = res.previousStatus ?? 'Processing';
+
             setRecords(prev => prev.filter(r => r.id !== id));
             setSelectedIds(prev => {
               const next = new Set(prev);
               next.delete(id);
               return next;
+            });
+
+            // Persistent undo toast — no timer, user dismisses manually
+            toast('Invoice deleted', {
+              duration: Infinity,
+              action: {
+                label: 'Undo',
+                onClick: async () => {
+                  try {
+                    await restoreInvoice(id, previousStatus);
+                    // Put the record back into the list if we still have it in memory
+                    if (deletedRecord) setRecords(prev => [deletedRecord, ...prev]);
+                    else fetchData(true);
+                  } catch {
+                    toast.error('Could not undo — please refresh the page.');
+                  }
+                },
+              },
             });
           }
         } catch (err) {
@@ -1078,7 +1104,7 @@ export default function APWorkspace() {
 
     setConfirmDialog({
       title: `Delete ${ids.length} selected invoice${ids.length > 1 ? 's' : ''}?`,
-      description: 'The selected invoices will be permanently removed from the workspace in one action.',
+      description: 'The selected invoices will be hidden from the workspace. You can restore them immediately after using the Undo option.',
       confirmLabel: `Delete ${ids.length} Invoice${ids.length > 1 ? 's' : ''}`,
       tone: 'danger',
       bullets: [
@@ -1089,12 +1115,34 @@ export default function APWorkspace() {
       onConfirm: async () => {
         setLoading(true);
         try {
+          // Capture records and previousStatus for each before removing from state
+          const deletedSnapshots: { id: string; previousStatus: string; record: any }[] = [];
           for (const id of ids) {
-            await deleteInvoice(id);
+            const res = await deleteInvoice(id);
+            const record = records.find(r => r.id === id);
+            deletedSnapshots.push({ id, previousStatus: res.previousStatus ?? 'Processing', record });
           }
-          toast.success(`${ids.length} invoices deleted`);
           setSelectedIds(new Set());
-          fetchData(true);
+          setRecords(prev => prev.filter(r => !ids.includes(r.id)));
+
+          // Persistent undo toast — no timer, user dismisses manually
+          toast(`${ids.length} invoice${ids.length > 1 ? 's' : ''} deleted`, {
+            duration: Infinity,
+            action: {
+              label: 'Undo',
+              onClick: async () => {
+                try {
+                  for (const { id, previousStatus, record } of deletedSnapshots) {
+                    await restoreInvoice(id, previousStatus);
+                    if (record) setRecords(prev => [record, ...prev]);
+                  }
+                  if (deletedSnapshots.some(s => !s.record)) fetchData(true);
+                } catch {
+                  toast.error('Could not undo — please refresh the page.');
+                }
+              },
+            },
+          });
         } catch (err) {
           console.error('Bulk delete failed:', err);
           toast.error('Failed to delete some invoices');

@@ -39,6 +39,7 @@ const ALLOWED_CHANNELS = [
     'invoices:update-ocr',
     'invoices:update-remarks',
     'invoices:delete',
+    'invoices:restore',
     'invoices:revalidate',
     'invoices:waive-po',
     // Vendors
