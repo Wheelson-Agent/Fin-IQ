@@ -1795,10 +1795,15 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
  * @returns Updated invoice row
  */
 export async function updateInvoiceStatus(id: string, status: string) {
+    // Block status changes on soft-deleted invoices — otherwise a stale UI could
+    // effectively resurrect a Deleted invoice by setting its status back, bypassing
+    // the audited restoreInvoice path.
     const result = await query(
-        `UPDATE ap_invoices SET processing_status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        `UPDATE ap_invoices SET processing_status = $2, updated_at = NOW()
+         WHERE id = $1 AND processing_status != 'Deleted' RETURNING *`,
         [id, status]
     );
+    if (!result.rows[0]) throw new Error('Invoice not found or has been deleted');
     return result.rows[0];
 }
 
@@ -1925,9 +1930,11 @@ export async function updateInvoicePreOcrReviewRoute(id: string, pre_ocr_status:
  */
 export async function updateInvoiceRemarks(id: string, remarks: string) {
     const result = await query(
-        `UPDATE ap_invoices SET failure_reason = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        `UPDATE ap_invoices SET failure_reason = $2, updated_at = NOW()
+         WHERE id = $1 AND processing_status != 'Deleted' RETURNING *`,
         [id, remarks]
     );
+    if (!result.rows[0]) throw new Error('Invoice not found or has been deleted');
     return result.rows[0];
 }
 
@@ -1939,7 +1946,7 @@ export async function updateInvoiceRemarks(id: string, remarks: string) {
  * @param tallyId - Reference ID returned by Tally
  * @param erpSyncStatus - 'processed' or 'failed'
  */
-export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed') {
+export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed', actor?: { userId?: string; userName?: string }) {
     const succeeded = erpSyncStatus !== 'failed';
     await query(
         `UPDATE ap_invoices SET
@@ -1970,6 +1977,8 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
             invoice_no: inv?.invoice_number,
             vendor_name: inv?.vendor_name,
             event_type: 'Auto-Posted',
+            user_name: actor?.userName || 'System',
+            changed_by_user_id: actor?.userId,
             description: isSuccess
                 ? `Invoice "${inv?.invoice_number || id}" posted to Tally${tallyId ? ` (Ref: ${tallyId})` : ''}.`
                 : `Invoice "${inv?.invoice_number || id}" Tally posting failed (status: ${erpSyncStatus}).`,
@@ -2446,6 +2455,17 @@ export async function getInvoiceItems(invoiceId: string) {
  * This performs a "delete and insert" to ensure the list matches exactly.
  */
 export async function saveInvoiceItems(invoiceId: string, items: any[]) {
+    // Refuse to rewrite lines on a soft-deleted invoice — the parent is tombstoned,
+    // so mutating its children would desync the Deleted view.
+    const parent = await query(
+        `SELECT processing_status FROM ap_invoices WHERE id = $1`,
+        [invoiceId]
+    );
+    if (!parent.rows[0]) throw new Error('Invoice not found');
+    if (parent.rows[0].processing_status === 'Deleted') {
+        throw new Error('Invoice has been deleted and cannot be modified');
+    }
+
     // 1. Delete existing items
     await query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [invoiceId]);
 
@@ -2474,15 +2494,19 @@ export async function saveInvoiceItems(invoiceId: string, items: any[]) {
  * Save all invoice data (header + line items) in a single atomic transaction.
  * Also logs a single audit entry for the entire operation.
  */
-export async function saveAllInvoiceData(id: string, data: any, items: any[], userName: string = 'System') {
+export async function saveAllInvoiceData(id: string, data: any, items: any[], userName: string = 'System', userId?: string | null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // 1. Fetch current for comparison and base payload
-        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        // 1. Fetch current for comparison and base payload. Exclude soft-deleted
+        // invoices so a stale tab can't rewrite a tombstoned row's header or lines.
+        const currentRes = await client.query(
+            `SELECT * FROM ap_invoices WHERE id = $1 AND processing_status != 'Deleted'`,
+            [id]
+        );
         const current = currentRes.rows[0];
-        if (!current) throw new Error('Invoice not found');
+        if (!current) throw new Error('Invoice not found or has been deleted');
 
         let rawPayload = current.ocr_raw_payload || {};
         if (typeof rawPayload === 'string') {
@@ -2576,6 +2600,7 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
                     event_type: 'Edited',
                     event_code: 'FIELD_EDITED',
                     user_name: userName,
+                    changed_by_user_id: userId || null,
                     description: summary,
                     summary,
                     before_data: workspaceAuditDiff.beforeData,
@@ -2664,6 +2689,7 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
             event_type: 'Edited',
             event_code: 'LINE_ITEM_EDITED',
             user_name: userName,
+            changed_by_user_id: userId || null,
             description: `Manual edit: updated header and ${items.length} line items`,
             summary: `Manual edit: updated header and ${items.length} line items.`,
             before_data: { status: current.processing_status },
@@ -2699,15 +2725,19 @@ export async function saveAllInvoiceData(id: string, data: any, items: any[], us
 export async function applyRevalidationOutcome(
     id: string,
     validationFlags: Record<string, any>,
-    userName: string = 'System'
+    userName: string = 'System',
+    userId?: string | null
 ) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        const currentRes = await client.query(
+            `SELECT * FROM ap_invoices WHERE id = $1 AND processing_status != 'Deleted'`,
+            [id]
+        );
         const current = currentRes.rows[0];
-        if (!current) throw new Error('Invoice not found');
+        if (!current) throw new Error('Invoice not found or has been deleted');
 
         let rawPayload: any = current.ocr_raw_payload || {};
         if (typeof rawPayload === 'string') {
@@ -2841,6 +2871,7 @@ export async function applyRevalidationOutcome(
                 event_type: 'Revalidated',
                 event_code: 'REVALIDATED',
                 user_name: userName,
+                changed_by_user_id: userId || null,
                 description: summary,
                 summary,
                 before_data: revalidationAuditDiff.beforeData,
@@ -2880,9 +2911,12 @@ export async function waiveInvoicePoRequirement(
     try {
         await client.query('BEGIN');
 
-        const currentRes = await client.query('SELECT * FROM ap_invoices WHERE id = $1', [id]);
+        const currentRes = await client.query(
+            `SELECT * FROM ap_invoices WHERE id = $1 AND processing_status != 'Deleted'`,
+            [id]
+        );
         const current = currentRes.rows[0];
-        if (!current) throw new Error('Invoice not found');
+        if (!current) throw new Error('Invoice not found or has been deleted');
 
         const n8nVal = parseObjectValue(current.n8n_val_json_data);
         const previousPoValidation = parseObjectValue(current.po_validation_json);
@@ -4905,7 +4939,7 @@ export async function getAppConfig(key: string, companyId?: string, strict: bool
 /**
  * Save a configuration value.
  */
-export async function setAppConfig(key: string, value: any, companyId?: string) {
+export async function setAppConfig(key: string, value: any, companyId?: string, actor?: { userId?: string; userName?: string }) {
     const valueJson = JSON.stringify(value);
     // Use strict mode for audit diff — only compare against the exact company row, not global fallback
     const previousValue = await getAppConfig(key, companyId, !!companyId);
@@ -4946,7 +4980,8 @@ export async function setAppConfig(key: string, value: any, companyId?: string) 
             entity_type: 'config',
             event_type: 'Edited',
             event_code: 'CONFIG_UPDATED',
-            user_name: 'System',
+            user_name: actor?.userName || 'System',
+            changed_by_user_id: actor?.userId || null,
             company_id: companyId || null,
             description: `${configLabel} updated (${scopeLabel}): ${changedSummary}.`,
             summary: `${configLabel}: ${changedSummary}.`,

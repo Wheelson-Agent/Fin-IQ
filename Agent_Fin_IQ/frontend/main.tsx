@@ -15,7 +15,7 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
+import { BrowserRouter, Routes, Route } from 'react-router';
 
 // Pages — one file per page
 import Root from './pages/Root';
@@ -25,10 +25,23 @@ import APWorkspace from './pages/APWorkspace';
 import AuditTrail from './pages/AuditTrail';
 import Config from './pages/Config';
 import Login from './pages/Login';
+import ChangePassword from './pages/ChangePassword';
 import AgentPage from './pages/AgentPage';
 import Reports from './pages/Reports';
-import UserProfile from './pages/UserProfile';
+import UserManagement from './pages/UserManagement';
 import NotFound from './pages/NotFound';
+
+// Auth session context — holds token, user, permissions, idle timer.
+import { AuthProvider } from './context/AuthContext';
+// Route guard — redirects unauthenticated users to /login and forces
+// first-login users onto /change-password before the main app loads.
+import RequireAuth from './components/RequireAuth';
+// Admin-only sub-guard — gates the User Management route so operators
+// get redirected instead of hitting a backend authorization error.
+import RequireAdmin from './components/RequireAdmin';
+// Per-module sub-guard — for pages like /reports where the required
+// level isn't "admin" but some specific module permission.
+import RequireModule from './components/RequireModule';
 
 /* SUPPLIER_360_START — remove this block to uninstall Supplier 360 */
 import SupplierList from './pages/supplier360/SupplierList';
@@ -49,11 +62,17 @@ import './styles/index.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
         <BrowserRouter>
+            <AuthProvider>
             <Routes>
                 {/* Login — standalone page (no sidebar) */}
                 <Route path="/login" element={<Login />} />
+                {/* Change-password — standalone page (no sidebar).
+                    Forced for first-login users; also accessible self-service. */}
+                <Route path="/change-password" element={<ChangePassword />} />
 
-                {/* Main app with sidebar layout */}
+                {/* Main app with sidebar layout — guarded by RequireAuth
+                    so unauthenticated users are bounced to /login. */}
+                <Route element={<RequireAuth />}>
                 <Route element={<Root />}>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/detail/:id" element={<DetailView />} />
@@ -61,8 +80,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/audit" element={<AuditTrail />} />
                     <Route path="/config" element={<Config />} />
                     <Route path="/agent" element={<AgentPage />} />
-                    <Route path="/reports" element={<Reports />} />
-                    <Route path="/profile" element={<UserProfile />} />
+                    <Route element={<RequireModule module="reports" level="view" />}>
+                        <Route path="/reports" element={<Reports />} />
+                    </Route>
+                    {/* Admin-only — user CRUD + permission matrix. */}
+                    <Route element={<RequireAdmin />}>
+                        <Route path="/users" element={<UserManagement />} />
+                    </Route>
                     {/* SUPPLIER_360_START — remove routes below to uninstall Supplier 360 */}
                     <Route path="/supplier360" element={<SupplierList />} />
                     <Route path="/supplier360/detail/:id" element={<SupplierDetail />} />
@@ -71,10 +95,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/supplier360/procurement" element={<ProcurementControl />} />
                     {/* SUPPLIER_360_END */}
                 </Route>
+                </Route>
 
                 {/* 404 */}
                 <Route path="*" element={<NotFound />} />
             </Routes>
+            </AuthProvider>
         </BrowserRouter>
     </React.StrictMode>
 );

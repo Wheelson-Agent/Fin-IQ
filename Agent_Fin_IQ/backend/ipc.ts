@@ -37,9 +37,11 @@
 
 import { ipcMain } from 'electron';
 import * as queries from './database/queries';
-import { login, validateToken } from './auth/auth';
+import { login, validateToken, getSessionUser, changePassword, generateToken } from './auth/auth';
+import { isFirstRunNeeded, completeFirstRunSetup } from './auth/bootstrap';
+import { canAccess, type Module, type AccessLevel } from './auth/permissions';
+import { listUsers, createUser, updateUser, resetUserPassword, deactivateUser } from './auth/users';
 import dotenv from 'dotenv';
-import { hasPermission } from './auth/roles';
 import * as n8n from './sync/n8n';
 import * as tallyPosting from './sync/tally_posting';
 import { refreshPurchaseOrderOutstandingFromTally } from './sync/po_outstanding';
@@ -95,11 +97,189 @@ async function recordStageSafe(
     }
 }
 
+// ─── IPC guard machinery ──────────────────────────────────
+// Every channel declares what authorisation it needs. The register()
+// helper below consults this map and rejects the call before the
+// handler body runs. Keeping the map centralised means a reviewer can
+// audit RBAC in one place instead of chasing 60+ handlers.
+type GuardSpec =
+    | { public: true }                                // unauthenticated (login, first-run, etc.)
+    | { authOnly: true }                              // any logged-in user
+    | { module: Module; level: AccessLevel }          // module + level check
+    | { adminOnly: true };                            // must be role=admin
+
+const CHANNEL_GUARDS: Record<string, GuardSpec> = {
+    // Auth — either public or self-identifying via the passed token.
+    'auth:login':              { public: true },
+    'auth:validate-token':     { public: true },
+    'auth:me':                 { public: true },
+    'auth:change-password':    { public: true },
+    'auth:first-run-status':   { public: true },
+    'auth:first-run-setup':    { public: true },
+    'auth:logout':             { public: true },
+
+    // User management — admin only.
+    'users:list':           { adminOnly: true },
+    'users:create':         { adminOnly: true },
+    'users:update':         { adminOnly: true },
+    'users:reset-password': { adminOnly: true },
+    'users:deactivate':     { adminOnly: true },
+
+    // Invoices
+    'invoices:get-all':              { module: 'invoices', level: 'view' },
+    'invoices:get-by-id':            { module: 'invoices', level: 'view' },
+    'invoices:get-items':            { module: 'invoices', level: 'view' },
+    'invoices:get-document-view':    { module: 'invoices', level: 'view' },
+    'invoices:status-counts':        { module: 'invoices', level: 'view' },
+    'invoices:get-tally-post-status':{ module: 'invoices', level: 'view' },
+    'invoices:save-items':           { module: 'invoices', level: 'edit' },
+    'invoices:save-all':             { module: 'invoices', level: 'edit' },
+    'invoices:upload':               { module: 'invoices', level: 'edit' },
+    'invoices:map-vendor':           { module: 'invoices', level: 'edit' },
+    'invoices:update-ocr':           { module: 'invoices', level: 'edit' },
+    'invoices:update-status':        { module: 'invoices', level: 'edit' },
+    'invoices:update-remarks':       { module: 'invoices', level: 'edit' },
+    // Delete/restore are destructive — admin-only even though edit
+    // permission would otherwise cover them.
+    'invoices:delete':               { adminOnly: true },
+    'invoices:restore':              { adminOnly: true },
+    'invoices:finalize-batch-file':  { module: 'invoices', level: 'edit' },
+    'invoices:revalidate':           { module: 'invoices', level: 'edit' },
+    // Waive-PO bypasses a compliance control — admin only per policy.
+    'invoices:waive-po':             { adminOnly: true },
+
+    // Vendors
+    'vendors:get-all':    { module: 'vendors', level: 'view' },
+    'vendors:get-by-id':  { module: 'vendors', level: 'view' },
+    'vendors:save':       { module: 'vendors', level: 'edit' },
+    'vendors:sync-tally': { module: 'vendors', level: 'edit' },
+
+    // Purchase orders, GRN, SES — read-only for now.
+    'po:get-all':   { module: 'po', level: 'view' },
+    'po:get-by-id': { module: 'po', level: 'view' },
+    'grn:get-all':  { module: 'po', level: 'view' },
+    'ses:get-all':  { module: 'po', level: 'view' },
+
+    // Masters (ledgers + stock items). Operators with masters:edit may
+    // create these while editing a line item (per policy).
+    'masters:get-ledgers':      { module: 'masters', level: 'view' },
+    'masters:create-ledger':    { module: 'masters', level: 'edit' },
+    'masters:create-item':      { module: 'masters', level: 'edit' },
+    'masters:get-tds-sections': { module: 'masters', level: 'view' },
+    'items:get-all':            { module: 'masters', level: 'view' },
+    'items:save':               { module: 'masters', level: 'edit' },
+
+    // Dashboard
+    'dashboard:get-metrics':     { module: 'dashboard', level: 'view' },
+    'dashboard:tally-sync':      { module: 'dashboard', level: 'view' },
+    'dashboard:po-health':       { module: 'dashboard', level: 'view' },
+    'dashboard:pipeline':        { module: 'dashboard', level: 'view' },
+    'dashboard:top-suppliers':   { module: 'dashboard', level: 'view' },
+    'dashboard:recent-activity': { module: 'dashboard', level: 'view' },
+
+    // Audit
+    'audit:get-logs':    { module: 'audit', level: 'view' },
+    'audit:delete-log':  { adminOnly: true },
+    'audit:delete-bulk': { adminOnly: true },
+
+    // Reports
+    'tally:get-sync-logs': { module: 'reports', level: 'view' },
+
+    // Companies — list endpoints are needed by the Topbar on every page,
+    // so they're authOnly rather than gated to a specific module.
+    'companies:get-active':   { authOnly: true },
+    'companies:get-all':      { authOnly: true },
+    'api/companies':          { authOnly: true },
+    'companies:update-gstin': { adminOnly: true },
+    'companies:purge-audit':  { adminOnly: true },
+
+    // Config — reads follow the config module, writes are admin only.
+    'config:get-rules':              { module: 'config', level: 'view' },
+    'config:save-rules':             { adminOnly: true },
+    'config:get-extended-criteria':  { module: 'config', level: 'view' },
+    'config:save-extended-criteria': { adminOnly: true },
+    'config:get-storage-path':       { module: 'config', level: 'view' },
+    'config:set-storage-path':       { adminOnly: true },
+    'config:get-full':               { module: 'config', level: 'view' },
+    'config:save-full':              { adminOnly: true },
+    'dialog:open-directory':         { adminOnly: true },
+
+    // ERP / sync
+    // Any signed-in user can trigger sync — the button fires on app
+    // mount and after creation flows (see commit 5d1e121), so gating
+    // it to admin would break post-upload sync for operators.
+    'erp:sync':               { authOnly: true },
+    'sync:get-latest-status': { authOnly: true },
+
+    // Processing — ops operations follow invoices; destructive/debug
+    // endpoints are admin only.
+    'processing:get-jobs':              { module: 'invoices', level: 'view' },
+    'processing:run-pipeline':          { module: 'invoices', level: 'edit' },
+    'processing:get-batch-logs':        { module: 'invoices', level: 'view' },
+    'processing:get-worker-status':     { module: 'invoices', level: 'view' },
+    'processing:get-batch-health':      { module: 'invoices', level: 'view' },
+    'processing:get-batch-stage-table': { module: 'invoices', level: 'view' },
+    'processing:get-all-logs-debug':    { adminOnly: true },
+    'processing:clear-batch-logs':      { adminOnly: true },
+
+    // Health checks — cheap, authenticated users can poll these.
+    'status:check-n8n':    { authOnly: true },
+    'status:get-n8n-full': { authOnly: true },
+    'status:check-ocr':    { authOnly: true },
+};
+
+/**
+ * Wrap a raw IPC handler with an auth/permission check driven by
+ * CHANNEL_GUARDS. Denials throw so the frontend's invoke() rejects
+ * with a message operators can surface in a toast.
+ */
+function guarded(
+    channel: string,
+    handler: (event: any, args: any) => Promise<any>
+): (event: any, args: any) => Promise<any> {
+    return async (event, args) => {
+        const spec = CHANNEL_GUARDS[channel];
+        if (!spec) {
+            // Unknown channel — fail closed so accidentally-unregistered
+            // handlers can't leak data.
+            throw new Error(`[IPC] No guard configured for "${channel}"`);
+        }
+
+        if ('public' in spec) {
+            return handler(event, args);
+        }
+
+        if (!_session) {
+            throw new Error('Not authenticated');
+        }
+        const user = await getSessionUser(_session.userId);
+        if (!user) {
+            throw new Error('Session is no longer valid');
+        }
+
+        if ('adminOnly' in spec) {
+            if (user.role !== 'admin') throw new Error('Admin privileges required');
+        } else if ('module' in spec) {
+            if (!canAccess(user, spec.module, spec.level)) {
+                throw new Error(`You don't have ${spec.level} access to ${spec.module}`);
+            }
+        }
+        // authOnly falls through with no extra check.
+
+        return handler(event, args);
+    };
+}
+
 /**
  * Register all IPC handlers.
  * Called once during backend initialization (main.ts).
  */
 export function registerIpcHandlers() {
+    // Local alias so every call site is guarded automatically. Using a
+    // local name (not ipcMain.handle) makes the security dependency
+    // obvious and prevents a raw registration from slipping in.
+    const register = (channel: string, handler: (event: any, args: any) => Promise<any>) =>
+        ipcMain.handle(channel, guarded(channel, handler));
 
 
     // ─── SYSTEM UI ─────────────────────────────────────────
@@ -108,7 +288,7 @@ export function registerIpcHandlers() {
      * Open a system directory selection dialog.
      * Output: Selected folder path string or null.
      */
-    ipcMain.handle('dialog:open-directory', async () => {
+    register('dialog:open-directory', async () => {
         const { dialog } = require('electron');
         const { canceled, filePaths } = await dialog.showOpenDialog({
             properties: ['openDirectory']
@@ -128,7 +308,7 @@ export function registerIpcHandlers() {
      * Input: { email: string, password: string }
      * Output: { success, user, token, error }
      */
-    ipcMain.handle('auth:login', async (_event, { email, password }) => {
+    register('auth:login', async (_event, { email, password }) => {
         const result = await login(email, password);
         if (result.success && result.user) {
             _session = { userId: result.user.id, userName: result.user.display_name || result.user.email };
@@ -137,13 +317,120 @@ export function registerIpcHandlers() {
     });
 
     /**
+     * Clear the backend session. Called from AuthContext.logout() alongside the
+     * frontend token removal so a subsequent IPC call can't be attributed to the
+     * previous user via the module-scoped _session variable.
+     */
+    register('auth:logout', async () => {
+        _session = null;
+        return { success: true };
+    });
+
+    /**
      * Validate a session token.
      * Input: { token: string }
      * Output: { valid: boolean, userId, role } or { valid: false }
      */
-    ipcMain.handle('auth:validate-token', async (_event, { token }) => {
-        const result = validateToken(token);
+    register('auth:validate-token', async (_event, { token }) => {
+        const result = await validateToken(token);
         return result ? { valid: true, ...result } : { valid: false };
+    });
+
+    /**
+     * Rehydrate the current user from a stored token. Used by the
+     * frontend on page reload to restore the session without asking
+     * the user to log in again.
+     * Input: { token: string }
+     * Output: { user } on success, { error } on expired/invalid token.
+     */
+    register('auth:me', async (_event, { token }) => {
+        const decoded = await validateToken(token);
+        if (!decoded) return { error: 'Invalid or expired token' };
+        const user = await getSessionUser(decoded.userId);
+        if (!user) return { error: 'User not found or inactive' };
+        // Keep the backend session in sync so audit attribution works
+        // even when the frontend reload happens before any other call.
+        _session = { userId: user.id, userName: user.display_name || user.email };
+        return { user };
+    });
+
+    /**
+     * Let the currently logged-in user change their own password.
+     * The token is required to identify the user — we never trust a
+     * userId passed in from the renderer.
+     * Input:  { token, currentPassword, newPassword }
+     * Output: { success } or { success: false, error }
+     */
+    register('auth:change-password', async (_event, { token, currentPassword, newPassword }) => {
+        const decoded = await validateToken(token);
+        if (!decoded) return { success: false, error: 'Session expired — please sign in again' };
+        return await changePassword(decoded.userId, currentPassword, newPassword);
+    });
+
+    /**
+     * Ask the backend whether the first-run admin setup is still pending.
+     * The frontend calls this on the login page so it can show a setup
+     * card instead of the sign-in form on a fresh install.
+     * Output: { needsSetup: boolean }
+     */
+    register('auth:first-run-status', async () => {
+        try {
+            return { needsSetup: await isFirstRunNeeded() };
+        } catch (err: any) {
+            console.error('[Auth] first-run-status failed:', err?.message || err);
+            return { needsSetup: false };
+        }
+    });
+
+    /**
+     * Complete first-run admin setup. Only works while the seed admin
+     * password is still a placeholder; once set, further calls return
+     * a friendly "already completed" error. On success we sign the
+     * admin in immediately so they land in the app.
+     * Input:  { email, displayName, password }
+     * Output: { success, user, token } or { success: false, error }
+     */
+    register('auth:first-run-setup', async (_event, { email, displayName, password }) => {
+        const setup = await completeFirstRunSetup({ email, displayName, password });
+        if (!setup.success || !setup.userId) {
+            return { success: false, error: setup.error || 'Setup failed' };
+        }
+        const user = await getSessionUser(setup.userId);
+        if (!user) {
+            return { success: false, error: 'Setup completed but user could not be loaded' };
+        }
+        const token = await generateToken(user.id, user.role);
+        _session = { userId: user.id, userName: user.display_name || user.email };
+        return { success: true, user, token };
+    });
+
+    // ─── USER MANAGEMENT (admin) ───────────────────────────
+    // Every handler below runs behind adminOnly in CHANNEL_GUARDS,
+    // so _session is guaranteed to be present and attached to an admin.
+
+    /** List all users for the admin's User Management page. */
+    register('users:list', async () => {
+        return await listUsers();
+    });
+
+    /** Create a new user. Initial password forces must_change_password. */
+    register('users:create', async (_event, payload) => {
+        return await createUser(payload, _session!);
+    });
+
+    /** Update mutable fields (role, permissions, limit, active) on a user. */
+    register('users:update', async (_event, { id, patch }) => {
+        return await updateUser(id, patch, _session!);
+    });
+
+    /** Admin-initiated password reset. User must change it on next login. */
+    register('users:reset-password', async (_event, { id, newPassword }) => {
+        return await resetUserPassword(id, newPassword, _session!);
+    });
+
+    /** Soft-delete (set is_active=false). Refuses last admin & self. */
+    register('users:deactivate', async (_event, { id }) => {
+        return await deactivateUser(id, _session!);
     });
 
     // ─── INVOICES ──────────────────────────────────────────
@@ -152,7 +439,7 @@ export function registerIpcHandlers() {
      * Get all invoices for the Doc Hub.
      * Output: Array of invoice rows
      */
-    ipcMain.handle('invoices:get-all', async (_event, { companyId } = {}) => {
+    register('invoices:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllInvoices(companyId);
     });
 
@@ -161,28 +448,28 @@ export function registerIpcHandlers() {
      * Input: { id: string }
      * Output: Single invoice row or null
      */
-    ipcMain.handle('invoices:get-by-id', async (_event, { id }) => {
+    register('invoices:get-by-id', async (_event, { id }) => {
         return await queries.getInvoiceById(id);
     });
 
     /**
      * Get line items for an invoice.
      */
-    ipcMain.handle('invoices:get-items', async (_event, { invoiceId }) => {
+    register('invoices:get-items', async (_event, { invoiceId }) => {
         return await queries.getInvoiceItems(invoiceId);
     });
 
     /**
      * Save/Update line items for an invoice.
      */
-    ipcMain.handle('invoices:save-items', async (_event, { invoiceId, items }) => {
+    register('invoices:save-items', async (_event, { invoiceId, items }) => {
         return await queries.saveInvoiceItems(invoiceId, items);
     });
 
     /**
      * Get the best available document view (original or OCR-ready artifact).
      */
-    ipcMain.handle('invoices:get-document-view', async (_event, { id }) => {
+    register('invoices:get-document-view', async (_event, { id }) => {
         try {
             const invoice = await queries.getInvoiceById(id);
             if (!invoice) return null;
@@ -244,7 +531,7 @@ export function registerIpcHandlers() {
     /**
      * Map a vendor to an invoice.
      */
-    ipcMain.handle('invoices:map-vendor', async (_event, { invoiceId, vendorId }) => {
+    register('invoices:map-vendor', async (_event, { invoiceId, vendorId }) => {
         const updated = await queries.updateInvoiceWithOCR(invoiceId, { vendor_id: vendorId, is_mapped: true });
 
         // Log audit event
@@ -266,7 +553,7 @@ export function registerIpcHandlers() {
     /**
      * Update invoice OCR data and main fields.
      */
-    ipcMain.handle('invoices:update-ocr', async (_event, { id, data }) => {
+    register('invoices:update-ocr', async (_event, { id, data }) => {
         return await queries.updateInvoiceWithOCR(id, data);
     });
 
@@ -275,8 +562,16 @@ export function registerIpcHandlers() {
      * Includes automated audit logging.
      * Input: { id: string, data: object, items: object[], userName?: string }
      */
-    ipcMain.handle('invoices:save-all', async (_event, { id, data, items, userName }) => {
-        return await queries.saveAllInvoiceData(id, data, items, userName);
+    register('invoices:save-all', async (_event, { id, data, items, userName }) => {
+        // Prefer the authenticated session over the client-supplied userName — the
+        // client value is spoofable; _session is set by auth:login / auth:me.
+        return await queries.saveAllInvoiceData(
+            id,
+            data,
+            items,
+            _session?.userName || userName || 'System',
+            _session?.userId || null
+        );
     });
 
     /**
@@ -284,7 +579,7 @@ export function registerIpcHandlers() {
      * Input: { filePath: string, fileName: string, batchId?: string, fileData?: number[] }
      * Output: Created invoice row
      */
-    ipcMain.handle('invoices:upload', async (_event, { filePath, fileName, batchId, fileData, userName, companyId }) => {
+    register('invoices:upload', async (_event, { filePath, fileName, batchId, fileData, userName, companyId }) => {
         console.log(`[IPC] invoices:upload received companyId: ${companyId || 'MISSING'}`);
         // Step 1: Ensure Batch Folder Structure
         let currentBatch = batchId;
@@ -335,7 +630,9 @@ export function registerIpcHandlers() {
             file_location: targetPath, // Initial location is the source folder
             batch_id: currentBatch,
             status: 'Processing',
-            uploader_name: userName || 'System',
+            // Trust the authenticated session over the client-supplied userName — the frontend
+            // value is display-only and could be spoofed; _session is set by auth:login.
+            uploader_name: _session?.userName || userName || 'System',
             company_id: companyId || null
         });
 
@@ -345,6 +642,8 @@ export function registerIpcHandlers() {
             invoice_id: invoice.id,
             invoice_no: invoice.invoice_number,
             event_type: 'Created',
+            user_name: _session?.userName || 'System',
+            changed_by_user_id: _session?.userId,
             description: `Invoice "${fileName}" uploaded to batch "${currentBatch}"`,
         }).catch((auditErr) => console.warn('[IPC] Non-critical: upload audit log failed:', auditErr?.message));
 
@@ -383,7 +682,7 @@ export function registerIpcHandlers() {
     /**
      * Finalize file storage (move from source to completed/exceptions).
      */
-    ipcMain.handle('invoices:finalize-batch-file', async (_event, { id, batchId, fileName, isSuccess }) => {
+    register('invoices:finalize-batch-file', async (_event, { id, batchId, fileName, isSuccess }) => {
         const uploadDate = new Date().toISOString().split('T')[0];
         const newPath = await finalizeFileStorage(batchId, fileName, isSuccess, uploadDate);
 
@@ -397,7 +696,7 @@ export function registerIpcHandlers() {
         return await queries.updateInvoiceStorageLocation(id, newPath, nextStatus);
     });
 
-    ipcMain.handle('invoices:revalidate', async (_event, { id }) => {
+    register('invoices:revalidate', async (_event, { id }) => {
         console.log(`[IPC] Revalidation requested for: ${id}`);
         try {
             const invoice = await queries.getInvoiceById(id);
@@ -488,7 +787,12 @@ export function registerIpcHandlers() {
 
                 // Remove undefineds to keep payload clean
                 Object.keys(validationFlags).forEach((k) => validationFlags[k] === undefined && delete validationFlags[k]);
-                const updatedInvoice = await queries.applyRevalidationOutcome(id, validationFlags, 'System');
+                const updatedInvoice = await queries.applyRevalidationOutcome(
+                    id,
+                    validationFlags,
+                    _session?.userName || 'System',
+                    _session?.userId || null
+                );
 
                 return {
                     success: true,
@@ -509,7 +813,7 @@ export function registerIpcHandlers() {
      * Waive mandatory PO requirement with audit trail.
      * Input: { id: string, reason: string }
      */
-    ipcMain.handle('invoices:waive-po', async (_event, { id, reason }) => {
+    register('invoices:waive-po', async (_event, { id, reason }) => {
         return await queries.waiveInvoicePoRequirement(
             id,
             reason,
@@ -523,8 +827,28 @@ export function registerIpcHandlers() {
      * Input: { id: string, status: string, userName?: string }
      * Output: Updated invoice row
      */
-    ipcMain.handle('invoices:update-status', async (_event, { id, status, userName }) => {
+    register('invoices:update-status', async (_event, { id, status, userName }) => {
         const before = await queries.getInvoiceById(id);
+
+        // Approval-limit enforcement. When a non-admin moves an invoice
+        // into the approved terminal state, the invoice amount must fit
+        // inside their per-user approval_limit (in rupees). A null limit
+        // is treated as "no ceiling configured" and blocks the operation
+        // so the admin must either set a limit or approve it themselves.
+        if (status === 'Auto-Posted' || status === 'Approved') {
+            const actor = _session ? await getSessionUser(_session.userId) : null;
+            if (actor && actor.role !== 'admin') {
+                const amount = Number(before?.grand_total ?? 0);
+                const limit = actor.approval_limit;
+                if (limit === null || limit === undefined) {
+                    throw new Error('No approval limit is set on your account. Ask an admin to set one or to approve this invoice.');
+                }
+                if (amount > Number(limit)) {
+                    throw new Error(`This invoice (₹${amount.toLocaleString('en-IN')}) exceeds your approval limit of ₹${Number(limit).toLocaleString('en-IN')}.`);
+                }
+            }
+        }
+
         const updated = await queries.updateInvoiceStatus(id, status);
 
         // Log audit event
@@ -549,7 +873,13 @@ export function registerIpcHandlers() {
                 const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
 
                 // Update erp_sync_status based on webhook result
-                await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
+                await queries.markPostedToTally(
+                    id,
+                    result.response,
+                    tallyIdStr,
+                    result.status,
+                    _session ? { userId: _session.userId, userName: _session.userName } : undefined
+                );
             } catch (err: any) {
                 console.error('[IPC] Tally posting failed:', err.message);
                 await queries.updateInvoiceWithOCR(id, { erp_sync_status: 'failed' } as any);
@@ -562,7 +892,7 @@ export function registerIpcHandlers() {
     /**
      * Update invoice remarks.
      */
-    ipcMain.handle('invoices:update-remarks', async (_event, { id, remarks }) => {
+    register('invoices:update-remarks', async (_event, { id, remarks }) => {
         const before = await queries.getInvoiceById(id);
         const updated = await queries.updateInvoiceRemarks(id, remarks);
         // Audit best-effort — never block the response
@@ -589,7 +919,7 @@ export function registerIpcHandlers() {
      * Returns previousStatus so the frontend can offer an undo action.
      * Audit is written inside a transaction within deleteInvoice() — atomic with the update.
      */
-    ipcMain.handle('invoices:delete', async (_event, { id }) => {
+    register('invoices:delete', async (_event, { id }) => {
         const result = await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true, previousStatus: result.previousStatus };
     });
@@ -598,7 +928,7 @@ export function registerIpcHandlers() {
      * Restore a soft-deleted invoice back to its previous status.
      * Called when the user clicks Undo on the delete toast.
      */
-    ipcMain.handle('invoices:restore', async (_event, { id, previousStatus }) => {
+    register('invoices:restore', async (_event, { id, previousStatus }) => {
         await queries.restoreInvoice(id, previousStatus, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true };
     });
@@ -609,14 +939,14 @@ export function registerIpcHandlers() {
      * Get all vendors with dynamically calculated totals.
      * Output: Array of vendor rows with total_due and invoice_count
      */
-    ipcMain.handle('vendors:get-all', async (_event, { companyId } = {}) => {
+    register('vendors:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllVendors(companyId);
     });
 
     /**
      * Get vendor by ID.
      */
-    ipcMain.handle('vendors:get-by-id', async (_event, { id }) => {
+    register('vendors:get-by-id', async (_event, { id }) => {
         return await queries.getVendorById(id);
     });
 
@@ -624,7 +954,7 @@ export function registerIpcHandlers() {
     /**
      * Save/Create a vendor.
      */
-    ipcMain.handle('vendors:save', async (_event, { vendor }) => {
+    register('vendors:save', async (_event, { vendor }) => {
         return await queries.saveVendor(vendor);
     });
 
@@ -632,7 +962,7 @@ export function registerIpcHandlers() {
      * Sync vendor to Tally via n8n vendor-creation webhook.
      * Payload must match n8n workflow contract. Returns { success, message?, data? }.
      */
-    ipcMain.handle('vendors:sync-tally', async (_event, { payload }) => {
+    register('vendors:sync-tally', async (_event, { payload }) => {
         try {
             console.log('[IPC] vendors:sync-tally request received, payload keys:', payload ? Object.keys(payload) : []);
             const result = await n8n.sendVendorCreationToN8n(payload || {});
@@ -681,7 +1011,7 @@ export function registerIpcHandlers() {
      * Get all audit log events.
      * Output: Array of audit event rows (most recent first)
      */
-    ipcMain.handle('audit:get-logs', async (_event, params = {}) => {
+    register('audit:get-logs', async (_event, params = {}) => {
         return await queries.getAuditLogs(params);
     });
 
@@ -689,7 +1019,7 @@ export function registerIpcHandlers() {
      * Hard-delete a single audit log entry.
      * Restricted: 'Created' and 'Deleted' events are forensic records and cannot be removed.
      */
-    ipcMain.handle('audit:delete-log', async (_event, { id }) => {
+    register('audit:delete-log', async (_event, { id }) => {
         if (!id) throw new Error('Missing audit log id');
         // Guard: fetch the row first and reject forensic event types
         const { rows } = await queries.getAuditLogById(id);
@@ -701,7 +1031,7 @@ export function registerIpcHandlers() {
         return await queries.deleteAuditLog(id);
     });
 
-    ipcMain.handle('audit:delete-bulk', async (_event, { ids }: { ids: number[] }) => {
+    register('audit:delete-bulk', async (_event, { ids }: { ids: number[] }) => {
         if (!Array.isArray(ids) || ids.length === 0) throw new Error('No IDs provided');
         const deleted = await queries.deleteAuditLogsBulk(ids);
         return { deleted };
@@ -709,29 +1039,29 @@ export function registerIpcHandlers() {
 
     // ─── ITEMS ─────────────────────────────────────────────
 
-    ipcMain.handle('items:get-all', async (_event, { companyId } = {}) => {
+    register('items:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllItems(companyId);
     });
 
-    ipcMain.handle('items:save', async (_event, { item }) => {
+    register('items:save', async (_event, { item }) => {
         return await queries.saveItem(item);
     });
 
     // ─── TALLY SYNC ────────────────────────────────────────
 
-    ipcMain.handle('tally:get-sync-logs', async (_event, { entityId } = {}) => {
+    register('tally:get-sync-logs', async (_event, { entityId } = {}) => {
         return await queries.getTallySyncLogs(entityId);
     });
 
-    ipcMain.handle('dashboard:get-metrics', async (_event, { companyId } = {}) => {
+    register('dashboard:get-metrics', async (_event, { companyId } = {}) => {
         return await queries.getDashboardMetrics(companyId);
     });
 
-    ipcMain.handle('dashboard:tally-sync', async (_event, { companyId } = {}) => {
+    register('dashboard:tally-sync', async (_event, { companyId } = {}) => {
         return await queries.getTallySyncStats(companyId);
     });
 
-    ipcMain.handle('dashboard:po-health', async (_event, { companyId } = {}) => {
+    register('dashboard:po-health', async (_event, { companyId } = {}) => {
         return await queries.getPoHealthStats(companyId);
     });
 
@@ -747,7 +1077,7 @@ export function registerIpcHandlers() {
      * Input:  { companyId?: string }
      * Output: PipelineData shape matching Dashboard.tsx PipelineData interface
      */
-    ipcMain.handle('dashboard:pipeline', async (_event, { companyId } = {}) => {
+    register('dashboard:pipeline', async (_event, { companyId } = {}) => {
         return await queries.getPipelineStats(companyId);
     });
 
@@ -765,11 +1095,11 @@ export function registerIpcHandlers() {
      * Input:  { companyId?: string }
      * Output: { top_suppliers, concentration_top3_pct, new_this_month }
      */
-    ipcMain.handle('dashboard:top-suppliers', async (_event, { companyId } = {}) => {
+    register('dashboard:top-suppliers', async (_event, { companyId } = {}) => {
         return await queries.getTopSuppliers(companyId);
     });
 
-    ipcMain.handle('dashboard:recent-activity', async (_event, { companyId } = {}) => {
+    register('dashboard:recent-activity', async (_event, { companyId } = {}) => {
         return await queries.getRecentDashboardActivity(companyId);
     });
 
@@ -780,7 +1110,7 @@ export function registerIpcHandlers() {
      * Input: { invoiceId: string }
      * Output: Array of processing job rows
      */
-    ipcMain.handle('processing:get-jobs', async (_event, { invoiceId }) => {
+    register('processing:get-jobs', async (_event, { invoiceId }) => {
         return await queries.getProcessingJobs(invoiceId);
     });
 
@@ -789,7 +1119,7 @@ export function registerIpcHandlers() {
      * Input: { invoiceId: string, filePath: string, fileName: string }
      * Output: { success: boolean, decision?: DecisionOutput, error?: string }
      */
-    ipcMain.handle('processing:run-pipeline', async (_event, { invoiceId, filePath, fileName, batchId }) => {
+    register('processing:run-pipeline', async (_event, { invoiceId, filePath, fileName, batchId }) => {
         const batchName = batchId || 'UNASSIGNED';
         try {
             batchLogger.incrementWorkers();
@@ -1105,82 +1435,82 @@ export function registerIpcHandlers() {
      * Used by Dashboard KPI chips.
      * Output: Array of { status, count }
      */
-    ipcMain.handle('invoices:status-counts', async (_event, { companyId } = {}) => {
+    register('invoices:status-counts', async (_event, { companyId } = {}) => {
         return await queries.getInvoiceStatusCounts(companyId);
     });
 
     /**
      * Connection Status Checks
      */
-    ipcMain.handle('status:check-n8n', async () => {
+    register('status:check-n8n', async () => {
         const response = await n8nWatcher.checkNow();
         return response.status === 'live';
     });
 
-    ipcMain.handle('status:get-n8n-full', async () => {
+    register('status:get-n8n-full', async () => {
         return n8nWatcher.getStatus();
     });
 
-    ipcMain.handle('status:check-ocr', async () => {
+    register('status:check-ocr', async () => {
         return await ocr.testOCR();
     });
 
     /**
      * Processing Logs & Worker Status
      */
-    ipcMain.handle('processing:get-batch-logs', async (_event, { batchName }) => {
+    register('processing:get-batch-logs', async (_event, { batchName }) => {
         return batchLogger.getLogs(batchName);
     });
 
-    ipcMain.handle('processing:get-worker-status', async () => {
+    register('processing:get-worker-status', async () => {
         return { activeWorkers: batchLogger.getWorkerCount() };
     });
 
-    ipcMain.handle('processing:get-batch-health', async (_event, { batchName, startedAfter } = {}) => {
+    register('processing:get-batch-health', async (_event, { batchName, startedAfter } = {}) => {
         return {
             invoiceCount: batchName ? await queries.getBatchInvoiceCount(batchName, startedAfter || null) : 0,
         };
     });
 
-    ipcMain.handle('processing:get-batch-stage-table', async (_event, { batchName, startedAfter } = {}) => {
+    register('processing:get-batch-stage-table', async (_event, { batchName, startedAfter } = {}) => {
         if (!batchName) return [];
         return await queries.getBatchStageTimingTable(batchName, startedAfter || null);
     });
 
-    ipcMain.handle('processing:get-all-logs-debug', async () => {
+    register('processing:get-all-logs-debug', async () => {
         return batchLogger.getAllLogsDebug();
     });
 
-    ipcMain.handle('processing:clear-batch-logs', async (_event, { batchName }) => {
+    register('processing:clear-batch-logs', async (_event, { batchName }) => {
         batchLogger.clearBatch(batchName);
         return { success: true };
     });
 
     // ─── PURCHASE ORDERS ────────────────────────────────────────
-    ipcMain.handle('po:get-all', async (_event, { companyId } = {}) => {
+    register('po:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllPurchaseOrders(companyId);
     });
 
-    ipcMain.handle('po:get-by-id', async (_event, { id }) => {
+    register('po:get-by-id', async (_event, { id }) => {
         return await queries.getPurchaseOrderById(id);
     });
 
     // ─── GOODS RECEIPTS ──────────────────────────────────────────
-    ipcMain.handle('grn:get-all', async (_event, { companyId } = {}) => {
+    register('grn:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllGoodsReceipts(companyId);
     });
 
     // ─── SERVICE ENTRY SHEETS ───────────────────────────────────
-    ipcMain.handle('ses:get-all', async (_event, { companyId } = {}) => {
+    register('ses:get-all', async (_event, { companyId } = {}) => {
         return await queries.getAllServiceEntrySheets(companyId);
     });
 
     // ─── MASTERS ────────────────────────────────────────────────
-    ipcMain.handle('masters:get-ledgers', async (_event, { companyId } = {}) => {
+    register('masters:get-ledgers', async (_event, { companyId } = {}) => {
         return await queries.getLedgerMasters(companyId);
     });
 
-    ipcMain.handle('masters:create-ledger', async (_event, { name, parent_group, account_type, company_id, meta } = {}) => {
+    register('masters:create-ledger', async (_event, { name, parent_group, account_type, company_id, meta } = {}) => {
         try {
             console.log('[IPC] masters:create-ledger: Received:', { name, parent_group, company_id, meta });
             console.log('[IPC] Routing via n8n first');
@@ -1229,7 +1559,7 @@ export function registerIpcHandlers() {
         }
     });
 
-    ipcMain.handle('masters:create-item', async (_event, { name, uom, hsn, tax_rate, company_id, meta } = {}) => {
+    register('masters:create-item', async (_event, { name, uom, hsn, tax_rate, company_id, meta } = {}) => {
         try {
             console.log('[IPC] masters:create-item: Received:', { name, uom, hsn, tax_rate, company_id, meta });
             console.log('[IPC] Routing via n8n first');
@@ -1309,24 +1639,24 @@ export function registerIpcHandlers() {
         }
     });
 
-    ipcMain.handle('masters:get-tds-sections', async () => {
+    register('masters:get-tds-sections', async () => {
         return await queries.getTdsSections();
     });
 
     // ─── COMPANIES ──────────────────────────────────────────────
-    ipcMain.handle('companies:get-active', async () => {
+    register('companies:get-active', async () => {
         return await queries.getActiveCompany();
     });
 
-    ipcMain.handle('companies:get-all', async () => {
+    register('companies:get-all', async () => {
         return await queries.getAllCompanies();
     });
 
-    ipcMain.handle('api/companies', async () => {
+    register('api/companies', async () => {
         return await queries.getSyncedCompanies();
     });
 
-    ipcMain.handle('companies:update-gstin', async (_event, { companyId, gstin } = {}) => {
+    register('companies:update-gstin', async (_event, { companyId, gstin } = {}) => {
         return await queries.updateCompanyGstin(companyId, gstin);
     });
 
@@ -1334,7 +1664,7 @@ export function registerIpcHandlers() {
      * Delete audit log rows that belong to inactive or fully-orphaned company IDs.
      * Returns { inactive_deleted, orphaned_deleted } for UI feedback.
      */
-    ipcMain.handle('companies:purge-audit', async () => {
+    register('companies:purge-audit', async () => {
         return await queries.purgeInactiveCompanyAuditLogs();
     });
 
@@ -1342,7 +1672,7 @@ export function registerIpcHandlers() {
 
     // ─── CONFIGURATION ──────────────────────────────────────────
 
-    ipcMain.handle('config:get-rules', async (_event, { companyId } = {}) => {
+    register('config:get-rules', async (_event, { companyId } = {}) => {
         console.log(`[CONFIG:GET-RULES] companyId=${companyId}`);
         // Use strict mode to prevent global fallback if companyId is provided
         const rules = await queries.getAppConfig('posting_rules', companyId, !!companyId);
@@ -1354,10 +1684,10 @@ export function registerIpcHandlers() {
         return rules;
     });
 
-    ipcMain.handle('config:save-rules', async (_event, { rules, companyId }) => {
+    register('config:save-rules', async (_event, { rules, companyId }) => {
         console.log(`[CONFIG:SAVE-RULES] Saving rules for companyId=${companyId}`);
         // Save config FIRST — this is the critical step that must not fail
-        await queries.setAppConfig('posting_rules', rules, companyId);
+        await queries.setAppConfig('posting_rules', rules, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         console.log(`[CONFIG:SAVE-RULES] Rules saved to DB for companyId=${companyId}`);
         // Re-evaluate invoice statuses in the background — non-blocking.
         // If this fails it must NOT block the save from being reported as successful.
@@ -1367,38 +1697,38 @@ export function registerIpcHandlers() {
         return { success: true };
     });
 
-    ipcMain.handle('config:get-extended-criteria', async (_event, { companyId }) => {
+    register('config:get-extended-criteria', async (_event, { companyId }) => {
         return await queries.getAppConfig('auto_post_criteria_extended', companyId, !!companyId);
     });
 
-    ipcMain.handle('config:save-extended-criteria', async (_event, { criteria, companyId }) => {
-        await queries.setAppConfig('auto_post_criteria_extended', criteria, companyId);
+    register('config:save-extended-criteria', async (_event, { criteria, companyId }) => {
+        await queries.setAppConfig('auto_post_criteria_extended', criteria, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true };
     });
 
     /**
      * Handlers for Storage Configuration (Local, S3, etc.)
      */
-    ipcMain.handle('config:get-storage-path', async (_event, { companyId } = {}) => {
+    register('config:get-storage-path', async (_event, { companyId } = {}) => {
         return await queries.getAppConfig('storage_config', companyId, !!companyId);
     });
 
-    ipcMain.handle('config:set-storage-path', async (_event, { config, companyId }) => {
-        await queries.setAppConfig('storage_config', config, companyId);
+    register('config:set-storage-path', async (_event, { config, companyId }) => {
+        await queries.setAppConfig('storage_config', config, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true };
     });
 
     /**
      * Complete configuration sync (Sources, ERP, Reports, etc.)
      */
-    ipcMain.handle('config:get-full', async (_event, { companyId }) => {
+    register('config:get-full', async (_event, { companyId }) => {
         if (!companyId) return null;
         return await queries.getAppConfig('full_config', companyId, true);
     });
 
-    ipcMain.handle('config:save-full', async (_event, { config, companyId }) => {
+    register('config:save-full', async (_event, { config, companyId }) => {
         if (!companyId) throw new Error('Missing companyId');
-        await queries.setAppConfig('full_config', config, companyId);
+        await queries.setAppConfig('full_config', config, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         reloadFolderWatchers();
         reloadEmailWatchers();
         return { success: true };
@@ -1417,7 +1747,13 @@ export function registerIpcHandlers() {
         try {
             const result = await tallyPosting.sendInvoiceToTally(id, invoice.ocr_raw_payload);
             const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
-            await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
+            await queries.markPostedToTally(
+                id,
+                result.response,
+                tallyIdStr,
+                result.status,
+                _session ? { userId: _session.userId, userName: _session.userName } : undefined
+            );
             await queries.createAuditLog({
                 invoice_id: id,
                 invoice_no: invoice.invoice_number,
@@ -1443,7 +1779,7 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('config:save-source-config', async (_event, { config, companyId }) => {
         if (!companyId) throw new Error('Missing companyId');
-        await queries.setAppConfig('source_config', config, companyId);
+        await queries.setAppConfig('source_config', config, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         reloadFolderWatchers();
         reloadEmailWatchers();
         return { success: true };
@@ -1451,7 +1787,7 @@ export function registerIpcHandlers() {
 
     let lastSyncTime = 0; // Timestamp for rate-limiting
 
-    ipcMain.handle('erp:sync', async () => {
+    register('erp:sync', async () => {
         const now = Date.now();
         if (now - lastSyncTime < 2000) {
             console.warn('[IPC] ERP Sync requested too soon. Rate-limiting to prevent double-execution.');
@@ -1556,7 +1892,7 @@ export function registerIpcHandlers() {
         }
     });
 
-    ipcMain.handle('invoices:get-tally-post-status', async (_: any, { invoiceId, since }: { invoiceId: string; since: string }) => {
+    register('invoices:get-tally-post-status', async (_: any, { invoiceId, since }: { invoiceId: string; since: string }) => {
         try {
             const result = await queries.getTallyPostStatus(invoiceId, since);
             return { success: true, ...result };
@@ -1566,7 +1902,7 @@ export function registerIpcHandlers() {
         }
     });
 
-    ipcMain.handle('sync:get-latest-status', async (_: any, { since, companyId }: { since?: string; companyId?: string } = {}) => {
+    register('sync:get-latest-status', async (_: any, { since, companyId }: { since?: string; companyId?: string } = {}) => {
         try {
             const rows = await queries.getLatestSyncStatus(since, companyId);
             return { success: true, rows };

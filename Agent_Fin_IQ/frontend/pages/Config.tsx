@@ -10,6 +10,7 @@ import {
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { PremiumConfirmDialog } from '../components/PremiumConfirmDialog';
+import { useAuth } from '../context/AuthContext';
 
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -362,6 +363,11 @@ function ConfigCard({
 
 /* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Main Page ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 export default function Config() {
+    // Operators get a read-only Control Hub — they can see rules and
+    // storage paths but every save/pick-folder action is admin-only
+    // on the backend (config:save-*, dialog:open-directory).
+    const { user: authUser } = useAuth();
+    const isAdmin = authUser?.role === 'admin';
     const INIT = {
         postingMode: 'manual', /* Changed default to manual */
         sources: { email: true, local_folder: false, whatsapp: false },
@@ -668,6 +674,10 @@ export default function Config() {
     };
 
     const handleSaveCompanyGstin = async (companyId: string) => {
+        if (!isAdmin) {
+            toast.error('Only administrators can update company GSTIN');
+            return;
+        }
         const draftValue = gstinDrafts[companyId] ?? '';
         const normalized = normalizeGstin(draftValue);
         const validationMessage = getGstinValidationError(companyId, normalized);
@@ -875,6 +885,10 @@ export default function Config() {
     }, []);
 
     const pickStorageFolder = async () => {
+        if (!isAdmin) {
+            toast.error('Only administrators can change the storage path');
+            return;
+        }
         // @ts-ignore
         const selected = await window.api.invoke('dialog:open-directory');
         if (selected) {
@@ -970,6 +984,10 @@ export default function Config() {
     };
 
     const handleSave = async () => {
+        if (!isAdmin) {
+            toast.error('Only administrators can save configuration changes');
+            return;
+        }
         const error = validateConfig();
         if (error) {
             setValidationError(error);
@@ -1081,6 +1099,12 @@ export default function Config() {
 
     return (
         <div className="font-sans min-h-screen pb-[48px]">
+            {!isAdmin && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] text-amber-900 flex items-center gap-2">
+                    <AlertCircle size={14} className="shrink-0" />
+                    <span><strong>Read-only view.</strong> Configuration changes require an administrator.</span>
+                </div>
+            )}
             {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Hero Header ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
             <motion.div
                 initial={{ opacity: 0, y: -16 }}
@@ -2224,14 +2248,19 @@ export default function Config() {
                                                             />
                                                         </div>
                                                         <button
+                                                            disabled={!isAdmin}
                                                             onClick={async () => {
+                                                                if (!isAdmin) {
+                                                                    toast.error('Only administrators can change folder paths');
+                                                                    return;
+                                                                }
                                                                 // @ts-ignore
                                                                 const selected = await window.api.invoke('dialog:open-directory');
                                                                 if (selected) {
                                                                     setSourceConfigs(s => ({ ...s, local_folder: { ...s.local_folder, folderPath: selected } }));
                                                                 }
                                                             }}
-                                                            className="h-[42px] px-4 bg-white border border-[#CBD5E1] rounded-[8px] text-[13px] font-bold text-[#1A2640] hover:bg-[#F8FAFC] transition-colors whitespace-nowrap"
+                                                            className="h-[42px] px-4 bg-white border border-[#CBD5E1] rounded-[8px] text-[13px] font-bold text-[#1A2640] hover:bg-[#F8FAFC] transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
                                                             Browse Folder
                                                         </button>

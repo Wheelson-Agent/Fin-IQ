@@ -12,6 +12,7 @@ import type { AuditEvent } from '../lib/types';
 import { PremiumConfirmDialog } from '../components/PremiumConfirmDialog';
 import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────
 const allEventTypes = ['All', 'Created', 'Processed', 'Edited', 'Revalidated', 'Approved', 'Rejected', 'Auto-Posted', 'Deleted'];
@@ -158,6 +159,10 @@ function SkeletonRow({ delay = 0 }: { delay?: number }) {
 // ─── Component ────────────────────────────────────────────────
 export default function AuditTrail() {
   const { selectedCompany, selectedCompanyName } = useCompany();
+  // audit:delete-log / delete-bulk are adminOnly channels — operators
+  // can view the log but cannot remove rows.
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.role === 'admin';
 
   const [events, setEvents]           = useState<AuditEvent[]>([]);
   const [total, setTotal]             = useState(0);
@@ -426,7 +431,7 @@ export default function AuditTrail() {
                   const eventId    = String(event.id);
                   const isExpanded = expandedIds.has(eventId);
                   const hasDiff    = !!(event.before_data && event.after_data);
-                  const canDelete  = !PROTECTED_EVENT_TYPES.has(event.event_type);
+                  const canDelete  = isAdmin && !PROTECTED_EVENT_TYPES.has(event.event_type);
                   const dotBg      = eventTypeIconBg[event.event_type] || 'bg-slate-50 border-slate-200';
                   const dotColor   = eventTypeDotColor[event.event_type] || 'bg-slate-400';
                   const textColor  = eventTypeTextColor[event.event_type] || 'text-slate-500';

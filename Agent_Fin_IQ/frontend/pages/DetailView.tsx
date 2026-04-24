@@ -50,6 +50,7 @@ import {
   waiveInvoicePo
 } from '../lib/api';
 import { toast } from 'sonner';
+import { useAuth } from '../context/AuthContext';
 import type { Invoice, InvoiceItem, Vendor, LedgerMaster, TdsSection, Company } from '../lib/types';
 
 const formatDateToDDMMYYYY = (dateStr: string | null | undefined) => {
@@ -798,6 +799,11 @@ export default function DetailView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  // Role gate — delete + waive-PO are admin-only channels on the backend
+  // (see CHANNEL_GUARDS). We hide the buttons so operators don't see
+  // actions that would just toast "Admin privileges required".
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.role === 'admin';
   const isFromReceived = searchParams.get('from') === 'received';
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [documentView, setDocumentView] = useState<{ path: string | null; source: 'preocr' | 'original' | 'missing'; totalPages?: number } | null>(null);
@@ -1667,7 +1673,7 @@ export default function DetailView() {
   const poMatchPassed = poNotApplicable || docFields.po_match_status === true || String(docFields.po_match_status).toLowerCase() === 'true';
   const poWaived = docFields.po_match_code === 'PO_WAIVED';
   // Waive button should not show when PO check is not applicable or already passing
-  const canWaivePo = !readOnly && !poMatchPassed && !poWaived && !poNotApplicable && (fromTab === 'input' || fromTab === 'handoff');
+  const canWaivePo = isAdmin && !readOnly && !poMatchPassed && !poWaived && !poNotApplicable && (fromTab === 'input' || fromTab === 'handoff');
   const poWaiverIsOverbilling = docFields.po_match_code === 'PO_OVERBILLED';
   const poWaiverTitle = poWaiverIsOverbilling ? 'Approve PO overbilling exception?' : 'Mark PO as not required?';
   const poWaiverActionLabel = poWaiverIsOverbilling ? 'Approve Exception' : 'Waive PO Requirement';
@@ -2228,7 +2234,7 @@ export default function DetailView() {
           )}
 
           <div className="flex items-center gap-2 border-l border-slate-200 pl-4 ml-2">
-            {!readOnly && !invoice?.erp_sync_id && fromTab !== 'ready' && (
+            {isAdmin && !readOnly && !invoice?.erp_sync_id && fromTab !== 'ready' && (
               <Button
                 variant="ghost"
                 size="icon"

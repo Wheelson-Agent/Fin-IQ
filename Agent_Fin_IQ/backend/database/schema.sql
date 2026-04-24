@@ -502,9 +502,48 @@ CREATE TABLE IF NOT EXISTS users (
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Bootstrap admin row. The password_hash here is a placeholder; the user
+-- replaces it via the first-run setup screen (see auth/bootstrap.ts).
+-- Guard: only seed when NO admin exists at all. Without this guard,
+-- a user who changed their email during setup would get a fresh
+-- placeholder row re-inserted on every restart — which would make the
+-- app bounce them back to the setup screen after each logout.
 INSERT INTO users (email, password_hash, display_name, role)
-VALUES ('admin@agent-tally.local', '$2b$10$placeholder_hash_change_me', 'System Admin', 'admin')
+SELECT 'admin@agent-tally.local', 'PENDING_BOOTSTRAP', 'System Admin', 'admin'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin')
 ON CONFLICT (email) DO NOTHING;
+
+-- ── Users table: additive migrations (Phase 1 RBAC) ──
+-- Safe to re-run; each column guarded by IF NOT EXISTS.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count   INT     DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until         TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions          JSONB   DEFAULT '{}'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_limit       NUMERIC(15,2);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by           UUID REFERENCES users(id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at           TIMESTAMPTZ DEFAULT NOW();
+
+-- Restrict role to the two we support. Drop existing constraint first
+-- (name may differ across older installs) so re-runs are idempotent.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'users' AND constraint_name = 'users_role_check'
+  ) THEN
+    ALTER TABLE users DROP CONSTRAINT users_role_check;
+  END IF;
+END $$;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('admin','operator'));
+
+-- ── App secrets (JWT signing key, etc.) ──
+-- Auto-provisioned per install by backend on first boot. Never hardcoded.
+CREATE TABLE IF NOT EXISTS app_secrets (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ============================================================
 -- SEED DATA

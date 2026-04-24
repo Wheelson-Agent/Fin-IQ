@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { NavLink } from 'react-router';
+import { NavLink, useNavigate } from 'react-router';
+import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, FileText, CreditCard, Eye, ClipboardList, CheckSquare, XCircle,
-  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal,
+  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal, LogOut, KeyRound,
   /* SUPPLIER_360_START */ TrendingUp /* SUPPLIER_360_END */
 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 
 interface SidebarProps {
   expanded: boolean;
@@ -20,7 +22,8 @@ const navItemsMain = [
 ];
 
 const navItemsManage = [
-  { id: 'reports', label: 'Reports', path: '/reports', icon: BarChart3 },
+  // Reports is admin-only — filtered out for operators inside the component.
+  { id: 'reports', label: 'Reports', path: '/reports', icon: BarChart3, adminOnly: true },
   /* SUPPLIER_360_START — remove this line to uninstall Supplier 360 */
   { id: 'supplier360', label: 'Supplier 360', path: '/supplier360', icon: TrendingUp, badge: 'NEW', badgeColor: 'bg-[#10B981]' },
   /* SUPPLIER_360_END */
@@ -28,11 +31,24 @@ const navItemsManage = [
 
 const navItemsSettings = [
   { id: 'config', label: 'Control Hub', path: '/config', icon: Settings },
-  { id: 'user', label: 'User & Company', path: '/user', icon: Users },
+  // Admin-only — filtered out for operators inside the component.
+  { id: 'users', label: 'User Management', path: '/users', icon: Users, adminOnly: true },
 ];
 
 export function Sidebar({ expanded, setExpanded }: SidebarProps) {
   const [hoveredTooltip, setHoveredTooltip] = useState<string | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const isAdmin = user?.role === 'admin';
+  // Initials for the avatar — first char of each word, capped at two.
+  const initials = (user?.display_name || user?.email || 'U')
+    .split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || 'U';
+  // Drop admin-only items when the current user is an operator. Backend
+  // enforces the same rule, so this is purely about not dangling a link
+  // that would just redirect them.
+  const settingsItems = navItemsSettings.filter(i => !i.adminOnly || isAdmin);
+  const manageItems = navItemsManage.filter((i: any) => !i.adminOnly || isAdmin);
 
   // Constants to match the design spec
   const wCollapsed = 64;
@@ -106,31 +122,71 @@ export function Sidebar({ expanded, setExpanded }: SidebarProps) {
         {/* Navigation List */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-[4px] relative z-10 scrollbar-none">
           <NavSection title="MAIN" expanded={expanded} items={navItemsMain} setHoveredTooltip={setHoveredTooltip} />
-          <NavSection title="MANAGE" expanded={expanded} items={navItemsManage} setHoveredTooltip={setHoveredTooltip} />
-          <NavSection title="SETTINGS" expanded={expanded} items={navItemsSettings} setHoveredTooltip={setHoveredTooltip} />
+          <NavSection title="MANAGE" expanded={expanded} items={manageItems} setHoveredTooltip={setHoveredTooltip} />
+          <NavSection title="SETTINGS" expanded={expanded} items={settingsItems} setHoveredTooltip={setHoveredTooltip} />
         </div>
 
-        {/* Bottom Avatar */}
-        <div className="py-[10px] border-t border-white/5 relative z-10">
-          <div className="flex items-center gap-[10px] py-[8px] px-[14px] cursor-pointer text-white/50 hover:text-white/85 transition-colors">
-            <div className="w-[32px] h-[32px] rounded-full bg-[#1E6FD9] flex items-center justify-center text-[12px] font-bold text-white shrink-0 ring-2 ring-[#1E6FD9]/40">
-              WT
-            </div>
-            <AnimatePresence>
-              {expanded && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="overflow-hidden whitespace-nowrap"
+        {/* User menu — avatar + popover with change-password / sign-out.
+            Replaces the Topbar popover so the account lives next to nav. */}
+        {user && (
+          <div className="py-[10px] border-t border-white/5 relative z-10">
+            <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  title={user.display_name || user.email}
+                  className="w-full flex items-center gap-[10px] py-[8px] px-[14px] cursor-pointer text-white/60 hover:text-white hover:bg-white/5 transition-colors border-none bg-transparent text-left"
                 >
-                  <div className="text-[12px] font-semibold text-white">WT</div>
-                  <div className="text-[10px] text-white/35 font-mono">finance@wheelsontech.com</div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  <div className="w-[32px] h-[32px] rounded-full bg-[#1E6FD9] flex items-center justify-center text-[12px] font-bold text-white shrink-0 ring-2 ring-[#1E6FD9]/40">
+                    {initials}
+                  </div>
+                  <AnimatePresence>
+                    {expanded && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="overflow-hidden whitespace-nowrap min-w-0"
+                      >
+                        <div className="text-[12px] font-semibold text-white truncate">{user.display_name || 'Account'}</div>
+                        <div className="text-[10px] text-white/40 font-mono truncate">{user.email}</div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="right" align="end" className="w-60 p-0">
+                <div className="px-3 py-2 border-b border-slate-100">
+                  <div className="text-[13px] font-semibold text-slate-900 truncate">
+                    {user.display_name || 'Signed in'}
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">{user.email}</div>
+                  {user.role && (
+                    <div className="mt-1 inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 capitalize">
+                      {user.role}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setUserMenuOpen(false); navigate('/change-password'); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <KeyRound size={14} />
+                  Change password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setUserMenuOpen(false); logout(); navigate('/login', { replace: true }); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-red-600 hover:bg-red-50 transition-colors border-t border-slate-100"
+                >
+                  <LogOut size={14} />
+                  Sign out
+                </button>
+              </PopoverContent>
+            </Popover>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Tooltips (only when collapsed) */}

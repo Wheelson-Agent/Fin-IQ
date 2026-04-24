@@ -640,7 +640,6 @@ export function Topbar({
                     </button>
                 )}
 
-                <button className="w-[34px] h-[34px] rounded-lg bg-[#1E6FD9] flex items-center justify-center text-[10px] font-black text-white shadow-lg hover:shadow-xl transition-all">WT</button>
             </div>
         </div>
     );

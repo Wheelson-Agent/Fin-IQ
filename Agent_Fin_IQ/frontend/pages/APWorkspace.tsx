@@ -30,6 +30,7 @@ import { useProcessing } from '../context/ProcessingContext';
 import { useCompany } from '../context/CompanyContext';
 
 import { getInvoices, deleteInvoice, restoreInvoice, updateInvoiceRemarks, updateInvoiceStatus, revalidateInvoice, getTallyPostStatus, type TallyPostOutcome } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { ProcessingPipeline } from '../components/at/ProcessingPipeline';
 import { Checkbox } from '../components/ui/checkbox';
@@ -380,6 +381,10 @@ const createDefaultBatchName = () => {
 export default function APWorkspace() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  // Delete / restore are adminOnly channels — block the handlers for
+  // operators so clicks don't fire rejected IPC calls.
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.role === 'admin';
   const [records, setRecords] = useState<APRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const { dateFilter } = useDateFilter();
@@ -1026,6 +1031,10 @@ export default function APWorkspace() {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (!isAdmin) {
+      toast.error('Only administrators can delete invoices');
+      return;
+    }
     setConfirmDialog({
       title: 'Delete this invoice?',
       description: 'This invoice will be hidden from the workspace. It can be restored using the Undo option immediately after deletion.',
@@ -1101,6 +1110,10 @@ export default function APWorkspace() {
   const handleDeleteSelected = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
+    if (!isAdmin) {
+      toast.error('Only administrators can delete invoices');
+      return;
+    }
 
     setConfirmDialog({
       title: `Delete ${ids.length} selected invoice${ids.length > 1 ? 's' : ''}?`,
