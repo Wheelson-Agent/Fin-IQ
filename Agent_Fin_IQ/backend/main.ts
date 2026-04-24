@@ -31,13 +31,10 @@ import path from 'path';
 import { initBatchesDir } from './utils/filesystem';
 import { fileURLToPath } from 'url';
 import * as n8nWatcher from './sync/n8nStatusWatcher';
-<<<<<<< Updated upstream
 import { startFolderWatchers } from './services/folderWatcher';
 import { startEmailWatchers } from './services/emailWatcher';
 import { startDigestScheduler } from './services/digestScheduler';
-=======
 import { getJwtSecret } from './auth/bootstrap';
->>>>>>> Stashed changes
 
 // ESM Compatibility
 const __filename = fileURLToPath(import.meta.url);

@@ -1944,12 +1944,8 @@ export async function updateInvoiceRemarks(id: string, remarks: string) {
  * @param tallyId - Reference ID returned by Tally
  * @param erpSyncStatus - 'processed' or 'failed'
  */
-<<<<<<< Updated upstream
-export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed') {
-    const succeeded = erpSyncStatus !== 'failed';
-=======
 export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed', actor?: { userId?: string; userName?: string }) {
->>>>>>> Stashed changes
+    const succeeded = erpSyncStatus !== 'failed';
     await query(
         `UPDATE ap_invoices SET
           is_posted_to_tally = $5,

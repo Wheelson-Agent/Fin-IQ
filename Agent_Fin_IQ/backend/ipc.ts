@@ -918,10 +918,6 @@ export function registerIpcHandlers() {
      * Delete an invoice.
      * Audit is written inside a transaction within deleteInvoice() — atomic with the delete.
      */
-<<<<<<< Updated upstream
-    ipcMain.handle('invoices:delete', async (_event, { id }) => {
-        await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
-=======
     register('invoices:delete', async (_event, { id }) => {
         const result = await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true, previousStatus: result.previousStatus };
@@ -933,7 +929,6 @@ export function registerIpcHandlers() {
      */
     register('invoices:restore', async (_event, { id, previousStatus }) => {
         await queries.restoreInvoice(id, previousStatus, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
->>>>>>> Stashed changes
         return { success: true };
     });
 
@@ -1732,8 +1727,7 @@ export function registerIpcHandlers() {
 
     register('config:save-full', async (_event, { config, companyId }) => {
         if (!companyId) throw new Error('Missing companyId');
-<<<<<<< Updated upstream
-        await queries.setAppConfig('full_config', config, companyId);
+        await queries.setAppConfig('full_config', config, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         reloadFolderWatchers();
         reloadEmailWatchers();
         return { success: true };
@@ -1752,7 +1746,13 @@ export function registerIpcHandlers() {
         try {
             const result = await tallyPosting.sendInvoiceToTally(id, invoice.ocr_raw_payload);
             const tallyIdStr = result.response?.tally_id || result.response?.masterid || result.response?.master_id || null;
-            await queries.markPostedToTally(id, result.response, tallyIdStr, result.status);
+            await queries.markPostedToTally(
+                id,
+                result.response,
+                tallyIdStr,
+                result.status,
+                _session ? { userId: _session.userId, userName: _session.userName } : undefined
+            );
             await queries.createAuditLog({
                 invoice_id: id,
                 invoice_no: invoice.invoice_number,
@@ -1778,12 +1778,9 @@ export function registerIpcHandlers() {
 
     ipcMain.handle('config:save-source-config', async (_event, { config, companyId }) => {
         if (!companyId) throw new Error('Missing companyId');
-        await queries.setAppConfig('source_config', config, companyId);
+        await queries.setAppConfig('source_config', config, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         reloadFolderWatchers();
         reloadEmailWatchers();
-=======
-        await queries.setAppConfig('full_config', config, companyId, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
->>>>>>> Stashed changes
         return { success: true };
     });
 
