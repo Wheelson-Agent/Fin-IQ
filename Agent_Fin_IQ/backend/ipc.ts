@@ -915,8 +915,9 @@ export function registerIpcHandlers() {
     });
 
     /**
-     * Delete an invoice.
-     * Audit is written inside a transaction within deleteInvoice() — atomic with the delete.
+     * Soft-delete an invoice (sets processing_status = 'Deleted').
+     * Returns previousStatus so the frontend can offer an undo action.
+     * Audit is written inside a transaction within deleteInvoice() — atomic with the update.
      */
     register('invoices:delete', async (_event, { id }) => {
         const result = await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);

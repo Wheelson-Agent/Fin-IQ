@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, ChevronUp, ArrowRight } from 'lucide-react';
@@ -183,6 +183,13 @@ function PipelineOverlay() {
   );
 }
 
+function triggerBackgroundSync() {
+  const firedAt = new Date().toISOString();
+  const api = (window as any).api;
+  if (api?.invoke) api.invoke('erp:sync').catch(() => {});
+  window.dispatchEvent(new CustomEvent('app:background-sync', { detail: { firedAt } }));
+}
+
 function AppShell() {
   const location = useLocation();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -191,6 +198,18 @@ function AppShell() {
   const { theme, toggleTheme } = useTheme();
   const { selectedCompany, setSelectedCompany, selectedCompanyName, companies } = useCompany();
   const { dateFilter, setDateFilter } = useDateFilter();
+  const isMounted = useRef(false);
+
+  // Fire once when the app first loads
+  useEffect(() => {
+    triggerBackgroundSync();
+  }, []);
+
+  // Fire whenever the user navigates to Dashboard (skip initial mount — covered above)
+  useEffect(() => {
+    if (!isMounted.current) { isMounted.current = true; return; }
+    if (location.pathname === '/') triggerBackgroundSync();
+  }, [location.pathname]);
 
   const handleRefresh = () => {
     window.dispatchEvent(new CustomEvent('app:refresh'));
