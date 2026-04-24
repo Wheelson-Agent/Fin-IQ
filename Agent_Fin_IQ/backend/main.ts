@@ -31,6 +31,9 @@ import path from 'path';
 import { initBatchesDir } from './utils/filesystem';
 import { fileURLToPath } from 'url';
 import * as n8nWatcher from './sync/n8nStatusWatcher';
+import { startFolderWatchers } from './services/folderWatcher';
+import { startEmailWatchers } from './services/emailWatcher';
+import { startDigestScheduler } from './services/digestScheduler';
 
 // ESM Compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -86,6 +89,9 @@ export async function initializeBackend(): Promise<boolean> {
 
     // Step 4: Start background watchers
     n8nWatcher.startWatching();
+    startDigestScheduler();
+    await startFolderWatchers();
+    await startEmailWatchers();
 
     // Create data directories
     const configPath = path.resolve(__dirname, '../config/app.config.json');

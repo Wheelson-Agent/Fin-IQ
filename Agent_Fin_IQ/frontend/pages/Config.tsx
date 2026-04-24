@@ -255,8 +255,8 @@ function MultiSelect({ options, selectedIds, onToggle, placeholder }: { options:
 
 /* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Source / Report toggle row ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 function ToggleRow({
-    checked, label, desc, icon, onChange, onConfigure, isConfigOpen
-}: { checked: boolean; label: string; desc: string; icon: React.ReactNode; onChange: () => void; onConfigure?: () => void; isConfigOpen?: boolean }) {
+    checked, label, desc, icon, onChange, onConfigure, isConfigOpen, onExpand, isExpanded
+}: { checked: boolean; label: string; desc: string; icon: React.ReactNode; onChange: () => void; onConfigure?: () => void; isConfigOpen?: boolean; onExpand?: () => void; isExpanded?: boolean }) {
     return (
         <motion.div
             className="flex items-center gap-[14px] p-[14px_16px] rounded-[12px] cursor-pointer transition-all"
@@ -279,6 +279,16 @@ function ToggleRow({
                         className={`p-[6px] rounded-[8px] transition-colors ${isConfigOpen ? 'bg-[#1E6FD9]' : 'text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#1A2640]'}`}
                     >
                         <Settings size={16} />
+                    </button>
+                )}
+                {onExpand && checked && (
+                    <button
+                        onClick={onExpand}
+                        className="p-[6px] rounded-[8px] transition-colors text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#1A2640]"
+                    >
+                        <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                            <ChevronDown size={16} />
+                        </motion.div>
                     </button>
                 )}
                 <Toggle checked={checked} onChange={onChange} />
@@ -354,9 +364,9 @@ function ConfigCard({
 export default function Config() {
     const INIT = {
         postingMode: 'manual', /* Changed default to manual */
-        sources: { email: true, drive: true, sharepoint: false, onedrive: false, whatsapp: false, local_folder: false },
+        sources: { email: true, local_folder: false, whatsapp: false },
         destination: 'tally',
-        reports: { email: true, teams: true, sharepoint: false, whatsapp: false },
+        reports: { email: true, whatsapp: false },
         criteria: {
             valueLimit: '100000',
             poMatch: true,
@@ -373,12 +383,9 @@ export default function Config() {
             filter_supplier_ids: [] as string[]
         },
         sourceConfigs: {
-            email: { address: 'finance@wheelsontech.com', folder: 'Inbox', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
-            sharepoint: { tenantId: '8a91-4c...', siteUrl: 'https://sigma.sharepoint.com', secret: '' },
-            drive: { folderId: '1B_xyz89k...', serviceAccount: 'agent-fc@gcp-project.iam', secret: 'ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢' },
-            onedrive: { tenantId: 'bf9a-4c...', folderPath: '/Finance/Invoices', secret: '' },
-            whatsapp: { phoneNumber: '', secret: '' },
-            local_folder: { folderPath: '' }
+            email: { address: '', folder: 'INBOX', secret: '' },
+            local_folder: { folderPath: '' },
+            whatsapp: { phoneNumber: '', secret: '' }
         },
         destConfigs: {
             tally: { serverUrl: 'http://localhost:9000', product: 'TallyPrime', version: 'Latest' },
@@ -387,7 +394,7 @@ export default function Config() {
             abap: { serverUrl: '', secret: '' }
         },
         reportConfigs: {
-            email: { recipients: ['finance@wheelsontech.com'], schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
+            email: { recipients: [], schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
             teams: { webhookUrl: 'https://sigma.webhook.office.com/123...', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
             sharepoint: { folderPath: '/Finance/DailyReports', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } },
             whatsapp: { phoneNumber: '', schedule: { frequency: 'Daily', day: 'Monday', date: '1', time: '17:00' }, summary: { processing: ['Total invoices received', 'Total invoices processed', 'Total invoices posted', 'Total invoices pending', 'Total invoices approved'], amount: ['Total invoice value received', 'Total invoice value posted', 'Total invoice value pending', 'Total invoice value approved', 'Average invoice value', 'Highest invoice value'], vendor: ['Total vendors processed', 'New vendors added', 'Top vendors by invoice count', 'Top vendors by invoice value'], posting: ['Auto-posted invoices count', 'Manual-posted invoices count', 'Touchless-posted invoices count', 'Total posted to ERP'], approval: ['Total invoices awaiting approval', 'Total invoices approved', 'Total invoices rejected', 'Average approval turnaround time'] } }
@@ -406,6 +413,9 @@ export default function Config() {
 
     const [postingMode, setPostingMode] = useState(INIT.postingMode);
     const [sources, setSources] = useState(INIT.sources);
+    const [emailExpanded, setEmailExpanded] = useState(false);
+    const [localFolderExpanded, setLocalFolderExpanded] = useState(false);
+    const [whatsappExpanded, setWhatsappExpanded] = useState(false);
     const [destination, setDestination] = useState(INIT.destination);
     const [reports, setReports] = useState(INIT.reports);
     const [criteria, setCriteria] = useState(INIT.criteria);
@@ -424,7 +434,7 @@ export default function Config() {
     // New states for Company views & validation
     const [companyView, setCompanyView] = useState<'list' | 'add' | 'edit'>('list');
     const [rulesView, setRulesView] = useState<'main' | 'criteria'>('main');
-    const [reportsView, setReportsView] = useState<'main' | 'email' | 'whatsapp' | 'teams' | 'sharepoint'>('main');
+    const [reportsView, setReportsView] = useState<'main' | 'email' | 'whatsapp'>('main');
     const [showConfirmAction, setShowConfirmAction] = useState<{
         isOpen: boolean;
         title: string;
@@ -763,7 +773,12 @@ export default function Config() {
                     try {
                         const fullConfig = await window.api.invoke('config:get-full', { companyId: activeCompanyId });
                         if (fullConfig) {
-                            if (fullConfig.sources) setSources(fullConfig.sources);
+                            if (fullConfig.sources) {
+                                setSources(fullConfig.sources);
+                                setEmailExpanded(!!fullConfig.sources.email);
+                                setLocalFolderExpanded(!!fullConfig.sources.local_folder);
+                                setWhatsappExpanded(!!fullConfig.sources.whatsapp);
+                            }
                             if (fullConfig.destination) setDestination(fullConfig.destination);
                             if (fullConfig.reports) setReports(fullConfig.reports);
                             if (fullConfig.sourceConfigs) setSourceConfigs(fullConfig.sourceConfigs);
@@ -910,10 +925,6 @@ export default function Config() {
 
     const validateConfig = () => {
         if (sources.email && !sourceConfigs.email.address) return "Email address is required for Email Ingestion.";
-        if (sources.drive && !sourceConfigs.drive.folderId) return "Drive Folder ID is required for Google Drive.";
-        if (sources.onedrive && !sourceConfigs.onedrive.folderPath) return "Folder Path is required for OneDrive.";
-        if (sources.sharepoint && !sourceConfigs.sharepoint.siteUrl) return "Site URL is required for SharePoint.";
-        if (sources.whatsapp && !sourceConfigs.whatsapp.phoneNumber) return "Phone number is required for WhatsApp source.";
         if (sources.local_folder && !sourceConfigs.local_folder.folderPath) return "Local folder path is required.";
 
         // Storage validation
@@ -954,8 +965,6 @@ export default function Config() {
         // Reports validation
         if (reports.email && (!(reportConfigs.email.recipients as string[]).length || !reportConfigs.email.schedule.time)) return "Email recipients and schedule time are required.";
         if (reports.whatsapp && (!reportConfigs.whatsapp.phoneNumber || !reportConfigs.whatsapp.schedule.time)) return "WhatsApp phone number and schedule time are required.";
-        if (reports.teams && (!reportConfigs.teams.webhookUrl || !reportConfigs.teams.schedule.time)) return "MS Teams webhook and schedule time are required.";
-        if (reports.sharepoint && (!reportConfigs.sharepoint.folderPath || !reportConfigs.sharepoint.schedule.time)) return "SharePoint folder and schedule time are required.";
 
         return null;
     };
@@ -995,6 +1004,19 @@ export default function Config() {
                     });
                 } catch (fullErr) {
                     console.error('[Config] config:save-full failed:', fullErr);
+                }
+
+                // Source config saved as dedicated key so backend watchers can read it directly
+                try {
+                    await window.api.invoke('config:save-source-config', {
+                        config: {
+                            sources: newConfig.sources,
+                            sourceConfigs: newConfig.sourceConfigs
+                        },
+                        companyId: activeCompanyId
+                    });
+                } catch (sourceErr) {
+                    console.error('[Config] config:save-source-config failed:', sourceErr);
                 }
             }
 
@@ -2187,9 +2209,9 @@ export default function Config() {
                             <div className="flex flex-col gap-[20px]">
                                 <ConfigCard icon={<Download size={22} />} title="Source Configuration" subtitle="Define where invoices are ingested from" accentColor="#8B5CF6">
                                     <div className="flex flex-col gap-[12px]">
-                                        <ToggleRow checked={sources.local_folder || false} label="Local Folder" desc="Monitor a local system directory for new invoices" icon={<Folder size={16} />} onChange={() => setSources(s => ({ ...s, local_folder: !s.local_folder }))} />
+                                        <ToggleRow checked={sources.local_folder || false} label="Local Folder" desc="Monitor a local system directory for new invoices" icon={<Folder size={16} />} onChange={() => { const next = !sources.local_folder; setSources(s => ({ ...s, local_folder: next })); setLocalFolderExpanded(next); }} onExpand={() => setLocalFolderExpanded(v => !v)} isExpanded={localFolderExpanded} />
                                         <AnimatePresence>
-                                            {sources.local_folder && (
+                                            {sources.local_folder && localFolderExpanded && (
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <div className="flex items-end gap-3 w-full">
                                                         <div className="flex-1">
@@ -2223,53 +2245,23 @@ export default function Config() {
                                             label="Email Ingestion"
                                             desc="Import invoice attachments from connected inboxes"
                                             icon={<Mail size={16} />}
-                                            onChange={() => setSources(s => ({ ...s, email: !s.email }))}
+                                            onChange={() => { const next = !sources.email; setSources(s => ({ ...s, email: next })); setEmailExpanded(next); }}
+                                            onExpand={() => setEmailExpanded(v => !v)}
+                                            isExpanded={emailExpanded}
                                         />
                                         <AnimatePresence>
-                                            {sources.email && (
+                                            {sources.email && emailExpanded && (
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Mail size={16} />} label="Monitored Inbox" value={sourceConfigs.email.address} onChange={(e: any) => setSourceConfigs(s => ({ ...s, email: { ...s.email, address: e.target.value } }))} placeholder="finance@company.com" />
                                                     <IntegrationField icon={<Key size={16} />} label="App Password" value={sourceConfigs.email.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, email: { ...s.email, secret: e.target.value } }))} placeholder="********" isSecret />
+                                                    <IntegrationField icon={<Folder size={16} />} label="Mail Folder" value={sourceConfigs.email.folder} onChange={(e: any) => setSourceConfigs(s => ({ ...s, email: { ...s.email, folder: e.target.value } }))} placeholder="INBOX" />
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
 
-                                        <ToggleRow checked={sources.drive} label="Google Drive" desc="Watch a selected Drive folder for new invoice files" icon={<HardDrive size={16} />} onChange={() => setSources(s => ({ ...s, drive: !s.drive }))} />
+                                        <ToggleRow checked={sources.whatsapp || false} label="WhatsApp" desc="Ingest invoices directly from WhatsApp business messages" icon={<WhatsAppIcon size={16} />} onChange={() => { const next = !sources.whatsapp; setSources(s => ({ ...s, whatsapp: next })); setWhatsappExpanded(next); }} onExpand={() => setWhatsappExpanded(v => !v)} isExpanded={whatsappExpanded} />
                                         <AnimatePresence>
-                                            {sources.drive && (
-                                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
-                                                    <IntegrationField icon={<Folder size={16} />} label="Folder ID" value={sourceConfigs.drive.folderId} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, folderId: e.target.value } }))} placeholder="1B_xyz..." />
-                                                    <IntegrationField icon={<UserCheck size={16} />} label="Service Account Email" value={sourceConfigs.drive.serviceAccount} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, serviceAccount: e.target.value } }))} placeholder="agent@project.iam.gserviceaccount.com" />
-                                                    <IntegrationField icon={<Key size={16} />} label="Private Key" value={sourceConfigs.drive.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, drive: { ...s.drive, secret: e.target.value } }))} placeholder="********" isSecret />
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-
-                                        <ToggleRow checked={sources.sharepoint} label="SharePoint" desc="Pull invoices from a connected SharePoint library" icon={<Share2 size={16} />} onChange={() => setSources(s => ({ ...s, sharepoint: !s.sharepoint }))} />
-                                        <AnimatePresence>
-                                            {sources.sharepoint && (
-                                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
-                                                    <IntegrationField icon={<Hash size={16} />} label="Tenant ID" value={sourceConfigs.sharepoint.tenantId} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, tenantId: e.target.value } }))} placeholder="8a91..." />
-                                                    <IntegrationField icon={<Link size={16} />} label="Site URL" value={sourceConfigs.sharepoint.siteUrl} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, siteUrl: e.target.value } }))} placeholder="https://..." />
-                                                    <IntegrationField icon={<Key size={16} />} label="Client Secret" value={sourceConfigs.sharepoint.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, sharepoint: { ...s.sharepoint, secret: e.target.value } }))} placeholder="********" isSecret />
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-
-                                        <ToggleRow checked={sources.onedrive} label="MS OneDrive" desc="Pull invoices from a connected Microsoft OneDrive folder" icon={<Cloud size={16} />} onChange={() => setSources(s => ({ ...s, onedrive: !s.onedrive }))} />
-                                        <AnimatePresence>
-                                            {sources.onedrive && (
-                                                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
-                                                    <IntegrationField icon={<Hash size={16} />} label="Tenant ID" value={sourceConfigs.onedrive.tenantId} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, tenantId: e.target.value } }))} placeholder="bf9a..." />
-                                                    <IntegrationField icon={<Folder size={16} />} label="Folder Path" value={sourceConfigs.onedrive.folderPath} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, folderPath: e.target.value } }))} placeholder="/Finance/Invoices" />
-                                                    <IntegrationField icon={<Key size={16} />} label="Client Secret" value={sourceConfigs.onedrive.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, onedrive: { ...s.onedrive, secret: e.target.value } }))} placeholder="********" isSecret />
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-
-                                        <ToggleRow checked={sources.whatsapp || false} label="WhatsApp" desc="Ingest invoices directly from WhatsApp business messages" icon={<WhatsAppIcon size={16} />} onChange={() => setSources(s => ({ ...s, whatsapp: !s.whatsapp }))} />
-                                        <AnimatePresence>
-                                            {sources.whatsapp && (
+                                            {sources.whatsapp && whatsappExpanded && (
                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pl-[48px] border-l-2 border-[#E2E8F0] ml-[17px] flex flex-col gap-3 mt-[-4px] pb-2">
                                                     <IntegrationField icon={<Phone size={16} />} label="WhatsApp Business Number" value={sourceConfigs.whatsapp.phoneNumber} onChange={(e: any) => setSourceConfigs(s => ({ ...s, whatsapp: { ...s.whatsapp, phoneNumber: e.target.value } }))} placeholder="+91 ..." />
                                                     <IntegrationField icon={<Key size={16} />} label="API Key / Token" value={sourceConfigs.whatsapp.secret} onChange={(e: any) => setSourceConfigs(s => ({ ...s, whatsapp: { ...s.whatsapp, secret: e.target.value } }))} placeholder="********" isSecret />
@@ -2460,47 +2452,6 @@ export default function Config() {
                                                 </div>
                                             </div>
 
-                                            {/* MS Teams */}
-                                            <div className={`p-[16px] rounded-[14px] border border-[#E2E8F0] bg-white transition-all`}>
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-[14px]">
-                                                        <div className="w-[40px] h-[40px] rounded-[10px] bg-[#EFF6FF] flex items-center justify-center text-[#2563EB]">
-                                                            <Share2 size={18} />
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-[14px] font-bold text-[#1A2640]">MS Teams</div>
-                                                            <div className="text-[12px] text-[#64748B]">Post to Teams channel</div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-[16px]">
-                                                        <button onClick={() => setReportsView('teams')} className="text-[#94A3B8] hover:text-[#1D4ED8] bg-transparent hover:bg-[#EFF6FF] w-[32px] h-[32px] rounded-[8px] flex items-center justify-center border-none cursor-pointer transition-colors pt-1">
-                                                            <Settings size={18} />
-                                                        </button>
-                                                        <Toggle checked={reports.teams} onChange={() => setReports({ ...reports, teams: !reports.teams })} />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* SharePoint */}
-                                            <div className={`p-[16px] rounded-[14px] border border-[#E2E8F0] bg-white transition-all`}>
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-[14px]">
-                                                        <div className="w-[40px] h-[40px] rounded-[10px] bg-[#F1F5F9] flex items-center justify-center text-[#1A2640]">
-                                                            <Share2 size={18} />
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-[14px] font-bold text-[#1A2640]">SharePoint</div>
-                                                            <div className="text-[12px] text-[#64748B]">Save archive PDF to SharePoint</div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-[16px]">
-                                                        <button onClick={() => setReportsView('sharepoint')} className="text-[#94A3B8] hover:text-[#1D4ED8] bg-transparent hover:bg-[#EFF6FF] w-[32px] h-[32px] rounded-[8px] flex items-center justify-center border-none cursor-pointer transition-colors pt-1">
-                                                            <Settings size={18} />
-                                                        </button>
-                                                        <Toggle checked={reports.sharepoint} onChange={() => setReports({ ...reports, sharepoint: !reports.sharepoint })} />
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </div>
                                     </ConfigCard>
                                 ) : (
@@ -2511,13 +2462,13 @@ export default function Config() {
                                             </button>
                                             <ChevronRight size={14} className="text-[#94A3B8]" />
                                             <span className="text-[13px] font-bold text-[#1E6FD9]">
-                                                {reportsView === 'email' ? 'Email Digest' : reportsView === 'whatsapp' ? 'WhatsApp' : reportsView === 'teams' ? 'MS Teams' : 'SharePoint'}
+                                                {reportsView === 'email' ? 'Email Digest' : 'WhatsApp'}
                                             </span>
                                         </div>
 
                                         <ConfigCard
-                                            icon={reportsView === 'email' ? <Mail size={22} /> : reportsView === 'whatsapp' ? <WhatsAppIcon size={22} /> : reportsView === 'teams' ? <Share2 size={22} /> : <Share2 size={22} />}
-                                            title={`${reportsView === 'email' ? 'Email' : reportsView === 'whatsapp' ? 'WhatsApp' : reportsView === 'teams' ? 'Teams' : 'SharePoint'} Configuration`}
+                                            icon={reportsView === 'email' ? <Mail size={22} /> : <WhatsAppIcon size={22} />}
+                                            title={`${reportsView === 'email' ? 'Email' : 'WhatsApp'} Configuration`}
                                             subtitle={`Configure destination, schedule, and content for this channel`}
                                             accentColor={reportsView === 'whatsapp' ? '#16A34A' : '#1E6FD9'}
                                         >
@@ -2535,7 +2486,7 @@ export default function Config() {
                                                                     {(reportConfigs.email.recipients as string[]).map((email) => (
                                                                         <div key={email} className="bg-white border border-[#CBD5E1] text-[#1A2640] text-[12px] font-medium px-[10px] py-[4px] rounded-[6px] flex items-center gap-[6px]">
                                                                             {email}
-                                                                            <button onClick={() => setReportConfigs(r => ({ ...r, email: { ...r.email, recipients: (r.email.recipients as string[]).filter(e => e !== email) } }))} className="text-[#94A3B8] hover:text-[#F43F5E] bg-transparent border-none cursor-pointer flex"><XCircle size={14} /></button>
+                                                                            <button onClick={() => setReportConfigs(r => ({ ...r, email: { ...r.email, recipients: (r.email.recipients as string[]).filter(e => e !== email) } } as typeof r))} className="text-[#94A3B8] hover:text-[#F43F5E] bg-transparent border-none cursor-pointer flex"><XCircle size={14} /></button>
                                                                         </div>
                                                                     ))}
                                                                 </div>
@@ -2549,7 +2500,7 @@ export default function Config() {
                                                                         onKeyDown={(e) => {
                                                                             if (e.key === 'Enter' && emailInput.includes('@')) {
                                                                                 if (!(reportConfigs.email.recipients as string[]).includes(emailInput)) {
-                                                                                    setReportConfigs(r => ({ ...r, email: { ...r.email, recipients: [...(r.email.recipients as string[]), emailInput] } }));
+                                                                                    setReportConfigs(r => ({ ...r, email: { ...r.email, recipients: [...(r.email.recipients as string[]), emailInput] } } as typeof r));
                                                                                 }
                                                                                 setEmailInput('');
                                                                             }
@@ -2558,7 +2509,7 @@ export default function Config() {
                                                                     <button
                                                                         onClick={() => {
                                                                             if (emailInput.includes('@') && !(reportConfigs.email.recipients as string[]).includes(emailInput)) {
-                                                                                setReportConfigs(r => ({ ...r, email: { ...r.email, recipients: [...(r.email.recipients as string[]), emailInput] } }));
+                                                                                setReportConfigs(r => ({ ...r, email: { ...r.email, recipients: [...(r.email.recipients as string[]), emailInput] } } as typeof r));
                                                                                 setEmailInput('');
                                                                             }
                                                                         }}
@@ -2568,9 +2519,9 @@ export default function Config() {
                                                             </div>
                                                         ) : (
                                                             <IntegrationField
-                                                                icon={reportsView === 'whatsapp' ? <Phone size={16} /> : reportsView === 'teams' ? <Link size={16} /> : <Folder size={16} />}
-                                                                label={reportsView === 'whatsapp' ? "Phone Number" : reportsView === 'teams' ? "Webhook URL" : "Folder Path"}
-                                                                value={(reportConfigs as any)[reportsView]?.[reportsView === 'whatsapp' ? 'phoneNumber' : reportsView === 'teams' ? 'webhookUrl' : 'folderPath'] || ''}
+                                                                icon={<Phone size={16} />}
+                                                                label="Phone Number"
+                                                                value={(reportConfigs as any)[reportsView]?.['phoneNumber'] || ''}
                                                                 onChange={(e: any) => {
                                                                     const field = reportsView === 'whatsapp' ? 'phoneNumber' : reportsView === 'teams' ? 'webhookUrl' : 'folderPath';
                                                                     setReportConfigs(r => ({ ...r, [reportsView]: { ...(r as any)[reportsView], [field]: e.target.value } }));
