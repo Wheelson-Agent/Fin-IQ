@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Bell, ChevronDown, Palette, Circle, Check, Wifi, WifiOff, RefreshCw, Building2, Database } from 'lucide-react';
+import { Search, Bell, ChevronDown, Circle, Check, Wifi, WifiOff, RefreshCw, Building2, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DateRangeValue } from '../context/DateContext';
 import { Calendar } from '../components/ui/calendar';
@@ -37,11 +37,6 @@ function deriveSyncDot(rows: SyncStatusRow[]): { dot: 'success' | 'failure'; too
  * Connection status for a single service.
  */
 type ServiceStatus = 'connected' | 'connecting' | 'disconnected';
-
-const themes: { id: Theme; label: string; desc: string; icon: string }[] = [
-    { id: 'color', label: 'Color', desc: 'Vibrant blue accents', icon: '🎨' },
-    { id: 'mono', label: 'Classic B&W', desc: 'Monochrome shadcn', icon: '⬛' },
-];
 
 interface TopbarProps {
     onOpenCmd: () => void;
@@ -650,3 +645,4 @@ export function Topbar({
         </div>
     );
 }
+

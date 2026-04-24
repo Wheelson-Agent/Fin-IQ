@@ -283,12 +283,183 @@ const buildStructuredLineItem = (baseItem: any, uiItem: any, index: number, docT
   return structured;
 };
 
+const buildStructuredAdditionalCharge = (baseCharge: any, uiCharge: any, index: number) => {
+  const structured = (baseCharge && typeof baseCharge === 'object' && !Array.isArray(baseCharge))
+    ? { ...baseCharge }
+    : {};
+
+  const safeAmount = parseChargeAmount(uiCharge?.amount ?? 0);
+  const chargeLedgerLabel = String(
+    uiCharge?.mapped_ledger ??
+    uiCharge?.ledger_label ??
+    uiCharge?.ledger ??
+    ''
+  ).trim();
+
+  setStructuredLineField(structured, ['description'], uiCharge?.description ?? '', 'description');
+  setStructuredLineField(structured, ['ledger'], chargeLedgerLabel, 'ledger');
+  setStructuredLineField(structured, ['mapped_ledger'], chargeLedgerLabel, 'mapped_ledger');
+  setStructuredLineField(structured, ['amount', 'total_amount', 'line_amount'], safeAmount, structured.total_amount !== undefined ? 'total_amount' : structured.line_amount !== undefined ? 'line_amount' : 'amount');
+
+  if (structured.id === undefined) {
+    structured.id = uiCharge?.id ?? `charge_${Date.now()}_${index}`;
+  }
+
+  return structured;
+};
+
+const parseJsonLike = (value: any): any => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+};
+
+const parseChargeAmount = (value: any): number => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (value === null || value === undefined) return 0;
+  const normalized = String(value)
+    .trim()
+    .replace(/[₹,\s]/g, '')
+    .replace(/[^\d.-]/g, '');
+  if (!normalized) return 0;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const getNumericChargeAmount = (charge: any): number => {
+  const value = typeof charge === 'object' && charge !== null
+    ? charge.amount ?? charge.total_amount ?? charge.line_amount ?? charge.value
+    : charge;
+  return parseChargeAmount(value);
+};
+
+const hasAdditionalChargeContent = (charge: any): boolean => {
+  if (!charge || typeof charge !== 'object' || Array.isArray(charge)) return false;
+  const description = String(charge.description ?? charge.charge_description ?? charge.name ?? '').trim();
+  const ledger = String(charge.mapped_ledger ?? charge.ledger_label ?? charge.ledger ?? '').trim();
+  return Boolean(description || ledger || getNumericChargeAmount(charge) !== 0);
+};
+
+const coerceAdditionalChargesArray = (value: any): any[] => {
+  const parsed = parseJsonLike(value);
+  if (Array.isArray(parsed)) {
+    return parsed.filter(hasAdditionalChargeContent);
+  }
+  if (!parsed || typeof parsed !== 'object') return [];
+
+  const directChargeKeys = ['description', 'charge_description', 'name', 'amount', 'total_amount', 'line_amount', 'ledger', 'mapped_ledger', 'ledger_label'];
+  if (directChargeKeys.some((key) => parsed[key] !== undefined)) {
+    return hasAdditionalChargeContent(parsed) ? [parsed] : [];
+  }
+
+  return Object.entries(parsed)
+    .map(([description, amount], index) => ({
+      id: `charge_${description.toLowerCase().replace(/[^a-z0-9]+/g, '_') || index}`,
+      description,
+      ledger: '',
+      mapped_ledger: '',
+      amount,
+    }))
+    .filter(hasAdditionalChargeContent);
+};
+
+const getRawPayloadValue = (rawPayload: Record<string, any>, keys: string[]) => {
+  const rawKeys = Object.keys(rawPayload || {});
+  for (const key of keys) {
+    if (rawPayload[key] !== undefined) return rawPayload[key];
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const match = rawKeys.find((rawKey) => rawKey.toLowerCase().replace(/[^a-z0-9]+/g, '_') === normalizedKey);
+    if (match) return rawPayload[match];
+  }
+  return undefined;
+};
+
+const buildAdditionalChargeFallbacks = (rawPayload: Record<string, any> | null | undefined) => {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return [];
+
+  const candidates = [
+    { description: 'Freight Charges', keys: ['Freight Charges', 'Freight'] },
+    { description: 'Packing and Forwarding Charges', keys: ['Packing and Forwarding Charges', 'Packing & Forwarding Charges', 'Packing Charges'] },
+    { description: 'Insurance Charges', keys: ['Insurance Charges', 'Insurance'] },
+    { description: 'Loading Charges', keys: ['Loading Charges'] },
+    { description: 'Unloading Charges', keys: ['Unloading Charges'] },
+    { description: 'Transport Charges', keys: ['Transport Charges', 'Transportation Charges'] },
+    { description: 'Other Charges', keys: ['Other Charges'] },
+  ];
+
+  return candidates
+    .map((candidate, index) => {
+      const value = getRawPayloadValue(rawPayload, candidate.keys);
+      const amount = parseChargeAmount(value);
+      if (amount === 0) return null;
+      return {
+        id: `charge_${candidate.description.toLowerCase().replace(/[^a-z0-9]+/g, '_') || index}`,
+        description: candidate.description,
+        ledger: '',
+        mapped_ledger: '',
+        amount,
+      };
+    })
+    .filter(Boolean) as any[];
+};
+
+const extractAdditionalChargesFromRawPayload = (rawPayload: Record<string, any> | null | undefined): any[] => {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return [];
+
+  const topLevelCharges = coerceAdditionalChargesArray(rawPayload.additional_charges);
+  if (topLevelCharges.length > 0) return topLevelCharges;
+
+  const workspaceCharges = coerceAdditionalChargesArray(rawPayload.__ap_workspace?.additional_charges);
+  if (workspaceCharges.length > 0) return workspaceCharges;
+
+  return buildAdditionalChargeFallbacks(rawPayload);
+};
+
+const buildAdditionalChargesForUi = (rawCharges: any[]): any[] => {
+  return (rawCharges || []).map((charge, idx) => {
+    const mappedLedgerLabel = String(charge?.mapped_ledger ?? charge?.ledger_label ?? charge?.ledger ?? '').trim();
+    const derivedDescription = String(charge?.description ?? charge?.charge_description ?? charge?.name ?? '').trim()
+      || (charge?.['Freight Charges'] !== undefined ? 'Freight Charges' : '');
+
+    return {
+      id: charge?.id ?? `charge_${Date.now()}_${idx}`,
+      description: derivedDescription,
+      ledger: mappedLedgerLabel,
+      mapped_ledger: mappedLedgerLabel,
+      amount: getNumericChargeAmount(charge),
+    };
+  }).filter((charge) =>
+    String(charge.description ?? '').trim() ||
+    String(charge.ledger ?? '').trim() ||
+    Number(charge.amount || 0) !== 0
+  );
+};
+
+const syncFreightChargeField = (payload: Record<string, any>, charges: any[]) => {
+  const freightCharge = (charges || []).find((charge) =>
+    String(charge?.description ?? '').trim().toLowerCase() === 'freight charges'
+  );
+
+  if (freightCharge) {
+    payload['Freight Charges'] = String(parseChargeAmount(freightCharge.amount).toFixed(2));
+  } else if (payload['Freight Charges'] !== undefined) {
+    delete payload['Freight Charges'];
+  }
+};
+
 const buildSavePayloadPreservingStructure = (
   rawPayload: Record<string, any> | null,
   docFields: Record<string, any>,
   originalDocFields: Record<string, any>,
   lineItems: any[],
-  originalLineItems: any[]
+  originalLineItems: any[],
+  additionalCharges: any[],
+  originalAdditionalCharges: any[]
 ) => {
   const nextPayload = deepCloneJson(
     rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload) ? rawPayload : {}
@@ -318,13 +489,30 @@ const buildSavePayloadPreservingStructure = (
     ? (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index, effectiveDocType))
     : sourceLineItems;
 
+  const chargesChanged = JSON.stringify(additionalCharges) !== JSON.stringify(originalAdditionalCharges);
+  const nextPayloadAdditionalCharges = extractAdditionalChargesFromRawPayload(nextPayload);
+  const sourceAdditionalCharges: any[] = nextPayloadAdditionalCharges.length > 0
+    ? nextPayloadAdditionalCharges
+    : extractAdditionalChargesFromRawPayload(rawPayload);
+
+  const savedAdditionalCharges = chargesChanged
+    ? (additionalCharges || []).map((charge, index) => buildStructuredAdditionalCharge(sourceAdditionalCharges[index], charge, index))
+    : sourceAdditionalCharges;
+
   if (lineItemsChanged || sourceLineItems.length > 0) {
     nextPayload.line_items = savedLineItems;
+  }
+  if (chargesChanged || sourceAdditionalCharges.length > 0) {
+    nextPayload.additional_charges = savedAdditionalCharges;
+  }
+  if (chargesChanged || rawPayload?.['Freight Charges'] !== undefined) {
+    syncFreightChargeField(nextPayload, savedAdditionalCharges);
   }
 
   nextPayload.__ap_workspace = {
     ...(nextPayload.__ap_workspace || {}),
     line_items: savedLineItems,
+    additional_charges: savedAdditionalCharges,
     last_saved_at: new Date().toISOString(),
   };
 
@@ -334,7 +522,8 @@ const buildSavePayloadPreservingStructure = (
 const buildWorkspaceRawPayloadSnapshot = (
   rawPayload: Record<string, any> | null,
   lineItems: any[],
-  nextDocType?: string
+  nextDocType?: string,
+  additionalCharges: any[] = []
 ) => {
   const nextPayload = deepCloneJson(
     rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload) ? rawPayload : {}
@@ -353,8 +542,15 @@ const buildWorkspaceRawPayloadSnapshot = (
   ).trim();
 
   const savedLineItems = (lineItems || []).map((item, index) => buildStructuredLineItem(sourceLineItems[index], item, index, effectiveDocType));
+  const nextPayloadAdditionalCharges = extractAdditionalChargesFromRawPayload(nextPayload);
+  const sourceAdditionalCharges: any[] = nextPayloadAdditionalCharges.length > 0
+    ? nextPayloadAdditionalCharges
+    : extractAdditionalChargesFromRawPayload(rawPayload);
+  const savedAdditionalCharges = (additionalCharges || []).map((charge, index) => buildStructuredAdditionalCharge(sourceAdditionalCharges[index], charge, index));
 
   nextPayload.line_items = savedLineItems;
+  nextPayload.additional_charges = savedAdditionalCharges;
+  syncFreightChargeField(nextPayload, savedAdditionalCharges);
   if (nextDocType) {
     nextPayload.doc_type = nextDocType;
   }
@@ -362,6 +558,7 @@ const buildWorkspaceRawPayloadSnapshot = (
   nextPayload.__ap_workspace = {
     ...(nextPayload.__ap_workspace || {}),
     line_items: lineItems,
+    additional_charges: savedAdditionalCharges,
     last_saved_at: new Date().toISOString(),
     ...(nextDocType ? { doc_type: nextDocType } : {}),
   };
@@ -644,7 +841,7 @@ export default function DetailView() {
   const [isVendorMapped, setIsVendorMapped] = useState(true);
   const [showVendorSlideout, setShowVendorSlideout] = useState(false);
   const [showLedgerSlideout, setShowLedgerSlideout] = useState(false);
-  const [activeLedgerIndex, setActiveLedgerIndex] = useState<number | null>(null);
+  const [activeLedgerTarget, setActiveLedgerTarget] = useState<{ section: 'line_item' | 'additional_charge'; index: number } | null>(null);
 
   const [newVendor, setNewVendor] = useState({
     name: '', underGroup: 'Sundry Creditors', gstin: '', state: 'Karnataka',
@@ -658,8 +855,10 @@ export default function DetailView() {
 
   const [docFields, setDocFields] = useState<Record<string, any>>({});
   const [lineItems, setLineItems] = useState<any[]>([]);
+  const [additionalCharges, setAdditionalCharges] = useState<any[]>([]);
   const [originalDocFields, setOriginalDocFields] = useState<Record<string, any>>({});
   const [originalLineItems, setOriginalLineItems] = useState<any[]>([]);
+  const [originalAdditionalCharges, setOriginalAdditionalCharges] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [poWaiverDialog, setPoWaiverDialog] = useState<{ reason: string } | null>(null);
@@ -668,8 +867,9 @@ export default function DetailView() {
   const isDirty = React.useMemo(() => {
     // Deep comparison via stringify is sufficient for these flat/nested objects
     return JSON.stringify(docFields) !== JSON.stringify(originalDocFields) ||
-      JSON.stringify(lineItems) !== JSON.stringify(originalLineItems);
-  }, [docFields, originalDocFields, lineItems, originalLineItems]);
+      JSON.stringify(lineItems) !== JSON.stringify(originalLineItems) ||
+      JSON.stringify(additionalCharges) !== JSON.stringify(originalAdditionalCharges);
+  }, [docFields, originalDocFields, lineItems, originalLineItems, additionalCharges, originalAdditionalCharges]);
   const isDirtyRef = React.useRef(isDirty);
   const silentRefreshInFlightRef = React.useRef(false);
 
@@ -796,6 +996,9 @@ export default function DetailView() {
     if (JSON.stringify(lineItems) !== JSON.stringify(originalLineItems)) {
       diff.push({ label: 'Line Items', status: '✅ Saved' });
     }
+    if (JSON.stringify(additionalCharges) !== JSON.stringify(originalAdditionalCharges)) {
+      diff.push({ label: 'Additional Charges', status: '✅ Saved' });
+    }
 
     setChangedFieldsList(diff);
 
@@ -805,7 +1008,9 @@ export default function DetailView() {
         docFields,
         originalDocFields,
         lineItems,
-        originalLineItems
+        originalLineItems,
+        additionalCharges,
+        originalAdditionalCharges
       );
       const docTypeChanged = JSON.stringify(docFields.doc_type) !== JSON.stringify(originalDocFields.doc_type);
 
@@ -840,6 +1045,7 @@ export default function DetailView() {
       // Reset originals using deep copy to break all references
       setOriginalDocFields(JSON.parse(JSON.stringify(docFields)));
       setOriginalLineItems(JSON.parse(JSON.stringify(lineItems)));
+      setOriginalAdditionalCharges(JSON.parse(JSON.stringify(additionalCharges)));
 
       setShowSaveSummary(true);
       return true;
@@ -1119,6 +1325,7 @@ export default function DetailView() {
           (Array.isArray(raw?.line_items) && raw.line_items) ||
           (Array.isArray(raw?.__ap_workspace?.line_items) && raw.__ap_workspace.line_items) ||
           [];
+        const rawAdditionalCharges: any[] = extractAdditionalChargesFromRawPayload(raw);
 
         if (rawLineItems.length > 0) {
           const mappedItems = rawLineItems.map((item, idx) => {
@@ -1175,6 +1382,15 @@ export default function DetailView() {
           setLineItems(defaultItems);
           setOriginalLineItems(JSON.parse(JSON.stringify(defaultItems)));
         }
+
+        if (rawAdditionalCharges.length > 0) {
+          const mappedCharges = buildAdditionalChargesForUi(rawAdditionalCharges);
+          setAdditionalCharges(mappedCharges);
+          setOriginalAdditionalCharges(JSON.parse(JSON.stringify(mappedCharges)));
+        } else {
+          setAdditionalCharges([]);
+          setOriginalAdditionalCharges([]);
+        }
       } else {
         console.error('[DetailView] Invoice not found for ID:', id);
       }
@@ -1197,6 +1413,16 @@ export default function DetailView() {
       setLoading(false);
     }
   }, [id, loadData]);
+
+  useEffect(() => {
+    if (additionalCharges.length > 0 || originalAdditionalCharges.length > 0) return;
+
+    const hydratedCharges = buildAdditionalChargesForUi(extractAdditionalChargesFromRawPayload(rawPayload));
+    if (hydratedCharges.length === 0) return;
+
+    setAdditionalCharges(hydratedCharges);
+    setOriginalAdditionalCharges(JSON.parse(JSON.stringify(hydratedCharges)));
+  }, [rawPayload, additionalCharges.length, originalAdditionalCharges.length]);
 
   const hasHydratedHeaderData =
     hasMeaningfulDisplayValue(invoice?.vendor_name) ||
@@ -1507,9 +1733,28 @@ export default function DetailView() {
     ]);
   };
 
+  const handleAddAdditionalCharge = () => {
+    if (!allowLineItemStructureEditing) return;
+    setAdditionalCharges([
+      ...additionalCharges,
+      {
+        id: `charge_${Date.now()}`,
+        description: '',
+        ledger: '',
+        mapped_ledger: '',
+        amount: 0,
+      },
+    ]);
+  };
+
   const handleRemoveLineItem = (id: number) => {
     if (!allowLineItemStructureEditing) return;
     setLineItems(lineItems.filter(li => li.id !== id));
+  };
+
+  const handleRemoveAdditionalCharge = (id: string | number) => {
+    if (!allowLineItemStructureEditing) return;
+    setAdditionalCharges(additionalCharges.filter((charge) => charge.id !== id));
   };
 
   const handleApproveAndPost = async () => {
@@ -1631,14 +1876,17 @@ export default function DetailView() {
   const handleCreateMaster = async () => {
     console.log('[MasterCreation] Button clicked. CreationMode:', creationMode);
     if (readOnly || isForReviewSelectionOnly) { console.warn('[MasterCreation] Blocked: View is not allowed to create masters'); return; }
-    if (activeLedgerIndex === null) { console.warn('[MasterCreation] Blocked: No active ledger index'); return; }
+    if (!activeLedgerTarget) { console.warn('[MasterCreation] Blocked: No active ledger target'); return; }
     const label = docFields?.doc_type_label || '';
     const isGoods = label.toLowerCase().includes('goods');
+    const activeIndex = activeLedgerTarget.index;
+    const isAdditionalChargeTarget = activeLedgerTarget.section === 'additional_charge';
     setSaving(true);
     setMasterSyncError(null);
     setMasterSyncSuccess(null);
     try {
       if (creationMode === 'STOCK_ITEM') {
+        if (isAdditionalChargeTarget) throw new Error('Stock item creation is not supported for additional charges');
         const { name, uom, hsn, tax_rate, buyerName } = newStockItem;
         console.log('[MasterCreation] Creating Stock Item:', { name, uom, hsn, tax_rate, buyerName });
         if (!name.trim()) throw new Error('Item name is required');
@@ -1652,7 +1900,7 @@ export default function DetailView() {
         if (!result.success || !result.item) throw new Error(result.message || 'Failed to create item');
         const createdName = result.item.item_name || name;
         setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
-        applyGoodsStockItemSelection(activeLedgerIndex, createdName);
+        applyGoodsStockItemSelection(activeIndex, createdName);
         setMasterSyncSuccess(result.message || 'Stock item created successfully');
         // Pull new stock item into DB — fire-and-forget, dot updates in Topbar
         triggerBackgroundSync();
@@ -1671,11 +1919,14 @@ export default function DetailView() {
         setLedgerOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
         setLedgerNameToId(prev => ({ ...prev, [createdName.toLowerCase()]: createdId }));
         setLedgerIdToName(prev => ({ ...prev, [createdId]: createdName }));
-        if (isGoods && allowCategorizedLineItemPicker) {
-          const converted = await handleGoodsLedgerSelection(activeLedgerIndex, createdName, createdId);
+        if (isAdditionalChargeTarget) {
+          applyAdditionalChargeLedgerSelection(activeIndex, createdName, createdId);
+          setMasterSyncSuccess(result.message || 'Ledger created successfully');
+        } else if (isGoods && allowCategorizedLineItemPicker) {
+          const converted = await handleGoodsLedgerSelection(activeIndex, createdName, createdId);
           if (!converted) setMasterSyncSuccess(result.message || 'Ledger created successfully');
         } else {
-          applyLedgerSelection(activeLedgerIndex, createdName, createdId);
+          applyLedgerSelection(activeIndex, createdName, createdId);
           setMasterSyncSuccess(result.message || 'Ledger created successfully');
         }
         // Pull new ledger into DB — fire-and-forget, dot updates in Topbar
@@ -1694,13 +1945,18 @@ export default function DetailView() {
   const sgst = subTotal * 0.09;
   const total = subTotal + cgst + sgst;
 
-  const syncWorkspaceRawPayload = (nextLineItems: any[], nextDocType?: string) => {
-    setRawPayload((prev: any) => buildWorkspaceRawPayloadSnapshot(prev, nextLineItems, nextDocType));
+  const syncWorkspaceRawPayload = (nextLineItems: any[], nextDocType?: string, nextAdditionalCharges: any[] = additionalCharges) => {
+    setRawPayload((prev: any) => buildWorkspaceRawPayloadSnapshot(prev, nextLineItems, nextDocType, nextAdditionalCharges));
   };
 
-  const applyLineItemsAndRawPayload = (nextLineItems: any[], nextDocType?: string) => {
+  const applyLineItemsAndRawPayload = (nextLineItems: any[], nextDocType?: string, nextAdditionalCharges: any[] = additionalCharges) => {
     setLineItems(nextLineItems);
-    syncWorkspaceRawPayload(nextLineItems, nextDocType);
+    syncWorkspaceRawPayload(nextLineItems, nextDocType, nextAdditionalCharges);
+  };
+
+  const applyAdditionalChargesAndRawPayload = (nextAdditionalCharges: any[]) => {
+    setAdditionalCharges(nextAdditionalCharges);
+    syncWorkspaceRawPayload(lineItems, undefined, nextAdditionalCharges);
   };
 
   const persistGoodsToServiceConversion = async (nextLineItems: any[]) => {
@@ -1711,7 +1967,7 @@ export default function DetailView() {
       doc_type: 'service',
       doc_type_label: 'Invoice (Service)',
     };
-    const nextRawPayload = buildWorkspaceRawPayloadSnapshot(rawPayload, nextLineItems, 'service');
+    const nextRawPayload = buildWorkspaceRawPayloadSnapshot(rawPayload, nextLineItems, 'service', additionalCharges);
 
     setSaving(true);
 
@@ -1795,6 +2051,21 @@ export default function DetailView() {
     });
 
     applyLineItemsAndRawPayload(nextLineItems);
+    return true;
+  };
+
+  const applyAdditionalChargeLedgerSelection = (rowIndex: number, ledgerLabel: string, explicitLedgerId?: string) => {
+    const resolvedId = explicitLedgerId || resolveLedgerId(ledgerLabel);
+    const nextAdditionalCharges = additionalCharges.map((charge, index) => {
+      if (index !== rowIndex) return charge;
+      return {
+        ...charge,
+        ledger: resolvedId || ledgerLabel,
+        mapped_ledger: ledgerLabel,
+      };
+    });
+
+    applyAdditionalChargesAndRawPayload(nextAdditionalCharges);
     return true;
   };
 
@@ -2475,7 +2746,7 @@ export default function DetailView() {
                                     showCreate={allowLineItemCreateCta}
                                     createLabel={isGoodsDocument ? 'Create Ledger / Stock Item' : 'Create New Ledger'}
                                     onCreateClick={(mode: LineItemPickerMode) => {
-                                      setActiveLedgerIndex(index);
+                                      setActiveLedgerTarget({ section: 'line_item', index });
                                       const suggestedBuyer = rawPayload?.['Name as per Tally'] || '';
                                       if (isGoodsDocument && mode === 'STOCK_ITEM') {
                                         setCreationMode('STOCK_ITEM');
@@ -2585,6 +2856,109 @@ export default function DetailView() {
                       <div className="px-5 mt-4">
                         <button onClick={handleAddLineItem} className="flex items-center gap-2 text-[#1E6FD9] text-[13px] font-bold border-none bg-transparent hover:text-[#1557B0] cursor-pointer">
                           <Plus size={16} /> Add Line Item
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="mt-6 px-1">
+                      <div className="rounded-[22px] border border-[#DCE7F5] bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FBFF_100%)] shadow-[0_18px_40px_rgba(148,163,184,0.10)] overflow-hidden">
+                        <div className="px-5 pt-5 pb-2 flex items-center justify-between gap-4">
+                          <div>
+                            <h3 className="text-[17px] font-black text-slate-900 tracking-tight">Additional Charges</h3>
+                            <p className="mt-1 text-[11px] font-medium text-slate-400">Supplementary invoice-level charges mapped to ledgers.</p>
+                          </div>
+                        </div>
+
+                        <div className="px-4 pb-4">
+                          <div className="overflow-x-auto custom-scrollbar">
+                            <table className="w-full min-w-[520px] border-separate border-spacing-0">
+                              <thead>
+                                <tr className="bg-[#F8FBFF]">
+                                  <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-left">Description</th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-left">Ledger</th>
+                                  <th className="py-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Amount</th>
+                                  {allowLineItemStructureEditing && <th className="py-2.5 px-3 w-[44px]"></th>}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {additionalCharges.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={allowLineItemStructureEditing ? 4 : 3} className="px-3 py-6 text-center text-[12px] font-semibold text-slate-400">
+                                      No additional charges added
+                                    </td>
+                                  </tr>
+                                ) : additionalCharges.map((charge, index) => (
+                                  <tr key={charge.id} className="hover:bg-slate-50 transition-colors">
+                                    <td className="p-2 align-top min-w-[180px]">
+                                      <input
+                                        disabled={!allowLineItemStructureEditing}
+                                        className={`w-full border px-2 rounded-[6px] text-[12px] outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-slate-800 px-0 h-[32px]' : 'border-slate-200 focus:border-blue-500 bg-white h-[34px]'}`}
+                                        value={charge.description}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setAdditionalCharges(additionalCharges.map((row, i) => i === index ? { ...row, description: val } : row));
+                                        }}
+                                      />
+                                    </td>
+                                    <td className="p-2 align-top min-w-[220px]">
+                                      <CustomTableSelect
+                                        value={ledgerIdToName[String(charge.ledger || '')] || charge.mapped_ledger || charge.ledger}
+                                        onChange={async (val: string) => {
+                                          const key = String(val || '').toLowerCase();
+                                          const resolvedId = ledgerNameToId[key];
+                                          const selectedLedger = findMatchingOption(val, ledgerOptions) || String(val || '').trim();
+                                          return applyAdditionalChargeLedgerSelection(index, selectedLedger, resolvedId || undefined);
+                                        }}
+                                        options={Array.from(new Set(ledgerOptions)).sort((a, b) => a.localeCompare(b))}
+                                        useCategorizedOptions={false}
+                                        allowStockMode={false}
+                                        defaultMode="LEDGER"
+                                        emptyLabel="Select ledger..."
+                                        disabled={readOnly}
+                                        highlight
+                                        showCreate={allowLineItemCreateCta}
+                                        createLabel="Create New Ledger"
+                                        onCreateClick={() => {
+                                          setActiveLedgerTarget({ section: 'additional_charge', index });
+                                          const suggestedBuyer = rawPayload?.['Name as per Tally'] || '';
+                                          setCreationMode('LEDGER');
+                                          setNewLedger(prev => ({ ...prev, name: '', buyerName: suggestedBuyer }));
+                                          setShowLedgerSlideout(true);
+                                        }}
+                                      />
+                                    </td>
+                                    <td className="p-2 align-top min-w-[110px]">
+                                      <input
+                                        disabled={!allowLineItemStructureEditing}
+                                        type="number"
+                                        className={`w-full border px-2 rounded-[6px] text-[12px] text-right font-mono outline-none disabled:opacity-100 ${!allowLineItemStructureEditing ? 'border-transparent bg-transparent font-bold text-[#1A2640] px-0 h-[32px]' : 'border-[#D0D9E8] focus:border-[#1E6FD9] bg-white h-[34px]'}`}
+                                        value={charge.amount}
+                                        onChange={(e) => {
+                                          const val = Number(e.target.value);
+                                          setAdditionalCharges(additionalCharges.map((row, i) => i === index ? { ...row, amount: Number.isFinite(val) ? val : 0 } : row));
+                                        }}
+                                      />
+                                    </td>
+                                    {allowLineItemStructureEditing && (
+                                      <td className="p-2 text-center align-top pt-[10px]">
+                                        <button onClick={() => handleRemoveAdditionalCharge(charge.id)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-1 rounded-[6px] cursor-pointer border-none bg-transparent transition-colors">
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {allowLineItemStructureEditing && (
+                      <div className="px-5 mt-4">
+                        <button onClick={handleAddAdditionalCharge} className="flex items-center gap-2 text-[#1E6FD9] text-[13px] font-bold border-none bg-transparent hover:text-[#1557B0] cursor-pointer">
+                          <Plus size={16} /> Add Additional Charge
                         </button>
                       </div>
                     )}
