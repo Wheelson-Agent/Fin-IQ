@@ -39,6 +39,7 @@ const ALLOWED_CHANNELS = [
     'invoices:update-ocr',
     'invoices:update-remarks',
     'invoices:delete',
+    'invoices:restore',
     'invoices:revalidate',
     'invoices:waive-po',
     // Vendors
@@ -92,6 +93,12 @@ const ALLOWED_CHANNELS = [
     'config:save-rules',
     'config:get-extended-criteria',
     'config:save-extended-criteria',
+    'config:get-full',
+    'config:save-full',
+    'config:get-source-config',
+    'config:save-source-config',
+    'reports:send-email-digest',
+    'invoices:retry-tally-post',
     'items:get-all',
     // Tally post status
     'invoices:get-tally-post-status',

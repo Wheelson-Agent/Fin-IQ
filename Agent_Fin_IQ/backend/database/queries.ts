@@ -18,7 +18,6 @@
  */
 
 import { query, pool } from './connection';
-import { sendInvoiceToTally } from '../sync/tally_posting';
 import { refreshPurchaseOrderOutstandingFromTally } from '../sync/po_outstanding';
 
 type InvoiceDateRangeConfig = {
@@ -521,6 +520,7 @@ async function buildPoConsumptionCheck(args: {
                 COALESCE(SUM(COALESCE(ai.sub_total, 0)), 0)::numeric AS already_invoiced_total
          FROM ap_invoices ai
          WHERE ai.company_id = $1::uuid
+           AND ai.processing_status != 'Deleted'
            AND ($3::uuid IS NULL OR ai.id <> $3::uuid)
            AND (
              UPPER(TRIM(COALESCE(ai.po_number, ''))) = UPPER(TRIM($2::text))
@@ -1540,8 +1540,7 @@ export async function evaluateInvoiceStatus(
             // Evaluate the enabled auto-post gates without changing fallback routing.
             try {
                 if (await shouldAutoPostInvoice(grandTotal, invoiceDate, invoiceVendorGst, docType, lineItems, companyId)) {
-                    console.log(`[DB] Auto-post criteria passed for invoice date "${invoiceDate || 'missing'}". Status -> Auto-Posted.`);
-                    finalStatus = 'Auto-Posted';
+                    console.log(`[DB] Auto-post criteria passed for invoice date "${invoiceDate || 'missing'}". Status stays Ready to Post — posting requires explicit user approval.`);
                 }
             } catch (ruleErr) {
                 console.error('[DB] Error evaluating posting rules:', ruleErr);
@@ -1586,11 +1585,11 @@ export async function getAllInvoices(companyId?: string) {
     const params: any[] = [];
 
     if (companyId && companyId !== 'ALL') {
-        sql += ' WHERE company_id = $1';
+        sql += ' WHERE company_id = $1 AND processing_status != \'Deleted\'';
         params.push(companyId);
     } else {
         // ALL mode: exclude invoices belonging to inactive (deregistered) companies
-        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)) AND processing_status != \'Deleted\'';
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -1620,8 +1619,9 @@ export async function getInvoiceById(id: string) {
                  WHEN LOWER(doc_type) LIKE '%service%' THEN 'Invoice (Service)'
                  ELSE 'Invoice (Service)'
                END as doc_type_label
-        FROM ap_invoices 
+        FROM ap_invoices
         WHERE id = $1
+          AND processing_status != 'Deleted'
     `, [id]);
     return result.rows[0] || null;
 }
@@ -1940,17 +1940,18 @@ export async function updateInvoiceRemarks(id: string, remarks: string) {
  * @param erpSyncStatus - 'processed' or 'failed'
  */
 export async function markPostedToTally(id: string, responseJson?: object, tallyId?: string, erpSyncStatus: string = 'processed') {
+    const succeeded = erpSyncStatus !== 'failed';
     await query(
         `UPDATE ap_invoices SET
-          is_posted_to_tally = true,
-          processing_status = 'Auto-Posted',
+          is_posted_to_tally = $5,
+          processing_status = CASE WHEN $5 THEN 'Auto-Posted' ELSE 'Handoff' END,
           erp_sync_status = $4,
           erp_sync_id = COALESCE($3, erp_sync_id),
           posted_to_tally_json = COALESCE($2::jsonb, posted_to_tally_json),
           tally_id = COALESCE($3, tally_id),
           updated_at = NOW()
         WHERE id = $1`,
-        [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus]
+        [id, responseJson ? JSON.stringify(responseJson) : null, tallyId || null, erpSyncStatus, succeeded]
     );
 
     let postedInvoiceCompanyId: string | null = null;
@@ -1996,9 +1997,9 @@ export async function markPostedToTally(id: string, responseJson?: object, tally
  * @param id - Invoice UUID
  */
 export async function deleteInvoice(id: string, actor?: { userId?: string; userName?: string }) {
-    // Fetch before the transaction so we have data for the audit entry
+    // Fetch before the transaction so we have data for the audit entry and undo support
     const invRes = await query(
-        'SELECT invoice_number, vendor_name FROM ap_invoices WHERE id = $1',
+        'SELECT invoice_number, vendor_name, processing_status FROM ap_invoices WHERE id = $1',
         [id]
     );
     const inv = invRes.rows[0];
@@ -2006,10 +2007,10 @@ export async function deleteInvoice(id: string, actor?: { userId?: string; userN
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM ap_invoice_lines WHERE ap_invoice_id = $1', [id]);
-        await client.query('DELETE FROM ap_invoice_taxes WHERE ap_invoice_id = $1', [id]);
-        await client.query('DELETE FROM ap_invoices WHERE id = $1', [id]);
-        // Audit is inside the transaction — if it fails the delete rolls back too
+        // Soft delete — mark as Deleted instead of destroying rows.
+        // Lines, taxes, and processing_jobs are preserved for audit and potential recovery.
+        await client.query(`UPDATE ap_invoices SET processing_status = 'Deleted' WHERE id = $1`, [id]);
+        // Audit is inside the transaction — if it fails the update rolls back too
         await insertAuditLog(client.query.bind(client), {
             invoice_id: id,
             invoice_no: inv?.invoice_number || null,
@@ -2022,6 +2023,35 @@ export async function deleteInvoice(id: string, actor?: { userId?: string; userN
             summary: `Invoice "${inv?.invoice_number || id}" deleted.`,
             old_values: inv ? { invoice_number: inv.invoice_number, vendor_name: inv.vendor_name } : undefined,
             before_data: inv ? { invoice_number: inv.invoice_number, vendor_name: inv.vendor_name } : undefined,
+        });
+        await client.query('COMMIT');
+        // Return previousStatus so the caller can offer an undo action
+        return { previousStatus: inv?.processing_status ?? null };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Restore a soft-deleted invoice back to its previous status.
+ * Called when the user clicks Undo after a delete.
+ */
+export async function restoreInvoice(id: string, previousStatus: string, actor?: { userId?: string; userName?: string }) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('UPDATE ap_invoices SET processing_status = $1 WHERE id = $2', [previousStatus, id]);
+        await insertAuditLog(client.query.bind(client), {
+            invoice_id: id,
+            event_type: 'Restored',
+            event_code: 'RESTORED',
+            user_name: actor?.userName || 'System',
+            changed_by_user_id: actor?.userId || null,
+            description: `Invoice was restored from deleted state.`,
+            summary: `Invoice restored.`,
         });
         await client.query('COMMIT');
         return true;
@@ -2048,10 +2078,10 @@ export async function getInvoiceStatusCounts(companyId?: string) {
     const params: any[] = [];
 
     if (companyId && companyId !== 'ALL') {
-        sql += ' WHERE company_id = $1';
+        sql += ' WHERE company_id = $1 AND processing_status != \'Deleted\'';
         params.push(companyId);
     } else {
-        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
+        sql += ' WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)) AND processing_status != \'Deleted\'';
     }
 
     sql += ' GROUP BY processing_status';
@@ -3184,7 +3214,7 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
         const rtVendorGst = invData.vendor_gst;
         if (rtInvoiceNo && rtVendorGst) {
             const dupResult = await client.query(
-                `SELECT id FROM ap_invoices WHERE LOWER(invoice_number) = LOWER($1) AND LOWER(vendor_gst) = LOWER($2) AND id != $3`,
+                `SELECT id FROM ap_invoices WHERE LOWER(invoice_number) = LOWER($1) AND LOWER(vendor_gst) = LOWER($2) AND id != $3 AND processing_status != 'Deleted'`,
                 [rtInvoiceNo, rtVendorGst, invoiceId]
             );
             if (dupResult.rows.length > 0) {
@@ -3318,15 +3348,6 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
                 const result = await client.query(updateSql, [invoiceId, ...invParams]);
                 console.log(`[DB] ingestN8nData: successfully updated ap_invoices for ${invoiceId}. Rows affected: ${result.rowCount}`);
 
-                if (finalStatus === 'Auto-Posted') {
-                    setTimeout(async () => {
-                        try {
-                            const postResult = await sendInvoiceToTally(invoiceId, invData.ocr_raw_payload);
-                            const tallyIdStr = postResult.response?.tally_id || postResult.response?.masterid || null;
-                            await markPostedToTally(invoiceId, postResult.response, tallyIdStr, postResult.status);
-                        } catch (postErr) {}
-                    }, 100);
-                }
             }
         }
 
@@ -3891,6 +3912,7 @@ export async function getBatchInvoiceCount(batchId: string, startedAfter?: strin
         `SELECT COUNT(*)::int AS invoice_count
          FROM ap_invoices
          WHERE batch_id = $1
+           AND processing_status != 'Deleted'
            AND ($2::timestamptz IS NULL OR created_at >= ($2::timestamptz - INTERVAL '1 second'))`,
         [batchId, startedAfter || null]
     );
@@ -3918,6 +3940,7 @@ export async function getBatchStageTimingTable(batchId: string, startedAfter?: s
          FROM ap_invoices ai
          LEFT JOIN processing_jobs pj ON pj.invoice_id = ai.id
          WHERE ai.batch_id = $1
+           AND ai.processing_status != 'Deleted'
            AND ($2::timestamptz IS NULL OR ai.created_at >= ($2::timestamptz - INTERVAL '1 second'))
          GROUP BY ai.id, ai.file_name, ai.created_at
          ORDER BY ai.created_at ASC`,
@@ -4055,8 +4078,8 @@ export async function getAllServiceEntrySheets(companyId?: string) {
 export async function getDashboardMetrics(companyId?: string) {
     // Specific company → filter by UUID. ALL → restrict to active companies only.
     const whereClause = companyId && companyId !== 'ALL'
-        ? 'WHERE company_id = $1'
-        : 'WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true))';
+        ? "WHERE company_id = $1 AND processing_status != 'Deleted'"
+        : "WHERE (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)) AND processing_status != 'Deleted'";
     const params = companyId && companyId !== 'ALL' ? [companyId] : [];
 
     const totalInvoices = await query(`SELECT COUNT(*)::int as count FROM ap_invoices ${whereClause}`, params);
@@ -4188,6 +4211,7 @@ export async function getPipelineStats(companyId?: string) {
             ($1::uuid IS NOT NULL AND company_id = $1::uuid)
             OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
         )
+          AND processing_status != 'Deleted'
           AND date_trunc('month', created_at) = date_trunc('month', NOW())
     `;
 
@@ -4201,6 +4225,7 @@ export async function getPipelineStats(companyId?: string) {
             ($1::uuid IS NOT NULL AND company_id = $1::uuid)
             OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
         )
+          AND processing_status != 'Deleted'
           AND date_trunc('month', created_at) = date_trunc('month', NOW()) - INTERVAL '1 month'
     `;
 
@@ -4215,6 +4240,7 @@ export async function getPipelineStats(companyId?: string) {
             ($1::uuid IS NOT NULL AND company_id = $1::uuid)
             OR ($1::uuid IS NULL AND (company_id IS NULL OR company_id IN (SELECT id FROM companies WHERE is_active = true)))
         )
+          AND processing_status != 'Deleted'
           AND date_trunc('month', created_at) = date_trunc('month', NOW())
           AND posting_mode IS NOT NULL
           AND posting_mode != 'touchless'
@@ -4398,6 +4424,7 @@ export async function getRecentDashboardActivity(companyId?: string) {
             JOIN ap_invoices ai ON ai.id = pj.invoice_id
             WHERE pj.stage = 'OCR'
               AND pj.status = 'PASSED'
+              AND ai.processing_status != 'Deleted'
               AND (
                   ($1::uuid IS NOT NULL AND ai.company_id = $1::uuid)
                   OR ($1::uuid IS NULL AND (ai.company_id IS NULL OR ai.company_id IN (SELECT id FROM companies WHERE is_active = true)))
@@ -4615,6 +4642,7 @@ export async function getPoHealthStats(companyId?: string) {
              )::int AS blocked_invoices
          FROM ap_invoices ai
          WHERE ai.po_validation_json IS NOT NULL
+           AND ai.processing_status != 'Deleted'
            ${invoiceCompanyFilter}`,
         params
     );
