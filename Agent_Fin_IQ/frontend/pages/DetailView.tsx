@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ZoomIn, ZoomOut, ChevronLeft, ChevronRight, FileText, ArrowLeft, Trash2, RefreshCw,
   AlertCircle, AlertTriangle, CheckCircle, CheckCircle2, ChevronDown, Calendar, Edit2, Plus, X, UserPlus, Database, Save,
-  Search, Bell, RefreshCcw, Eye, Maximize2
+  Search, Bell, RefreshCcw, Eye, Maximize2, TrendingUp
 } from 'lucide-react';
 import { StatusBadge, EnhancementBadge } from '../components/at/StatusBadge';
 import { RevalidationIcon } from '../components/at/RevalidationIcon';
@@ -845,6 +845,10 @@ export default function DetailView() {
 
   // New states for real-time creation
   const [isVendorMapped, setIsVendorMapped] = useState(true);
+  // Purchase Price Variation result — parsed from ap_invoices.pricing_validation_json.
+  // Null means the rule never ran on this invoice; populated object means it has, and
+  // `.status === 'blocked'` is what we render the warning banner for.
+  const [pricingValidation, setPricingValidation] = useState<{ status?: string; threshold_pct?: number; failed_lines?: any[] } | null>(null);
   const [showVendorSlideout, setShowVendorSlideout] = useState(false);
   const [showLedgerSlideout, setShowLedgerSlideout] = useState(false);
   const [activeLedgerTarget, setActiveLedgerTarget] = useState<{ section: 'line_item' | 'additional_charge'; index: number } | null>(null);
@@ -1192,6 +1196,21 @@ export default function DetailView() {
             poValidation = {};
           }
         }
+        // Mirror the PO-validation parse for the Purchase Price Variation payload.
+        // Null / unparseable values leave the warning banner hidden — it only renders
+        // when the rule has run and returned a structured object.
+        let priceValidation: any = null;
+        if ((invoiceRecord as any).pricing_validation_json) {
+          try {
+            priceValidation = typeof (invoiceRecord as any).pricing_validation_json === 'string'
+              ? JSON.parse((invoiceRecord as any).pricing_validation_json)
+              : (invoiceRecord as any).pricing_validation_json;
+          } catch (e) {
+            console.warn('[DetailView] Failed to parse pricing_validation_json');
+            priceValidation = null;
+          }
+        }
+        setPricingValidation(priceValidation);
         const companyVerifiedFromN8n = getOptionalBooleanFlag(n8nValidation?.buyer_verification) === true;
 
         setRawPayload(raw);
@@ -2487,6 +2506,64 @@ export default function DetailView() {
                         <p className="text-[14px] font-bold text-orange-700 leading-tight">
                           Extraction Failed: AI was unable to confidently extract all fields. Please review and provide manual input.
                         </p>
+                      </div>
+                    </div>
+                  )}
+                  {pricingValidation?.status === 'blocked' && Array.isArray(pricingValidation?.failed_lines) && pricingValidation.failed_lines.length > 0 && (
+                    // Price Variation warning — rendered whenever the PPV rule blocked
+                    // auto-posting. Amber tone (informational warning, not a hard error)
+                    // because the invoice is still reviewable / approvable; the rule
+                    // just flagged that one or more lines exceeded the supplier's
+                    // historical average by more than the configured threshold.
+                    <div className="rounded-[22px] border border-[#fcd34d] bg-[linear-gradient(135deg,#FFFBEB_0%,#FEF3C7_100%)] px-5 py-4 shadow-[0_14px_30px_rgba(234,179,8,0.10)]">
+                      <div className="flex items-start gap-3.5">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#fde68a] bg-[linear-gradient(180deg,#FFFBEB_0%,#FEF3C7_100%)] shrink-0 shadow-[0_8px_18px_rgba(234,179,8,0.12)]">
+                          <TrendingUp size={18} className="text-[#b45309]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-2">
+                            <p className="text-[13px] font-black text-[#92400e] leading-tight">
+                              Price variation detected on {pricingValidation.failed_lines.length} {pricingValidation.failed_lines.length === 1 ? 'line' : 'lines'}
+                            </p>
+                            {typeof pricingValidation.threshold_pct === 'number' && (
+                              <span className="text-[10px] font-bold text-[#b45309]/80">
+                                (threshold: {pricingValidation.threshold_pct}% of supplier average)
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-[#b45309] font-medium mt-0.5">
+                            Unit prices above the supplier's historical average. Review before approving.
+                          </p>
+                          <div className="mt-3 flex flex-col gap-1.5">
+                            {pricingValidation.failed_lines.slice(0, 5).map((line: any, idx: number) => (
+                              <div
+                                key={line.line_id || idx}
+                                className="flex items-center justify-between gap-3 rounded-[10px] border border-[#fde68a] bg-white/70 px-3 py-2 text-[11.5px]"
+                              >
+                                <div className="min-w-0 flex-1 truncate font-semibold text-[#78350f]">
+                                  {line.description || 'Line item'}
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0 font-mono">
+                                  <span className="text-[#92400e]">
+                                    ₹{Number(line.current_price || 0).toLocaleString('en-IN')}
+                                  </span>
+                                  <span className="text-[#b45309]/60">vs avg</span>
+                                  <span className="text-[#78350f]">
+                                    ₹{Number(line.historical_avg || 0).toLocaleString('en-IN')}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full bg-[#fbbf24]/25 px-2 py-0.5 text-[10px] font-black text-[#92400e]">
+                                    +{Number(line.pct_above_avg || 0).toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                            {pricingValidation.failed_lines.length > 5 && (
+                              <div className="text-[10.5px] text-[#b45309]/80 italic pl-1">
+                                …and {pricingValidation.failed_lines.length - 5} more line{pricingValidation.failed_lines.length - 5 === 1 ? '' : 's'}.
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}

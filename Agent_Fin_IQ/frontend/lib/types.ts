@@ -50,6 +50,9 @@ export interface Invoice {
     all_data_invoice: Record<string, any> | null;
     n8n_val_json_data: string | null;
     po_validation_json?: Record<string, any> | string | null;
+    // Purchase Price Variation result — populated by the PPV rule when
+    // enabled in Control Hub. Shape: { status, threshold_pct, failed_lines[], ... }.
+    pricing_validation_json?: Record<string, any> | string | null;
     tally_id: string | null;
     uploader_name: string;
     created_at: string;

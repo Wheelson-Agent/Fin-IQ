@@ -1388,6 +1388,169 @@ function passesItemFilterRule(lineItems: any[], docType: any, itemFilter: any, s
     );
 }
 
+// ─── Purchase Price Variation (PPV) helpers ───────────────────────────────
+// Stored shape written to ap_invoices.pricing_validation_json when the PPV
+// rule runs. Consumed by the frontend to show per-line spike detail. The
+// column is nullable — only populated after PPV has been evaluated at least
+// once on an invoice.
+type PricingValidationDetail = {
+    status: 'passed' | 'blocked' | 'disabled';
+    threshold_pct: number;                   // e.g. 110 → block when current > 1.10 × avg
+    evaluated_at: string;                    // ISO timestamp
+    checked_lines_count: number;             // lines with item_id that had enough history
+    skipped_lines_count: number;             // lines without item_id or with <min samples
+    failed_lines: Array<{
+        line_id: string | null;
+        description: string;
+        current_price: number;
+        historical_avg: number;
+        pct_above_avg: number;               // e.g. 23.4 → 23.4% over avg
+        sample_count: number;
+    }>;
+};
+
+// Fetch historical (avg unit price, sample count) per item for a given vendor.
+// Scope: lines on invoices already Approved or Auto-Posted — i.e. successful
+// postings — with a positive unit price. Excludes the current invoice so it
+// cannot compare against itself. Returns a Map keyed by item_id so callers
+// can look up per-line stats in O(1) without further queries.
+async function fetchPpvStatsForInvoice(
+    vendorGst: string | null | undefined,
+    itemIds: string[],
+    excludeInvoiceId: string,
+): Promise<Map<string, { avg_price: number; sample_count: number }>> {
+    const map = new Map<string, { avg_price: number; sample_count: number }>();
+    // Guard: without a GSTIN or item IDs the rule cannot evaluate — skip the query entirely.
+    if (!vendorGst || !Array.isArray(itemIds) || itemIds.length === 0) return map;
+    const result = await query(
+        `SELECT l.item_id::text                  AS item_id,
+                AVG(l.unit_price)::numeric       AS avg_price,
+                COUNT(*)::int                    AS sample_count
+           FROM ap_invoice_lines l
+           JOIN ap_invoices      i ON i.id = l.ap_invoice_id
+          WHERE LOWER(i.vendor_gst) = LOWER($1)
+            AND l.item_id = ANY($2::uuid[])
+            AND i.processing_status IN ('Approved','Auto-Posted')
+            AND i.id != $3::uuid
+            AND l.unit_price > 0
+          GROUP BY l.item_id`,
+        [vendorGst, itemIds, excludeInvoiceId]
+    );
+    for (const row of result.rows) {
+        map.set(String(row.item_id), {
+            avg_price: Number(row.avg_price) || 0,
+            sample_count: Number(row.sample_count) || 0,
+        });
+    }
+    return map;
+}
+
+// Batch version used by reEvaluateAutoPostStatuses — one SQL over all
+// (vendor_gst, item_id) pairs appearing in the candidate invoices, excluding
+// the candidates themselves from the historical pool. Returns a nested Map
+// keyed by "vendorGstLower::itemId" for O(1) per-line lookup.
+async function fetchPpvStatsBatch(
+    vendorItemPairs: Array<{ vendorGst: string; itemId: string }>,
+    excludeInvoiceIds: string[],
+): Promise<Map<string, { avg_price: number; sample_count: number }>> {
+    const map = new Map<string, { avg_price: number; sample_count: number }>();
+    if (!vendorItemPairs.length) return map;
+    // De-duplicate so the IN lists stay compact on large candidate sets.
+    const vendorGstsLower = Array.from(new Set(vendorItemPairs.map(p => p.vendorGst.toLowerCase())));
+    const itemIds = Array.from(new Set(vendorItemPairs.map(p => p.itemId)));
+    const excludeIds = Array.isArray(excludeInvoiceIds) ? excludeInvoiceIds : [];
+    const result = await query(
+        `SELECT LOWER(i.vendor_gst)            AS vendor_gst_lower,
+                l.item_id::text                AS item_id,
+                AVG(l.unit_price)::numeric     AS avg_price,
+                COUNT(*)::int                  AS sample_count
+           FROM ap_invoice_lines l
+           JOIN ap_invoices      i ON i.id = l.ap_invoice_id
+          WHERE LOWER(i.vendor_gst) = ANY($1::text[])
+            AND l.item_id           = ANY($2::uuid[])
+            AND i.processing_status IN ('Approved','Auto-Posted')
+            AND NOT (i.id = ANY($3::uuid[]))
+            AND l.unit_price > 0
+          GROUP BY LOWER(i.vendor_gst), l.item_id`,
+        [vendorGstsLower, itemIds, excludeIds]
+    );
+    for (const row of result.rows) {
+        map.set(`${row.vendor_gst_lower}::${row.item_id}`, {
+            avg_price: Number(row.avg_price) || 0,
+            sample_count: Number(row.sample_count) || 0,
+        });
+    }
+    return map;
+}
+
+// Pure evaluator — given pre-computed stats, decides pass/fail per line and
+// builds the pricing_validation_json payload. Keeps the rule deterministic
+// and testable; all I/O happens in the fetch helpers above.
+// MIN_SAMPLES defines the cold-start guard: fewer historical samples than this
+// and the line is skipped (silent pass) — per user spec "silently let it pass".
+const PPV_MIN_SAMPLES = 3;
+
+function evaluatePurchasePriceVariation(
+    lineItems: any[],
+    criteriaExtended: any,
+    statsMap: Map<string, { avg_price: number; sample_count: number }>,
+    lookupKey: (line: any) => string | null,
+): { pass: boolean; detail: PricingValidationDetail } {
+    const thresholdPct = Number(criteriaExtended?.fc_exceeded_supplier_avg_threshold ?? 110);
+    const thresholdFactor = thresholdPct / 100;
+    const failed: PricingValidationDetail['failed_lines'] = [];
+    let checked = 0;
+    let skipped = 0;
+
+    for (const line of Array.isArray(lineItems) ? lineItems : []) {
+        const key = lookupKey(line);
+        const currentPrice = Number(line?.unit_price) || 0;
+        // Skip lines without a reliable item identity or without a price.
+        if (!key || currentPrice <= 0) { skipped++; continue; }
+        const stats = statsMap.get(key);
+        // Cold-start guard — silent pass when there is not enough history.
+        if (!stats || stats.sample_count < PPV_MIN_SAMPLES) { skipped++; continue; }
+        checked++;
+        if (currentPrice > stats.avg_price * thresholdFactor) {
+            failed.push({
+                line_id: line?.id ?? null,
+                description: String(line?.description ?? '').slice(0, 200),
+                current_price: currentPrice,
+                historical_avg: Number(stats.avg_price.toFixed(2)),
+                pct_above_avg: Number(((currentPrice / stats.avg_price - 1) * 100).toFixed(2)),
+                sample_count: stats.sample_count,
+            });
+        }
+    }
+
+    const detail: PricingValidationDetail = {
+        status: failed.length > 0 ? 'blocked' : 'passed',
+        threshold_pct: thresholdPct,
+        evaluated_at: new Date().toISOString(),
+        checked_lines_count: checked,
+        skipped_lines_count: skipped,
+        failed_lines: failed,
+    };
+    return { pass: failed.length === 0, detail };
+}
+
+// Persist the evaluation result to ap_invoices.pricing_validation_json.
+// Writes are best-effort: a logging failure here must never block the
+// surrounding auto-post decision or transaction rollback.
+async function stampPricingValidation(invoiceId: string, detail: PricingValidationDetail) {
+    try {
+        await query(
+            `UPDATE ap_invoices
+                SET pricing_validation_json = $2::jsonb,
+                    updated_at              = NOW()
+              WHERE id = $1`,
+            [invoiceId, JSON.stringify(detail)]
+        );
+    } catch (err) {
+        console.error('[DB] stampPricingValidation failed for', invoiceId, err);
+    }
+}
+
 function shouldInvoiceAutoPostWithRules(args: {
     grandTotal: any;
     invoiceDate: any;
@@ -1398,14 +1561,31 @@ function shouldInvoiceAutoPostWithRules(args: {
     invoiceDateRange: any;
     selectedSupplierGstins: Set<string>;
     selectedItemNames: string[];
+    // Pre-computed PPV pass/fail. Default true keeps the rule neutral when PPV
+    // is disabled, when no history exists, or when the caller hasn't evaluated
+    // it — the existing four checks remain the sole gate in those cases.
+    pricingPass?: boolean;
 }): boolean {
     return passesValueLimitRule(args.grandTotal, args.postingRules) &&
         passesInvoiceDateRange(args.invoiceDate, args.invoiceDateRange) &&
         passesSupplierFilterRule(args.invoiceVendorGst, args.postingRules, args.selectedSupplierGstins) &&
-        passesItemFilterRule(args.lineItems, args.docType, args.postingRules, args.selectedItemNames);
+        passesItemFilterRule(args.lineItems, args.docType, args.postingRules, args.selectedItemNames) &&
+        (args.pricingPass !== false);
 }
 
-async function shouldAutoPostInvoice(grandTotal: any, invoiceDate: any, invoiceVendorGst: any, docType: any, lineItems: any[] = [], companyId?: string) {
+async function shouldAutoPostInvoice(
+    grandTotal: any,
+    invoiceDate: any,
+    invoiceVendorGst: any,
+    docType: any,
+    lineItems: any[] = [],
+    companyId?: string,
+    // Optional: when provided, PPV is evaluated and its result is stamped onto
+    // pricing_validation_json. Ingest callers pass these so fresh invoices show
+    // the spike detail even though the status outcome is unchanged (ingest is
+    // intentionally non-gating — see comment at the ingest call site).
+    invoiceId?: string,
+) {
     const postingRules = await getAppConfig('posting_rules', companyId || undefined);
     // No config saved → treat as manual (safe default: never auto-post without explicit opt-in)
     if (!postingRules || postingRules?.postingMode === 'manual') return false;
@@ -1415,6 +1595,36 @@ async function shouldAutoPostInvoice(grandTotal: any, invoiceDate: any, invoiceV
         : await getAppConfig('global_invoice_date_range');
     const selectedSupplierGstins = await getSelectedSupplierGstins(postingRules);
     const selectedItemNames = await getSelectedItemNames(postingRules);
+
+    // PPV evaluation — only runs when the admin has enabled the rule in the
+    // Extended Criteria config. When disabled, pricingPass stays true and the
+    // behaviour is identical to the pre-PPV code path.
+    let pricingPass = true;
+    if (invoiceId) {
+        try {
+            const criteriaExtended = await getAppConfig('auto_post_criteria_extended', companyId || undefined);
+            if (criteriaExtended?.fc_exceeded_supplier_avg_enabled) {
+                const itemIds = (Array.isArray(lineItems) ? lineItems : [])
+                    .map((l: any) => l?.item_id)
+                    .filter((v: any): v is string => typeof v === 'string' && v.length > 0);
+                const statsMap = await fetchPpvStatsForInvoice(invoiceVendorGst, itemIds, invoiceId);
+                const ppvResult = evaluatePurchasePriceVariation(
+                    lineItems,
+                    criteriaExtended,
+                    statsMap,
+                    (line: any) => (typeof line?.item_id === 'string' && line.item_id.length > 0 ? line.item_id : null),
+                );
+                pricingPass = ppvResult.pass;
+                // Stamping happens regardless of whether the status is gated — the
+                // detail is useful context for operators even on a fresh 'Ready to
+                // Post' invoice where the status wouldn't change anyway.
+                await stampPricingValidation(invoiceId, ppvResult.detail);
+            }
+        } catch (ppvErr) {
+            console.error('[DB] PPV evaluation failed (non-fatal) for', invoiceId, ppvErr);
+        }
+    }
+
     return shouldInvoiceAutoPostWithRules({
         grandTotal,
         invoiceDate,
@@ -1425,6 +1635,7 @@ async function shouldAutoPostInvoice(grandTotal: any, invoiceDate: any, invoiceV
         invoiceDateRange,
         selectedSupplierGstins,
         selectedItemNames,
+        pricingPass,
     });
 }
 
@@ -1491,8 +1702,8 @@ function dedupeRawPayloadAliases(payload: any, sourceKeys: string[] = []) {
  * This encapsulates the business logic for tab movement.
  */
 export async function evaluateInvoiceStatus(
-    validationData: any, 
-    vendorId: string | null, 
+    validationData: any,
+    vendorId: string | null,
     invoiceNumber: string | null,
     lineItems: any[] = [],
     n8nStatus?: string,
@@ -1501,7 +1712,13 @@ export async function evaluateInvoiceStatus(
     invoiceDate?: string | null,
     invoiceVendorGst?: string | null,
     docType?: string | null,
-    poValidationJson?: any
+    poValidationJson?: any,
+    // Optional: when provided, enables PPV evaluation + stamping of
+    // pricing_validation_json on this invoice. Existing callers that omit it
+    // keep pre-PPV behaviour exactly — the auto-post evaluation still runs
+    // (and still only logs, per the existing ingest design) but no PPV
+    // side-effect happens without an id to stamp onto.
+    invoiceId?: string
 ): Promise<string> {
     const getVal = (key: string) => {
         if (!validationData) return false;
@@ -1539,7 +1756,11 @@ export async function evaluateInvoiceStatus(
             // --- POSTING RULES EVALUATION ---
             // Evaluate the enabled auto-post gates without changing fallback routing.
             try {
-                if (await shouldAutoPostInvoice(grandTotal, invoiceDate, invoiceVendorGst, docType, lineItems, companyId)) {
+                // Passing invoiceId here opts this evaluation into PPV: if the
+                // admin has enabled the Purchase Price Variation rule, PPV is
+                // evaluated and the detail is stamped onto pricing_validation_json.
+                // Status routing stays unchanged at ingest (existing design).
+                if (await shouldAutoPostInvoice(grandTotal, invoiceDate, invoiceVendorGst, docType, lineItems, companyId, invoiceId)) {
                     console.log(`[DB] Auto-post criteria passed for invoice date "${invoiceDate || 'missing'}". Status stays Ready to Post — posting requires explicit user approval.`);
                 }
             } catch (ruleErr) {
@@ -1750,8 +1971,9 @@ export async function updateInvoiceWithOCR(id: string, data: any) {
     const poValidationJson = buildPoValidationJson(poMatch);
     updateValues.po_validation_json = JSON.stringify(poValidationJson);
 
-    // Always re-calculate status on save to ensure correct tab movement
-    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal, invDate, vGst, currentDocType, poValidationJson);
+    // Always re-calculate status on save to ensure correct tab movement.
+    // Passing `id` enables PPV re-evaluation + stamp when the rule is enabled.
+    const finalStatus = await evaluateInvoiceStatus(n8nVal, vId, invNo, items, current.n8n_validation_status, compId, gTotal, invDate, vGst, currentDocType, poValidationJson, id);
     updateValues.processing_status = finalStatus;
 
     // Special handling for date strings to ensure PostgreSQL compatibility
@@ -2828,7 +3050,8 @@ export async function applyRevalidationOutcome(
             current.invoice_date,
             current.vendor_gst,
             current.doc_type,
-            poValidationJson
+            poValidationJson,
+            id
         );
 
         const updateRes = await client.query(
@@ -2963,7 +3186,8 @@ export async function waiveInvoicePoRequirement(
             current.invoice_date,
             current.vendor_gst,
             current.doc_type,
-            poValidationJson
+            poValidationJson,
+            id
         );
         // A PO waiver is a human exception only; it must not silently perform or imply Tally posting.
         const finalStatus = evaluatedStatus === 'Auto-Posted' ? 'Ready to Post' : evaluatedStatus;
@@ -3311,7 +3535,8 @@ export async function ingestN8nData(invoiceId: string, n8nData: any) {
             invData.invoice_date,
             invData.vendor_gst,
             invData.doc_type,
-            poValidationJson
+            poValidationJson,
+            invoiceId
         );
 
         let isHighAmount = false;
@@ -5113,8 +5338,12 @@ export async function reEvaluateAutoPostStatuses(companyId?: string) {
             const lineItemsByInvoiceId = new Map<string, any[]>();
 
             if (candidateInvoiceIds.length > 0) {
+                // Include id, item_id, unit_price so the PPV evaluator can use them
+                // alongside the description that the item-name filter already needs.
+                // All of these are additive — the existing rule checks only read
+                // `description` and are unaffected.
                 const lineItemsRes = await client.query(
-                    `SELECT ap_invoice_id, description
+                    `SELECT id, ap_invoice_id, description, item_id, unit_price
                      FROM ap_invoice_lines
                      WHERE ap_invoice_id = ANY($1::uuid[])`,
                     [candidateInvoiceIds]
@@ -5127,7 +5356,61 @@ export async function reEvaluateAutoPostStatuses(companyId?: string) {
                 }
             }
 
+            // ─── PPV pre-aggregation ─────────────────────────────
+            // Load the extended criteria once. When PPV is disabled, we skip
+            // the batch fetch entirely and keep pricingPass=true for every
+            // candidate — behaviour identical to the pre-PPV code path.
+            const criteriaExtended = await getAppConfig('auto_post_criteria_extended', companyId || undefined);
+            const ppvEnabled = !!criteriaExtended?.fc_exceeded_supplier_avg_enabled;
+            let ppvStatsMap = new Map<string, { avg_price: number; sample_count: number }>();
+            if (ppvEnabled) {
+                // Collect all (vendor_gst, item_id) pairs across the candidate
+                // set. One SQL below fetches historical averages for every pair
+                // at once — avoids N×M queries inside the loop. Candidates are
+                // excluded from the historical pool so their own unposted lines
+                // don't skew the average they're being compared against.
+                const pairs: Array<{ vendorGst: string; itemId: string }> = [];
+                for (const inv of candidateInvoices) {
+                    if (!inv.vendor_gst) continue;
+                    const lines = lineItemsByInvoiceId.get(inv.id) || [];
+                    for (const line of lines) {
+                        if (typeof line.item_id === 'string' && line.item_id.length > 0) {
+                            pairs.push({ vendorGst: inv.vendor_gst, itemId: line.item_id });
+                        }
+                    }
+                }
+                ppvStatsMap = await fetchPpvStatsBatch(pairs, candidateInvoiceIds);
+            }
+
             for (const invoice of candidateInvoices) {
+                // Evaluate PPV for this invoice against the pre-aggregated stats.
+                // When disabled, pricingPass stays true and no stamp is written.
+                let pricingPass = true;
+                if (ppvEnabled) {
+                    const invoiceLines = lineItemsByInvoiceId.get(invoice.id) || [];
+                    const vendorGstLower = (invoice.vendor_gst || '').toLowerCase();
+                    const ppvResult = evaluatePurchasePriceVariation(
+                        invoiceLines,
+                        criteriaExtended,
+                        ppvStatsMap,
+                        (line: any) => (
+                            invoice.vendor_gst && typeof line?.item_id === 'string' && line.item_id.length > 0
+                                ? `${vendorGstLower}::${line.item_id}`
+                                : null
+                        ),
+                    );
+                    pricingPass = ppvResult.pass;
+                    // Stamp the detail inside the same transaction so the status
+                    // change and its reason commit or roll back atomically.
+                    await client.query(
+                        `UPDATE ap_invoices
+                            SET pricing_validation_json = $2::jsonb,
+                                updated_at              = NOW()
+                          WHERE id = $1`,
+                        [invoice.id, JSON.stringify(ppvResult.detail)]
+                    );
+                }
+
                 const shouldAutoPost = shouldInvoiceAutoPostWithRules({
                     grandTotal: invoice.grand_total,
                     invoiceDate: invoice.invoice_date,
@@ -5138,6 +5421,7 @@ export async function reEvaluateAutoPostStatuses(companyId?: string) {
                     invoiceDateRange,
                     selectedSupplierGstins,
                     selectedItemNames,
+                    pricingPass,
                 });
 
                 const nextStatus = shouldAutoPost ? 'Auto-Posted' : 'Ready to Post';

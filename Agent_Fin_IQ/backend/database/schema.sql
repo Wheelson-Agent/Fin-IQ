@@ -52,7 +52,7 @@ BEGIN
 END $$;
 
 -- Update ap_invoice_lines to have item_id and ledger_id
-DO $$ 
+DO $$
 BEGIN
   IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'ap_invoice_lines') THEN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ap_invoice_lines' AND column_name='item_id') THEN
@@ -60,6 +60,19 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ap_invoice_lines' AND column_name='ledger_id') THEN
       ALTER TABLE ap_invoice_lines ADD COLUMN ledger_id UUID;
+    END IF;
+  END IF;
+END $$;
+
+-- Purchase Price Variation (PPV) — stores the per-line outcome of the
+-- auto-post PPV rule (current unit price vs supplier's historical average).
+-- Populated when the rule runs; the UI reads it to show which lines spiked
+-- and by how much. Null when PPV has never been evaluated on the invoice.
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'ap_invoices') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ap_invoices' AND column_name='pricing_validation_json') THEN
+      ALTER TABLE ap_invoices ADD COLUMN pricing_validation_json JSONB;
     END IF;
   END IF;
 END $$;

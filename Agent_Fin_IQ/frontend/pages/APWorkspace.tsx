@@ -77,6 +77,12 @@ interface APRecord {
     detail: string;
     tone: 'amber' | 'rose' | 'emerald';
   };
+  /** Summary of the PPV rule result for this invoice. Populated when ap_invoices.pricing_validation_json
+   *  reports blocked lines — used to render a small "Price Spike" badge on the row. */
+  priceSpike?: {
+    count: number;        // how many lines exceeded the threshold
+    topPct: number;       // the largest pct_above_avg across failed lines — shown inside the badge
+  };
   taxBreakdown: {
     igst: number | null;
     cgst: number | null;
@@ -236,7 +242,10 @@ const itemDescriptionMatches = (description: string, selectedItemName: string) =
 } */
 
 function RoutingRuleBadges({ record, postingMode, valueLimitConfig, invoiceDateRangeConfig, supplierFilterConfig, itemFilterConfig }: {
-  record: { isHighAmount: boolean; date: string; vendorGst: string; docTypeLabel: string; itemDescriptions: string[]; status: RecordStatus };
+  // `priceSpike` is optional — only populated when the PPV rule has blocked
+  // this invoice. Shown as an additional badge alongside the other routing
+  // flags. All existing row rendering sites already pass the full record.
+  record: { isHighAmount: boolean; date: string; vendorGst: string; docTypeLabel: string; itemDescriptions: string[]; status: RecordStatus; priceSpike?: { count: number; topPct: number } };
   postingMode: 'manual' | 'auto' | 'touchless';
   valueLimitConfig: { enabled: boolean; limit: number } | null;
   invoiceDateRangeConfig: { enabled: boolean; from: string; to: string } | null;
@@ -302,6 +311,25 @@ function RoutingRuleBadges({ record, postingMode, valueLimitConfig, invoiceDateR
       className: 'bg-white border-slate-200',
       iconWrapClassName: 'bg-emerald-50 border border-emerald-200',
       iconClassName: 'text-emerald-600',
+      textClassName: 'text-slate-700',
+    });
+  }
+
+  // Purchase Price Variation — signals one or more line items priced above the
+  // supplier's historical average by more than the configured threshold. The
+  // badge label includes the count of flagged lines and the largest spike %
+  // so operators can triage at a glance without opening the invoice.
+  if (record.priceSpike && record.priceSpike.count > 0) {
+    const spikePctLabel = record.priceSpike.topPct >= 1
+      ? `+${record.priceSpike.topPct.toFixed(0)}%`
+      : '';
+    flags.push({
+      icon: <TrendingUp className="w-2.5 h-2.5 shrink-0" />,
+      label: `Price Spike${spikePctLabel ? ` ${spikePctLabel}` : ''}${record.priceSpike.count > 1 ? ` · ${record.priceSpike.count}` : ''}`,
+      title: `${record.priceSpike.count} line${record.priceSpike.count === 1 ? '' : 's'} priced above the supplier's historical average.`,
+      className: 'bg-white border-slate-200',
+      iconWrapClassName: 'bg-orange-50 border border-orange-200',
+      iconClassName: 'text-orange-600',
       textClassName: 'text-slate-700',
     });
   }
@@ -536,6 +564,20 @@ export default function APWorkspace() {
             : (poValidation.status === 'matched' || poValidation.status === 'waived');
           const poIssue = getPoIssueDisplay(poValidation);
 
+          // Parse Purchase Price Variation (PPV) detail if the rule has been
+          // evaluated for this invoice. Only build the priceSpike summary when
+          // the rule actually blocked — passed/disabled states get no badge.
+          const priceValidation = parseJSON(inv.pricing_validation_json);
+          const priceSpikeSummary = (priceValidation?.status === 'blocked' && Array.isArray(priceValidation?.failed_lines) && priceValidation.failed_lines.length > 0)
+            ? {
+                count: priceValidation.failed_lines.length,
+                topPct: priceValidation.failed_lines.reduce(
+                  (max: number, ln: any) => Math.max(max, Number(ln?.pct_above_avg) || 0),
+                  0,
+                ),
+              }
+            : undefined;
+
           const getVal = (key: string, oldKey?: string) => {
             const val = valData[key] ??
               valData[key.toLowerCase().replace(/ /g, '_')] ??
@@ -652,6 +694,7 @@ export default function APWorkspace() {
             // Carry po_number from the DB row so tabs can display it in Supplier Reference
             poNumber: inv.po_number ? String(inv.po_number).trim() : undefined,
             poIssue,
+            priceSpike: priceSpikeSummary,
             taxBreakdown: {
               igst: raw.igst ?? raw.IGST ?? null,
               cgst: raw.cgst ?? raw.CGST ?? null,

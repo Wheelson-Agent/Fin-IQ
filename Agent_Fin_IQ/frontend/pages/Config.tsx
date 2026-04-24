@@ -108,6 +108,52 @@ function RadioPill({
     );
 }
 
+/**
+ * FoldIndicator — chevron next to a <Toggle> that reflects whether the
+ * section's expandable content is currently visible. When an onClick is
+ * provided it becomes an interactive fold-only control: click it to collapse
+ * or expand the content without touching the rule's on/off state. When
+ * onClick is omitted it's purely decorative (mirrors the toggle).
+ */
+function FoldIndicator({
+    expanded,
+    onClick,
+    disabled,
+}: {
+    expanded: boolean;
+    onClick?: () => void;
+    disabled?: boolean;
+}) {
+    const interactive = typeof onClick === 'function' && !disabled;
+    if (!interactive) {
+        return (
+            <motion.div
+                animate={{ rotate: expanded ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+                className={`text-[#94A3B8] shrink-0 ${disabled ? 'opacity-40' : ''}`}
+                aria-hidden="true"
+            >
+                <ChevronDown size={14} />
+            </motion.div>
+        );
+    }
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            aria-label={expanded ? 'Collapse section' : 'Expand section'}
+            className="text-[#94A3B8] shrink-0 rounded-md p-[4px] hover:bg-[#E2E8F0] hover:text-[#64748B] transition-colors cursor-pointer"
+        >
+            <motion.div
+                animate={{ rotate: expanded ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+            >
+                <ChevronDown size={14} />
+            </motion.div>
+        </button>
+    );
+}
+
 /* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MultiSelect Component ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */
 interface SelectOption { id: string; label: string; }
 function MultiSelect({ options, selectedIds, onToggle, placeholder }: { options: SelectOption[], selectedIds: string[], onToggle: (id: string) => void, placeholder: string }) {
@@ -430,6 +476,14 @@ export default function Config() {
     const [reportConfigs, setReportConfigs] = useState(INIT.reportConfigs);
     const [storage, setStorage] = useState(INIT.storage);
     const [criteriaExtended, setCriteriaExtended] = useState(INIT.criteriaExtended);
+    // Per-rule fold state — purely cosmetic, not persisted. A section is
+    // collapsed only when the user explicitly clicks its chevron; toggling
+    // the rule off/on does not change this map. When the rule is disabled
+    // the content is hidden regardless, so the collapsed flag only matters
+    // while the rule is enabled.
+    const [collapsedRules, setCollapsedRules] = useState<Record<string, boolean>>({});
+    const toggleRuleFold = (key: string) =>
+        setCollapsedRules(prev => ({ ...prev, [key]: !prev[key] }));
     const [allSuppliers, setAllSuppliers] = useState<any[]>([]);
     const [allItems, setAllItems] = useState<any[]>([]);
     const [openConfigs, setOpenConfigs] = useState<Record<string, boolean>>({});
@@ -1986,9 +2040,16 @@ export default function Config() {
                                                                      <div className="text-[11px] text-[#94A3B8]">Higher values trigger manual review</div>
                                                                  </div>
                                                              </div>
-                                                             <Toggle checked={criteria.enableValueLimit} onChange={() => setCriteria({ ...criteria, enableValueLimit: !criteria.enableValueLimit })} />
+                                                             <div className="flex items-center gap-[10px]">
+                                                                 <FoldIndicator
+                                                                     expanded={criteria.enableValueLimit && !collapsedRules.valueLimit}
+                                                                     onClick={() => toggleRuleFold('valueLimit')}
+                                                                     disabled={!criteria.enableValueLimit}
+                                                                 />
+                                                                 <Toggle checked={criteria.enableValueLimit} onChange={() => setCriteria({ ...criteria, enableValueLimit: !criteria.enableValueLimit })} />
+                                                             </div>
                                                          </div>
-                                                         {criteria.enableValueLimit && (
+                                                         {criteria.enableValueLimit && !collapsedRules.valueLimit && (
                                                              <div className="pl-[44px] pr-[12px] animate-in fade-in slide-in-from-top-2 duration-300">
                                                                  <div className="flex items-center gap-[8px] mt-[4px]">
                                                                      <div className="relative flex-1">
@@ -2019,9 +2080,16 @@ export default function Config() {
                                                                      </div>
                                                                  </div>
                                                              </div>
-                                                             <Toggle checked={criteria.poMatch} onChange={() => setCriteria({ ...criteria, poMatch: !criteria.poMatch, ...(!criteria.poMatch ? {} : { enablePoMatchAmountLimit: false }) })} />
+                                                             <div className="flex items-center gap-[10px]">
+                                                                 <FoldIndicator
+                                                                     expanded={criteria.poMatch && !collapsedRules.poMatch}
+                                                                     onClick={() => toggleRuleFold('poMatch')}
+                                                                     disabled={!criteria.poMatch}
+                                                                 />
+                                                                 <Toggle checked={criteria.poMatch} onChange={() => setCriteria({ ...criteria, poMatch: !criteria.poMatch, ...(!criteria.poMatch ? {} : { enablePoMatchAmountLimit: false }) })} />
+                                                             </div>
                                                          </div>
-                                                         {criteria.poMatch && (
+                                                         {criteria.poMatch && !collapsedRules.poMatch && (
                                                              <div className="pl-[44px] flex flex-col gap-[10px] animate-in fade-in slide-in-from-top-2 duration-300">
                                                                  {/* Exclude service invoices from PO check */}
                                                                  <div className="bg-white border border-[#E2E8F0] rounded-[10px] p-[10px_14px] flex items-center justify-between">
@@ -2038,9 +2106,16 @@ export default function Config() {
                                                                              <div className="text-[12px] font-bold text-[#1A2640]">Minimum Amount Threshold</div>
                                                                              <div className="text-[11px] text-[#94A3B8]">Skip PO check when grand total is at or below this amount</div>
                                                                          </div>
-                                                                         <Toggle checked={(criteria as any).enablePoMatchAmountLimit} onChange={() => setCriteria({ ...criteria, enablePoMatchAmountLimit: !(criteria as any).enablePoMatchAmountLimit })} />
+                                                                         <div className="flex items-center gap-[10px]">
+                                                                             <FoldIndicator
+                                                                                 expanded={!!(criteria as any).enablePoMatchAmountLimit && !collapsedRules.poMatchMinAmount}
+                                                                                 onClick={() => toggleRuleFold('poMatchMinAmount')}
+                                                                                 disabled={!(criteria as any).enablePoMatchAmountLimit}
+                                                                             />
+                                                                             <Toggle checked={(criteria as any).enablePoMatchAmountLimit} onChange={() => setCriteria({ ...criteria, enablePoMatchAmountLimit: !(criteria as any).enablePoMatchAmountLimit })} />
+                                                                         </div>
                                                                      </div>
-                                                                     {(criteria as any).enablePoMatchAmountLimit && (
+                                                                     {(criteria as any).enablePoMatchAmountLimit && !collapsedRules.poMatchMinAmount && (
                                                                          <div className="flex items-center gap-[8px]">
                                                                              <div className="relative flex-1">
                                                                                  <span className="absolute left-[14px] top-1/2 -translate-y-[45%] text-[#64748B] font-bold text-[14px]">{"\u20B9"}</span>
@@ -2070,13 +2145,20 @@ export default function Config() {
                                                                     <div className="text-[11px] text-[#94A3B8]">Blocks auto-posting when a product's unit price spikes beyond the supplier's historical average</div>
                                                                 </div>
                                                             </div>
-                                                            <Toggle 
-                                                                checked={criteriaExtended.fc_exceeded_supplier_avg_enabled} 
-                                                                onChange={() => setCriteriaExtended({ ...criteriaExtended, fc_exceeded_supplier_avg_enabled: !criteriaExtended.fc_exceeded_supplier_avg_enabled })} 
-                                                            />
+                                                            <div className="flex items-center gap-[10px]">
+                                                                <FoldIndicator
+                                                                    expanded={criteriaExtended.fc_exceeded_supplier_avg_enabled && !collapsedRules.ppv}
+                                                                    onClick={() => toggleRuleFold('ppv')}
+                                                                    disabled={!criteriaExtended.fc_exceeded_supplier_avg_enabled}
+                                                                />
+                                                                <Toggle
+                                                                    checked={criteriaExtended.fc_exceeded_supplier_avg_enabled}
+                                                                    onChange={() => setCriteriaExtended({ ...criteriaExtended, fc_exceeded_supplier_avg_enabled: !criteriaExtended.fc_exceeded_supplier_avg_enabled })}
+                                                                />
+                                                            </div>
                                                         </div>
                                                         <AnimatePresence>
-                                                            {criteriaExtended.fc_exceeded_supplier_avg_enabled && (
+                                                            {criteriaExtended.fc_exceeded_supplier_avg_enabled && !collapsedRules.ppv && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <div className="flex items-center gap-[12px] bg-white p-[8px_12px] rounded-[10px] border border-[#E2E8F0] w-fit">
                                                                         <span className="text-[12px] font-bold text-[#64748B]">Threshold:</span>
@@ -2107,13 +2189,20 @@ export default function Config() {
                                                                     <div className="text-[11px] text-[#94A3B8]">Process only invoices within specific dates</div>
                                                                 </div>
                                                             </div>
-                                                            <Toggle 
-                                                                checked={(criteria as any).filter_invoice_date_enabled} 
-                                                                onChange={() => setCriteria({ ...(criteria as any), filter_invoice_date_enabled: !(criteria as any).filter_invoice_date_enabled })} 
-                                                            />
+                                                            <div className="flex items-center gap-[10px]">
+                                                                <FoldIndicator
+                                                                    expanded={!!(criteria as any).filter_invoice_date_enabled && !collapsedRules.dateRange}
+                                                                    onClick={() => toggleRuleFold('dateRange')}
+                                                                    disabled={!(criteria as any).filter_invoice_date_enabled}
+                                                                />
+                                                                <Toggle
+                                                                    checked={(criteria as any).filter_invoice_date_enabled}
+                                                                    onChange={() => setCriteria({ ...(criteria as any), filter_invoice_date_enabled: !(criteria as any).filter_invoice_date_enabled })}
+                                                                />
+                                                            </div>
                                                         </div>
                                                         <AnimatePresence>
-                                                            {(criteria as any).filter_invoice_date_enabled && (
+                                                            {(criteria as any).filter_invoice_date_enabled && !collapsedRules.dateRange && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <div className="flex items-center gap-[12px]">
                                                                         <div className="flex-1">
@@ -2156,13 +2245,20 @@ export default function Config() {
                                                                     <div className="text-[11px] text-[#94A3B8]">Limit auto-post to specific stock items</div>
                                                                 </div>
                                                             </div>
-                                                            <Toggle 
-                                                                checked={(criteria as any).filter_item_enabled} 
-                                                                onChange={() => setCriteria({ ...(criteria as any), filter_item_enabled: !(criteria as any).filter_item_enabled })} 
-                                                            />
+                                                            <div className="flex items-center gap-[10px]">
+                                                                <FoldIndicator
+                                                                    expanded={!!(criteria as any).filter_item_enabled && !collapsedRules.itemFilter}
+                                                                    onClick={() => toggleRuleFold('itemFilter')}
+                                                                    disabled={!(criteria as any).filter_item_enabled}
+                                                                />
+                                                                <Toggle
+                                                                    checked={(criteria as any).filter_item_enabled}
+                                                                    onChange={() => setCriteria({ ...(criteria as any), filter_item_enabled: !(criteria as any).filter_item_enabled })}
+                                                                />
+                                                            </div>
                                                         </div>
                                                         <AnimatePresence>
-                                                            {(criteria as any).filter_item_enabled && (
+                                                            {(criteria as any).filter_item_enabled && !collapsedRules.itemFilter && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <MultiSelect 
                                                                         options={selectableItems.map((item: any) => ({ id: item.id, label: item.item_code ? `${item.item_name} (${item.item_code})` : item.item_name }))}
@@ -2194,13 +2290,20 @@ export default function Config() {
                                                                     <div className="text-[11px] text-[#94A3B8]">Limit auto-post to specific mapped vendors</div>
                                                                 </div>
                                                             </div>
-                                                            <Toggle 
-                                                                checked={(criteria as any).filter_supplier_enabled} 
-                                                                onChange={() => setCriteria({ ...(criteria as any), filter_supplier_enabled: !(criteria as any).filter_supplier_enabled })} 
-                                                            />
+                                                            <div className="flex items-center gap-[10px]">
+                                                                <FoldIndicator
+                                                                    expanded={!!(criteria as any).filter_supplier_enabled && !collapsedRules.supplierFilter}
+                                                                    onClick={() => toggleRuleFold('supplierFilter')}
+                                                                    disabled={!(criteria as any).filter_supplier_enabled}
+                                                                />
+                                                                <Toggle
+                                                                    checked={(criteria as any).filter_supplier_enabled}
+                                                                    onChange={() => setCriteria({ ...(criteria as any), filter_supplier_enabled: !(criteria as any).filter_supplier_enabled })}
+                                                                />
+                                                            </div>
                                                         </div>
                                                         <AnimatePresence>
-                                                            {(criteria as any).filter_supplier_enabled && (
+                                                            {(criteria as any).filter_supplier_enabled && !collapsedRules.supplierFilter && (
                                                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="pl-[44px] overflow-hidden">
                                                                     <MultiSelect 
                                                                         options={selectableSuppliers.map((v: any) => ({ id: v.id, label: `${v.name} (${String(v.gstin || '').trim().toUpperCase()})` }))}
