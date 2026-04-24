@@ -2899,10 +2899,33 @@ export default function APWorkspace() {
                             }}
                           />
                         </TableCell>
-                        <TableCell className="text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all" onClick={(e) => handleDelete(e, record.id)}>
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
+                        <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost" size="icon"
+                              className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all"
+                              title="Retry Tally Post"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const result = await window.api.invoke('invoices:retry-tally-post', { id: record.id });
+                                  if (result.success) {
+                                    toast.success(`Posted to Tally successfully`);
+                                    setRecords(prev => prev.filter(r => r.id !== record.id));
+                                  } else {
+                                    toast.error(`Tally retry failed: ${result.error || result.status}`);
+                                  }
+                                } catch (err: any) {
+                                  toast.error(`Retry error: ${err.message}`);
+                                }
+                              }}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all" onClick={(e) => handleDelete(e, record.id)}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
