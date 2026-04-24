@@ -57,6 +57,52 @@ export async function validateToken(token: string) {
     );
 }
 
+/**
+ * Shape returned by the backend users:my-profile handler.
+ * All figures derive from live DB rows — no fabricated metrics.
+ */
+export interface MyProfilePayload {
+    user: {
+        id: string;
+        email: string;
+        display_name: string;
+        role: 'admin' | 'operator';
+        is_active: boolean;
+        last_login: string | null;
+        created_at: string;
+        permissions: Record<string, 'none' | 'view' | 'edit'> | null;
+        approval_limit: number | null;
+        must_change_password: boolean;
+    };
+    stats: {
+        approved: number;
+        uploaded: number;
+        edited: number;
+        total_actions: number;
+        last_active: string | null;
+    };
+    activity: Array<{
+        event_type: string;
+        event_code: string | null;
+        invoice_id: string | null;
+        invoice_no: string | null;
+        vendor_name: string | null;
+        description: string | null;
+        batch_id: string | null;
+        entity_type: string | null;
+        timestamp: string;
+    }>;
+    companies: Array<{ id: string; name: string; gstin: string | null; is_active: boolean }>;
+}
+
+/**
+ * Fetch the currently-authenticated user's profile payload (header info,
+ * activity counts, recent timeline, company list).
+ */
+export async function getMyProfile(): Promise<MyProfilePayload> {
+    return invoke<MyProfilePayload>('users:my-profile', {});
+}
+
 // ─── INVOICES ─────────────────────────────────────────────
 
 /**

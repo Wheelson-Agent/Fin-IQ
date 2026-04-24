@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, FileText, CreditCard, Eye, ClipboardList, CheckSquare, XCircle,
-  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal, LogOut, KeyRound,
+  Settings, Users, BarChart3, ChevronRight, Zap, Bell, Search, Command, Sparkles, PanelLeft, PanelLeftClose, Package, Terminal, LogOut, KeyRound, User as UserIcon,
   /* SUPPLIER_360_START */ TrendingUp /* SUPPLIER_360_END */
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
@@ -167,6 +167,14 @@ export function Sidebar({ expanded, setExpanded }: SidebarProps) {
                     </div>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => { setUserMenuOpen(false); navigate('/me'); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  <UserIcon size={14} />
+                  My Profile
+                </button>
                 <button
                   type="button"
                   onClick={() => { setUserMenuOpen(false); navigate('/change-password'); }}

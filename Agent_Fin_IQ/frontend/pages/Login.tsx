@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lock, User, Mail, ArrowRight, ShieldCheck, AlertCircle, Sparkles } from 'lucide-react';
+import { Lock, User, Mail, ArrowRight, ShieldCheck, AlertCircle, Sparkles, X, Copy, Check, KeyRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 /**
@@ -98,6 +98,36 @@ function SignInCard({
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
+    // Password recovery modal — explains the admin-assisted reset flow and
+    // surfaces the active admin contacts the user should reach out to.
+    const [recoverOpen, setRecoverOpen] = useState(false);
+    const [recoverLoading, setRecoverLoading] = useState(false);
+    const [admins, setAdmins] = useState<Array<{ display_name: string; email: string }>>([]);
+    const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+
+    const openRecover = async () => {
+        setRecoverOpen(true);
+        setRecoverLoading(true);
+        try {
+            const res: any = await (window as any).api?.invoke?.('auth:admin-contacts', {});
+            setAdmins(Array.isArray(res?.admins) ? res.admins : []);
+        } catch {
+            setAdmins([]);
+        } finally {
+            setRecoverLoading(false);
+        }
+    };
+
+    const copyEmail = async (email: string) => {
+        try {
+            await navigator.clipboard.writeText(email);
+            setCopiedEmail(email);
+            window.setTimeout(() => setCopiedEmail(null), 1600);
+        } catch {
+            /* ignore — clipboard may be unavailable in some Electron contexts */
+        }
+    };
+
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(false);
@@ -181,7 +211,13 @@ function SignInCard({
                         <div className="flex flex-col gap-[8px]">
                             <div className="flex items-center justify-between ml-[4px]">
                                 <label className="text-[12px] font-bold text-[#4A5568] uppercase tracking-wider">Password</label>
-                                <button type="button" className="text-[12px] font-bold text-[#1E6FD9] hover:underline bg-transparent border-none cursor-pointer">Recover</button>
+                                <button
+                                    type="button"
+                                    onClick={openRecover}
+                                    className="text-[12px] font-bold text-[#1E6FD9] hover:underline bg-transparent border-none cursor-pointer"
+                                >
+                                    Recover
+                                </button>
                             </div>
                             <div className={`relative flex items-center bg-white border ${error ? 'border-[#EF4444] shadow-[0_0_0_3px_rgba(239,68,68,0.1)]' : 'border-[#D0D9E8] focus-within:border-[#1E6FD9] focus-within:shadow-[0_0_0_3px_rgba(30,111,217,0.1)]'} rounded-[12px] transition-all duration-200 overflow-hidden group`}>
                                 <div className="pl-[16px] pr-[12px] text-[#8899AA] group-focus-within:text-[#1E6FD9] transition-colors"><Lock size={18} /></div>
@@ -217,6 +253,129 @@ function SignInCard({
                     </p>
                 </div>
             </motion.div>
+
+            {/* ─── Password recovery modal ──────────────────────────── */}
+            <AnimatePresence>
+                {recoverOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0B1623]/55 backdrop-blur-sm"
+                        onClick={() => setRecoverOpen(false)}
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                            onClick={e => e.stopPropagation()}
+                            className="relative w-[min(92vw,460px)] bg-white rounded-[20px] shadow-[0_32px_80px_rgba(13,27,42,0.35)] overflow-hidden"
+                        >
+                            {/* Top accent strip */}
+                            <div className="absolute top-0 left-0 right-0 h-[4px] bg-gradient-to-r from-[#1E6FD9] via-[#7C3AED] to-[#1E6FD9]" />
+
+                            {/* Close button */}
+                            <button
+                                type="button"
+                                onClick={() => setRecoverOpen(false)}
+                                className="absolute top-[14px] right-[14px] w-[30px] h-[30px] rounded-full bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#64748B] hover:text-[#1A2640] flex items-center justify-center transition-colors"
+                                aria-label="Close"
+                            >
+                                <X size={16} />
+                            </button>
+
+                            <div className="px-[28px] pt-[32px] pb-[24px]">
+                                {/* Header */}
+                                <div className="flex items-center gap-[14px] mb-[18px]">
+                                    <div className="w-[44px] h-[44px] rounded-[12px] bg-[#EBF3FF] text-[#1E6FD9] flex items-center justify-center shrink-0">
+                                        <KeyRound size={20} />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-[17px] font-bold text-[#1A2640] leading-tight">Recover your password</h2>
+                                        <p className="text-[12px] text-[#64748B] mt-[2px]">Resets are handled by your administrator.</p>
+                                    </div>
+                                </div>
+
+                                {/* Instruction */}
+                                <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-[12px] p-[14px] mb-[18px]">
+                                    <p className="text-[12.5px] text-[#334155] leading-relaxed">
+                                        Ask an admin to reset your password from <span className="font-semibold text-[#1A2640]">User Management</span>.
+                                        They'll give you a temporary password — you'll be asked to set a new one on your next sign-in.
+                                    </p>
+                                </div>
+
+                                {/* Admin list */}
+                                <div>
+                                    <div className="text-[11px] font-bold text-[#64748B] uppercase tracking-[0.12em] mb-[10px]">
+                                        Administrators
+                                    </div>
+                                    {recoverLoading ? (
+                                        <div className="flex items-center justify-center py-[28px] text-[#8899AA] text-[12px]">
+                                            <div className="w-[16px] h-[16px] border-2 border-[#CBD5E1] border-t-[#1E6FD9] rounded-full animate-spin mr-[8px]" />
+                                            Loading contacts…
+                                        </div>
+                                    ) : admins.length === 0 ? (
+                                        <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-[10px] p-[12px] flex items-start gap-[10px]">
+                                            <AlertCircle size={16} className="text-[#DC2626] shrink-0 mt-[1px]" />
+                                            <div className="text-[12px] text-[#991B1B] leading-snug">
+                                                No active administrator is configured. Contact your IT team or the person who installed this app.
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <ul className="flex flex-col gap-[8px]">
+                                            {admins.map(a => {
+                                                const copied = copiedEmail === a.email;
+                                                return (
+                                                    <li
+                                                        key={a.email}
+                                                        className="flex items-center gap-[12px] p-[12px] rounded-[10px] border border-[#E2E8F0] bg-white hover:border-[#CBD5E1] transition-colors"
+                                                    >
+                                                        <div className="w-[34px] h-[34px] rounded-full bg-gradient-to-br from-[#1E6FD9] to-[#7C3AED] text-white flex items-center justify-center font-bold text-[13px] shrink-0">
+                                                            {(a.display_name || a.email).slice(0, 1).toUpperCase()}
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-[13px] font-semibold text-[#1A2640] truncate">
+                                                                {a.display_name || a.email.split('@')[0]}
+                                                            </div>
+                                                            <div className="text-[11.5px] text-[#64748B] truncate font-mono">{a.email}</div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => copyEmail(a.email)}
+                                                            className={`shrink-0 inline-flex items-center gap-[5px] px-[10px] py-[6px] rounded-[8px] text-[11px] font-semibold transition-all ${
+                                                                copied
+                                                                    ? 'bg-[#DCFCE7] text-[#15803D] border border-[#86EFAC]'
+                                                                    : 'bg-[#F1F5F9] text-[#1E6FD9] hover:bg-[#E2E8F0] border border-transparent'
+                                                            }`}
+                                                            aria-label={`Copy ${a.email}`}
+                                                        >
+                                                            {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+                                                        </button>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-[28px] py-[14px] bg-[#F8FAFC] border-t border-[#E2E8F0] flex items-center justify-between">
+                                <span className="text-[11px] text-[#8899AA]">Passwords are never sent over email.</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setRecoverOpen(false)}
+                                    className="text-[12px] font-bold text-[#1E6FD9] hover:underline bg-transparent border-none cursor-pointer"
+                                >
+                                    Got it
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </>
     );
 }

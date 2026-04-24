@@ -29,6 +29,7 @@ import ChangePassword from './pages/ChangePassword';
 import AgentPage from './pages/AgentPage';
 import Reports from './pages/Reports';
 import UserManagement from './pages/UserManagement';
+import ProfilePage from './pages/ProfilePage';
 import NotFound from './pages/NotFound';
 
 // Auth session context — holds token, user, permissions, idle timer.
@@ -80,6 +81,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/audit" element={<AuditTrail />} />
                     <Route path="/config" element={<Config />} />
                     <Route path="/agent" element={<AgentPage />} />
+                    {/* Self-view profile — any authenticated user sees their own activity snapshot. */}
+                    <Route path="/me" element={<ProfilePage />} />
                     <Route element={<RequireModule module="reports" level="view" />}>
                         <Route path="/reports" element={<Reports />} />
                     </Route>
