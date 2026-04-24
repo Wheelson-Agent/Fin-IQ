@@ -31,9 +31,13 @@ import path from 'path';
 import { initBatchesDir } from './utils/filesystem';
 import { fileURLToPath } from 'url';
 import * as n8nWatcher from './sync/n8nStatusWatcher';
+<<<<<<< Updated upstream
 import { startFolderWatchers } from './services/folderWatcher';
 import { startEmailWatchers } from './services/emailWatcher';
 import { startDigestScheduler } from './services/digestScheduler';
+=======
+import { getJwtSecret } from './auth/bootstrap';
+>>>>>>> Stashed changes
 
 // ESM Compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -80,6 +84,15 @@ export async function initializeBackend(): Promise<boolean> {
         } else {
             console.error('[DB] Migration warning:', error.message);
         }
+    }
+
+    // Step 2.5: Auth bootstrap — provisions the per-install JWT signing
+    // secret. Admin password setup happens at the user's first open via
+    // the first-run setup screen (see auth/bootstrap.completeFirstRunSetup).
+    try {
+        await getJwtSecret();
+    } catch (err: any) {
+        console.error('[Auth] Bootstrap failed:', err?.message || err);
     }
 
     // Step 3: Register IPC handlers

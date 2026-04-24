@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle, XCircle, Loader2, Upload, FileSearch, Cpu, Zap, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { uploadInvoice, runPipeline, getBatchLogs, getWorkerStatus, getAllLogsDebug } from '../../lib/api';
 import { Button } from '../../components/ui/button';
+import { useAuth } from '../../context/AuthContext';
 
 /* ─────────────────────────── Types ─────────────────────────── */
 export type StageStatus = 'idle' | 'active' | 'done' | 'error';
@@ -307,6 +308,10 @@ export function ProcessingPipeline({
     onConfirmedCountChange,
     companyId
 }: ProcessingPipelineProps) {
+    // Debug-logs endpoint is admin-only; skip the poll for operators so
+    // they don't spam the backend with rejected IPC calls every tick.
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const STAGES_INIT: PipelineStage[] = [
         { id: 'uploading', label: 'Uploaded', sublabel: isBatch ? `Transferring ${fileNames.length} files...` : 'File secured', icon: <Upload size={28} />, status: 'active' },
         { id: 'analyzing', label: 'Pre-ocr document analysis', sublabel: 'Data extraction & validation', icon: <FileSearch size={28} />, status: 'idle' },
@@ -393,7 +398,9 @@ export function ProcessingPipeline({
                 const [fetchedLogsResult, statusResult, debugLogsResult, batchHealthResult] = await Promise.allSettled([
                     getBatchLogs(batchName),
                     getWorkerStatus(),
-                    getAllLogsDebug(),
+                    // Admin-only diagnostic — operators get a stub so the
+                    // polling loop doesn't dispatch rejected IPC calls.
+                    isAdmin ? getAllLogsDebug() : Promise.resolve([]),
                     // @ts-ignore - Electron preload bridge
                     window.api.invoke('processing:get-batch-health', { batchName, startedAfter: pipelineStartedAt || null })
                 ]);

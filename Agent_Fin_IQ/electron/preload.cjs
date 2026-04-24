@@ -24,6 +24,17 @@ const ALLOWED_CHANNELS = [
     // Auth
     'auth:login',
     'auth:validate-token',
+    'auth:me',
+    'auth:change-password',
+    'auth:first-run-status',
+    'auth:first-run-setup',
+    'auth:logout',
+    // User management (admin only; gated server-side too)
+    'users:list',
+    'users:create',
+    'users:update',
+    'users:reset-password',
+    'users:deactivate',
     // Invoices
     'invoices:get-all',
     'invoices:get-by-id',
@@ -78,6 +89,7 @@ const ALLOWED_CHANNELS = [
     'processing:get-batch-logs',
     'processing:get-worker-status',
     'processing:get-all-logs-debug',
+    'processing:get-batch-health',
     // ERP Sync
     'erp:sync',
     // Health checks
