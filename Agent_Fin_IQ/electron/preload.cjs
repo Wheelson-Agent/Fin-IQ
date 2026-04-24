@@ -29,12 +29,14 @@ const ALLOWED_CHANNELS = [
     'auth:first-run-status',
     'auth:first-run-setup',
     'auth:logout',
+    'auth:admin-contacts',
     // User management (admin only; gated server-side too)
     'users:list',
     'users:create',
     'users:update',
     'users:reset-password',
     'users:deactivate',
+    'users:my-profile',
     // Invoices
     'invoices:get-all',
     'invoices:get-by-id',

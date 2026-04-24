@@ -5249,3 +5249,83 @@ export async function getLatestSyncStatus(since?: string, companyId?: string): P
     );
     return result.rows as SyncStatusRow[];
 }
+
+// ============================================================
+// ADMIN CONTACTS — for the login "Recover password" flow
+// ============================================================
+
+/**
+ * List active admins as { display_name, email }. Used by the public
+ * auth:admin-contacts IPC so the login screen can tell a user who to
+ * ask for a password reset.
+ */
+export async function getAdminContacts(): Promise<Array<{ display_name: string; email: string }>> {
+    const result = await query(
+        `SELECT display_name, email
+           FROM users
+          WHERE role = 'admin' AND is_active = true
+          ORDER BY display_name ASC`
+    );
+    return result.rows as Array<{ display_name: string; email: string }>;
+}
+
+// ============================================================
+// USER PROFILE — aggregate for /me page
+// ============================================================
+
+/**
+ * Build the profile-page payload for a given user.
+ * Returns everything the Profile page needs in one round-trip:
+ *   - user core fields (including created_at, last_login for header)
+ *   - activity counts derived from audit_logs
+ *   - recent activity list (last 20 events by this user)
+ *   - active companies (for the Company tab)
+ *
+ * All figures come straight from live tables — no fabricated metrics.
+ */
+export async function getUserProfileData(userId: string) {
+    const userRow = await query(
+        `SELECT id, email, display_name, role, is_active, last_login, created_at,
+                permissions, approval_limit, must_change_password
+           FROM users
+          WHERE id = $1`,
+        [userId]
+    );
+    if (!userRow.rows[0]) return null;
+
+    const statsRow = await query(
+        `SELECT
+           COUNT(*) FILTER (WHERE event_type IN ('Approved','Auto-Posted'))::int AS approved,
+           COUNT(*) FILTER (WHERE event_type = 'Created' AND (entity_type IS NULL OR entity_type = 'invoice'))::int AS uploaded,
+           COUNT(*) FILTER (WHERE event_type = 'Edited')::int                                                     AS edited,
+           COUNT(*)::int                                                                                          AS total_actions,
+           MAX(timestamp)                                                                                         AS last_active
+         FROM audit_logs
+         WHERE changed_by_user_id = $1`,
+        [userId]
+    );
+
+    const activityRows = await query(
+        `SELECT event_type, event_code, invoice_id, invoice_no, vendor_name,
+                description, batch_id, entity_type, timestamp
+           FROM audit_logs
+          WHERE changed_by_user_id = $1
+          ORDER BY timestamp DESC
+          LIMIT 20`,
+        [userId]
+    );
+
+    const companiesRow = await query(
+        `SELECT id, name, gstin, is_active
+           FROM companies
+          WHERE is_active = true
+          ORDER BY name ASC`
+    );
+
+    return {
+        user: userRow.rows[0],
+        stats: statsRow.rows[0] || { approved: 0, uploaded: 0, edited: 0, total_actions: 0, last_active: null },
+        activity: activityRows.rows,
+        companies: companiesRow.rows,
+    };
+}

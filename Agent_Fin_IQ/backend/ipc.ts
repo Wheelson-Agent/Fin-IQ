@@ -117,6 +117,9 @@ const CHANNEL_GUARDS: Record<string, GuardSpec> = {
     'auth:first-run-status':   { public: true },
     'auth:first-run-setup':    { public: true },
     'auth:logout':             { public: true },
+    // Public so it's reachable from the login screen — returns only display_name + email
+    // for active admins. No sensitive fields.
+    'auth:admin-contacts':     { public: true },
 
     // User management — admin only.
     'users:list':           { adminOnly: true },
@@ -124,6 +127,8 @@ const CHANNEL_GUARDS: Record<string, GuardSpec> = {
     'users:update':         { adminOnly: true },
     'users:reset-password': { adminOnly: true },
     'users:deactivate':     { adminOnly: true },
+    // Self-view profile — any logged-in user can fetch their own profile payload.
+    'users:my-profile':     { authOnly: true },
 
     // Invoices
     'invoices:get-all':              { module: 'invoices', level: 'view' },
@@ -327,6 +332,15 @@ export function registerIpcHandlers() {
     });
 
     /**
+     * Return active admin contacts for the login "Recover password" flow.
+     * Public so the login screen can reach it while unauthenticated. Exposes
+     * only display_name + email — no password hash, role internals, or ids.
+     */
+    register('auth:admin-contacts', async () => {
+        return { admins: await queries.getAdminContacts() };
+    });
+
+    /**
      * Validate a session token.
      * Input: { token: string }
      * Output: { valid: boolean, userId, role } or { valid: false }
@@ -431,6 +445,16 @@ export function registerIpcHandlers() {
     /** Soft-delete (set is_active=false). Refuses last admin & self. */
     register('users:deactivate', async (_event, { id }) => {
         return await deactivateUser(id, _session!);
+    });
+
+    /**
+     * Return the Profile-page payload for the currently-authenticated user.
+     * Aggregates the user row, activity counts from audit_logs, recent
+     * activity, and active companies into one round-trip.
+     */
+    register('users:my-profile', async () => {
+        if (!_session) throw new Error('Not authenticated');
+        return await queries.getUserProfileData(_session.userId);
     });
 
     // ─── INVOICES ──────────────────────────────────────────
