@@ -117,11 +117,18 @@ export async function updateInvoiceOCR(id: string, data: any): Promise<Invoice> 
 }
 
 /**
- * Delete an invoice permanently.
- * @param id - Invoice UUID
+ * Soft-delete an invoice (sets processing_status = 'Deleted').
+ * Returns previousStatus so the caller can offer an undo action.
  */
-export async function deleteInvoice(id: string): Promise<{ success: boolean; error?: string }> {
-    return invoke<{ success: boolean; error?: string }>('invoices:delete', { id });
+export async function deleteInvoice(id: string): Promise<{ success: boolean; previousStatus?: string; error?: string }> {
+    return invoke<{ success: boolean; previousStatus?: string; error?: string }>('invoices:delete', { id });
+}
+
+/**
+ * Restore a soft-deleted invoice back to its previous status.
+ */
+export async function restoreInvoice(id: string, previousStatus: string): Promise<{ success: boolean; error?: string }> {
+    return invoke<{ success: boolean; error?: string }>('invoices:restore', { id, previousStatus });
 }
 
 /**

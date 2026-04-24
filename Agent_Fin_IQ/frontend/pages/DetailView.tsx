@@ -1605,6 +1605,8 @@ export default function DetailView() {
       console.log('[DetailView] syncVendorWithTally result:', result?.success, result?.message);
       if (result.success) {
         setVendorSyncSuccess(result.message || 'Supplier registered successfully');
+        // Pull new vendor into DB — fire-and-forget, dot updates in Topbar
+        triggerBackgroundSync();
       } else {
         setVendorSyncError(result.message || 'Registration failed. Please try again.');
       }
@@ -1615,6 +1617,15 @@ export default function DetailView() {
     } finally {
       setIsSyncingVendor(false);
     }
+  };
+
+  // Fire erp:sync in the background after a creation succeeds.
+  // Dispatches app:background-sync so Topbar starts polling and shows red/green dot.
+  const triggerBackgroundSync = () => {
+    const firedAt = new Date().toISOString();
+    const api = (window as any).api;
+    if (api?.invoke) api.invoke('erp:sync').catch(() => {/* silent — dot will show timeout */});
+    window.dispatchEvent(new CustomEvent('app:background-sync', { detail: { firedAt } }));
   };
 
   const handleCreateMaster = async () => {
@@ -1643,6 +1654,8 @@ export default function DetailView() {
         setItemOptions(prev => prev.includes(createdName) ? prev : [...prev, createdName]);
         applyGoodsStockItemSelection(activeLedgerIndex, createdName);
         setMasterSyncSuccess(result.message || 'Stock item created successfully');
+        // Pull new stock item into DB — fire-and-forget, dot updates in Topbar
+        triggerBackgroundSync();
       } else {
         const { name, underGroup, buyerName, gstApplicable } = newLedger;
         if (!name.trim()) throw new Error('Ledger name is required');
@@ -1665,6 +1678,8 @@ export default function DetailView() {
           applyLedgerSelection(activeLedgerIndex, createdName, createdId);
           setMasterSyncSuccess(result.message || 'Ledger created successfully');
         }
+        // Pull new ledger into DB — fire-and-forget, dot updates in Topbar
+        triggerBackgroundSync();
       }
     } catch (err: any) {
       setMasterSyncError(err.message || 'Creation failed');

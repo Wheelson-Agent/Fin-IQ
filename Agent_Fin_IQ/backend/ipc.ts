@@ -585,11 +585,21 @@ export function registerIpcHandlers() {
     });
 
     /**
-     * Delete an invoice.
-     * Audit is written inside a transaction within deleteInvoice() — atomic with the delete.
+     * Soft-delete an invoice (sets processing_status = 'Deleted').
+     * Returns previousStatus so the frontend can offer an undo action.
+     * Audit is written inside a transaction within deleteInvoice() — atomic with the update.
      */
     ipcMain.handle('invoices:delete', async (_event, { id }) => {
-        await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
+        const result = await queries.deleteInvoice(id, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
+        return { success: true, previousStatus: result.previousStatus };
+    });
+
+    /**
+     * Restore a soft-deleted invoice back to its previous status.
+     * Called when the user clicks Undo on the delete toast.
+     */
+    ipcMain.handle('invoices:restore', async (_event, { id, previousStatus }) => {
+        await queries.restoreInvoice(id, previousStatus, _session ? { userId: _session.userId, userName: _session.userName } : undefined);
         return { success: true };
     });
 

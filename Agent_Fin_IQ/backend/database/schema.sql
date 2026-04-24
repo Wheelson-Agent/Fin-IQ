@@ -542,6 +542,13 @@ ON CONFLICT DO NOTHING;
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_status ON ap_invoices(processing_status);
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_vendor ON ap_invoices(vendor_id);
+-- Partial unique index: prevents duplicate active invoices for the same vendor+invoice_number.
+-- Excludes 'Deleted' rows so soft-deleted invoices don't block re-uploads or re-deletes.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_vendor_gst
+  ON ap_invoices (vendor_gst, invoice_number)
+  WHERE processing_status != 'Deleted'
+    AND vendor_gst IS NOT NULL
+    AND invoice_number IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_date ON ap_invoices(invoice_date);
 CREATE INDEX IF NOT EXISTS idx_ap_invoices_company ON ap_invoices(company_id);
 CREATE INDEX IF NOT EXISTS idx_vendors_company ON vendors(company_id);
@@ -576,7 +583,7 @@ BEGIN
   ALTER TABLE audit_logs ADD CONSTRAINT chk_audit_logs_event_type
     CHECK (event_type IN (
       'Created', 'Edited', 'Approved', 'Rejected',
-      'Auto-Posted', 'Deleted', 'Validated', 'Revalidated', 'Processed'
+      'Auto-Posted', 'Deleted', 'Restored', 'Validated', 'Revalidated', 'Processed'
     ));
 END $$;
 
